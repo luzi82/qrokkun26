@@ -1,7 +1,8 @@
-"""Canonical net: qrokkun_env.agents.player_v1"""
-
 #!/usr/bin/env python3
-"""GPU player training: flee BC pretrain + PPO vs scripted spawner."""
+"""Canonical net: qrokkun_env.agents.player_v1
+
+GPU player training: flee BC pretrain + PPO vs scripted spawner.
+"""
 
 from __future__ import annotations
 
@@ -20,73 +21,11 @@ from torch.distributions import Categorical
 from qrokkun_env.env import ACTIONS, Qrokkun26Env
 from qrokkun_env.obs import OBS_DIM, vectorize
 from qrokkun_env.policies import FleeNearestBullet
+from qrokkun_env.agents.player_v1 import PlayerV1
 from qrokkun_env.sanity import run_episode
 
 
-class ActorCritic(nn.Module):
-    def __init__(self, hidden: int = 256) -> None:
-        super().__init__()
-        self.body = nn.Sequential(
-            nn.Linear(OBS_DIM, hidden),
-            nn.Tanh(),
-            nn.Linear(hidden, hidden),
-            nn.Tanh(),
-        )
-        self.policy = nn.Linear(hidden, len(ACTIONS))
-        self.value = nn.Linear(hidden, 1)
-
-    def forward(self, x: torch.Tensor) -> tuple[Categorical, torch.Tensor]:
-        h = self.body(x)
-        return Categorical(logits=self.policy(h)), self.value(h).squeeze(-1)
-
-
-def shaped_reward(env: Qrokkun26Env, base: float, done: bool) -> float:
-    r = base
-    if env.bullets:
-        d2 = min((b.x - env.px) ** 2 + (b.y - env.py) ** 2 for b in env.bullets)
-        r += 0.003 * min(math.sqrt(d2) / 80.0, 1.0)
-        # Closing-speed penalty toward nearest bullet.
-        nb = min(env.bullets, key=lambda b: (b.x - env.px) ** 2 + (b.y - env.py) ** 2)
-        closing = ((nb.x - env.px) * nb.vx + (nb.y - env.py) * nb.vy) / (math.sqrt(d2) + 1e-6)
-        if closing < 0:
-            r += 0.001 * max(closing / 50.0, -1.0)
-    if done and env.dead:
-        r -= 1.0
-    return r
-
-
-def bc_pretrain(net: ActorCritic, device: torch.device, steps: int, batch: int, lr: float) -> float:
-    """Imitate flee-nearest on random seeds."""
-    opt = torch.optim.Adam(net.parameters(), lr=lr)
-    flee = FleeNearestBullet()
-    net.train()
-    total_loss = 0.0
-    n = 0
-    for i in range(steps):
-        obs_list = []
-        act_list = []
-        for j in range(batch):
-            env = Qrokkun26Env(seed=10_000 + i * batch + j)
-            env.reset(seed=10_000 + i * batch + j)
-            # Roll a short random prefix then label flee action.
-            for _ in range((i + j) % 40):
-                a = flee.act(env)
-                _o, _r, done, _ = env.step(a)
-                if done:
-                    env.reset()
-                    break
-            obs_list.append(vectorize(env))
-            act_list.append(ACTIONS.index(flee.act(env)))
-        x = torch.tensor(obs_list, dtype=torch.float32, device=device)
-        y = torch.tensor(act_list, dtype=torch.int64, device=device)
-        dist, _v = net(x)
-        loss = F.cross_entropy(dist.logits, y)
-        opt.zero_grad()
-        loss.backward()
-        opt.step()
-        total_loss += float(loss.item())
-        n += 1
-    return total_loss / max(n, 1)
+ActorCritic = PlayerV1
 
 
 @dataclass

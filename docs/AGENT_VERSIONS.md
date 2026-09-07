@@ -1,14 +1,14 @@
 # Player / Spawner version map
 
-Each version’s **network + obs/action helpers** live under `qrokkun_env/agents/`.
-Training loops remain in `qrokkun_env/train_*.py` (historical entrypoints).
+Canonical **networks + obs/action helpers** live under `qrokkun_env/agents/`.
+Training loops in `qrokkun_env/train_*.py` must **alias** those classes (not redefine them).
 
-| Ver | Player module | Spawner module | Notes / checkpoints |
-|-----|---------------|----------------|---------------------|
-| v0 | `agents/player_v0.py` | *(scripted only)* | CPU REINFORCE; `train_player.py` |
-| v1 | `agents/player_v1.py` | `agents/spawner_v1.py` | 45-dim / 288-act; `player_gpu.pt`, `baseline_v1/spawner_gpu.pt` |
-| v2 | `agents/player_v2.py` (=v1 arch) | `agents/spawner_v2.py` | kind→1152, 8-dim S obs; short both_v2 run |
-| v3 | `agents/player_v3.py` | `agents/spawner_v3.py` | rich 390-dim (64 bullets, zero-pad); `both_v3_*.pt` |
-| v4 | *(planned)* | *(planned)* | continuous S + mask/one-hot/attention |
+| Ver | Player module | Spawner module | Train entrypoints | Checkpoints |
+|-----|---------------|----------------|-------------------|-------------|
+| v0 | `agents/player_v0.py` | *(scripted)* | `train_player.py` | early CPU MLP |
+| v1 | `agents/player_v1.py` | `agents/spawner_v1.py` | `train_player_gpu.py`, `train_spawner_gpu.py`, `train_both_gpu.py` | `player_gpu.pt`, `baseline_v1/spawner_gpu.pt` |
+| v2 | `agents/player_v2.py` | `agents/spawner_v2.py` | `train_both_v2_gpu.py` | short both_v2 run |
+| v3 | `agents/player_v3.py` | `agents/spawner_v3.py` | `train_both_v3_gpu.py` | `both_v3_*.pt` |
+| v4 | *(planned)* | *(planned)* | — | continuous S + mask/one-hot/attention |
 
-Lost / never standalone: nothing recovered beyond what’s in-repo.
+`train_both_v3` exposes `PlayerAC = PlayerV3` and `SpawnerAC = SpawnerV3`.

@@ -1,7 +1,8 @@
-"""Canonical net: qrokkun_env.agents.player_v0"""
-
 #!/usr/bin/env python3
-"""Train a tiny player MLP vs the scripted spawner (CPU-friendly REINFORCE)."""
+"""Canonical net: qrokkun_env.agents.player_v0
+
+Train a tiny player MLP vs the scripted spawner (CPU-friendly REINFORCE).
+"""
 
 from __future__ import annotations
 
@@ -17,25 +18,14 @@ from torch.distributions import Categorical
 
 from qrokkun_env.env import ACTIONS, Qrokkun26Env
 from qrokkun_env.obs import OBS_DIM, vectorize
+from qrokkun_env.agents.player_v0 import PlayerV0
 from qrokkun_env.sanity import run_episode
 
 
-class PlayerMLP(nn.Module):
-    def __init__(self, hidden: int = 64) -> None:
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(OBS_DIM, hidden),
-            nn.Tanh(),
-            nn.Linear(hidden, hidden),
-            nn.Tanh(),
-            nn.Linear(hidden, len(ACTIONS)),
-        )
-
-    def forward(self, x: torch.Tensor) -> Categorical:
-        return Categorical(logits=self.net(x))
+PlayerMLP = PlayerV0
 
 
-@dataclass
+
 class Rollout:
     log_probs: list[torch.Tensor]
     rewards: list[float]

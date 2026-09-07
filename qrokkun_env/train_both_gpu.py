@@ -1,7 +1,8 @@
-"""Canonical nets: agents.player_v1 + agents.spawner_v1 (both_v1)"""
-
 #!/usr/bin/env python3
-"""Simultaneous player+spawner PPO; keep baseline ckpts for comparison."""
+"""Canonical nets: agents.player_v1 + agents.spawner_v1 (both_v1)
+
+Simultaneous player+spawner PPO; keep baseline ckpts for comparison.
+"""
 
 from __future__ import annotations
 
@@ -21,27 +22,15 @@ from qrokkun_env import constants as C
 from qrokkun_env.env import ACTIONS, ACTION_TO_DIR, Qrokkun26Env, _move_toward, _spawn_interval
 from qrokkun_env.godot_rng import f32
 from qrokkun_env.obs import OBS_DIM, vectorize
-from qrokkun_env.train_spawner_gpu import (
+from qrokkun_env.agents.player_v1 import PlayerV1
+from qrokkun_env.agents.spawner_v1 import (
     SPAWNER_ACTIONS,
-    SPAWNER_OBS_DIM,
-    SpawnerAC,
+    SpawnerV1,
     spawn_from_action,
     spawner_vectorize,
 )
-
-
-class PlayerAC(nn.Module):
-    def __init__(self, hidden: int = 256) -> None:
-        super().__init__()
-        self.body = nn.Sequential(
-            nn.Linear(OBS_DIM, hidden), nn.Tanh(), nn.Linear(hidden, hidden), nn.Tanh()
-        )
-        self.policy = nn.Linear(hidden, len(ACTIONS))
-        self.value = nn.Linear(hidden, 1)
-
-    def forward(self, x: torch.Tensor) -> tuple[Categorical, torch.Tensor]:
-        h = self.body(x)
-        return Categorical(logits=self.policy(h)), self.value(h).squeeze(-1)
+PlayerAC = PlayerV1
+SpawnerAC = SpawnerV1
 
 
 @dataclass

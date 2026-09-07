@@ -1,7 +1,7 @@
-"""Canonical net: qrokkun_env.agents.player_v1 (long AC run)"""
-
 #!/usr/bin/env python3
-"""Time-boxed CPU training: tiny actor-critic vs scripted spawner.
+"""Canonical net: qrokkun_env.agents.player_v1 (long AC run)
+
+Time-boxed CPU training: tiny actor-critic vs scripted spawner.
 
 Goal: beat the flee-nearest rule baseline on held-out seeds.
 """
