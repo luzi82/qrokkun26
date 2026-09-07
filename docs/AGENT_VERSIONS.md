@@ -28,3 +28,10 @@ Canonical under `qrokkun_env/train/`. Top-level `train_*.py` files are **back-co
 | v4 both | `train/both_v4.py` | `train_both_v4_gpu.py` |
 
 Train loops must alias agent classes (e.g. `PlayerAC = PlayerV4` / `SpawnerAC = SpawnerV4`), not redefine nets.
+
+## v4 train temperature (v4.2)
+
+`--temp-p` / `--temp-s` must be **1.0**. Any other value is rejected immediately
+(CLI names kept). Non-1.0 temperature is not supported: it would desync rollout
+log-probs from the PPO update. Exploration uses on-policy sampling + entropy, not
+temperature scaling.

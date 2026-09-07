@@ -315,7 +315,7 @@ def eval_pair(player, spawner, device, seeds, max_steps) -> float:
     return sum(times) / max(len(times), 1)
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser()
     ap.add_argument("--hours", type=float, default=6.0)
     ap.add_argument("--out-player", type=Path, default=Path("runs/both_v4_player.pt"))
@@ -329,13 +329,13 @@ def main() -> None:
         "--temp-p",
         type=float,
         default=1.0,
-        help="Player action temperature (default 1.0). Exploration uses sampling+entropy, not temp!=1.",
+        help="Player action temperature (default 1.0). Exploration uses sampling+entropy, not temp!=1. Non-1.0 is rejected.",
     )
     ap.add_argument(
         "--temp-s",
         type=float,
         default=1.0,
-        help="Spawner action temperature (default 1.0). Exploration uses sampling+entropy, not temp!=1.",
+        help="Spawner action temperature (default 1.0). Exploration uses sampling+entropy, not temp!=1. Non-1.0 is rejected.",
     )
     ap.add_argument("--entropy-p", type=float, default=0.04)
     ap.add_argument("--entropy-s", type=float, default=0.02)
@@ -349,7 +349,23 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=4)
     ap.add_argument("--d-model", type=int, default=128)
     ap.add_argument("--hidden", type=int, default=256)
+    return ap
+
+
+def reject_non_unit_temp(args: argparse.Namespace) -> None:
+    """v4.2: keep CLI names but refuse any temperature other than 1.0."""
+    if float(args.temp_p) != 1.0 or float(args.temp_s) != 1.0:
+        raise SystemExit(
+            "error: non-1.0 temperature is not supported "
+            f"(got --temp-p={args.temp_p}, --temp-s={args.temp_s}). "
+            "Exploration uses sampling+entropy, not temp!=1."
+        )
+
+
+def main() -> None:
+    ap = build_parser()
     args = ap.parse_args()
+    reject_non_unit_temp(args)
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     torch.manual_seed(args.seed)
