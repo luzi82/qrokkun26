@@ -1,0 +1,132 @@
+Qrokkun26 v4 → v5 改動計劃
+==========================
+來源：GPT 5.6 sol（docs/suggestions/1788785426_gpt56sol.txt）＋ room 討論（對稱×4／policy sample／replay）＋ v4 實測（new×new ~1.8s、唔同 seed 片一樣、flee×newS ≈ scripted）
+日期：2026-09-07（HKT）
+作者：Software Engineer（Grok Bot）＋ Code reviewer 同意優先序
+
+目標
+----
+1. 先令 both_v4 訓練／評估「算得啱」（PPO ratio、truncate、eval 分家）。
+2. 再加大 sample 多樣性同對手覆蓋（對稱增廣、BC、frozen pool）。
+3. 唔做 on-policy PPO 嘅 historical transition replay。
+4. 架構大改（新 obs／action／encoder）先留到真正需要時再開 v5 agent。
+
+版本劃分
+--------
+- **v4.x（修 both_v4.py／render／eval；agent 仍係 PlayerV4／SpawnerV4）**
+  正確性＋量測。唔改 network 形狀，checkpoint 可繼續 load。
+- **v5（新 train entry／可選新 agent 檔；建議 both_v5.py）**
+  多樣性配方：對稱×4、Flee BC→PPO、frozen opponent pool、env randomization、reward／S action 微調。
+  若 encoder／action 空間唔變，v5 可以只係 train recipe；若要改 birth 自由度或 reward 大改，再拆 agents/player_v5.py 等。
+
+────────────────────────────────
+v4.x — P0 正確性（必須先做）
+────────────────────────────────
+
+B. Temperature 同 PPO likelihood 一致（最高優先）
+- 預設 --temp-p 1.0、--temp-s 1.0（而家 1.15／1.2 破壞 ratio）。
+- 探索靠 Categorical／Normal sample ＋ entropy bonus，唔靠 temp≠1。
+- Regression：rollout 後、update 前，recompute log_prob，ratio ≈ 1.0。
+- 檔：qrokkun_env/train/both_v4.py、tests/test_v4_obs_and_spawn.py（或新 test_ppo_ratio.py）。
+
+A. 分離 deterministic 與 stochastic evaluation
+- eval_pair(sample_policy, rng_jitter) 兩組指標都記：
+  - deterministic：sample=False, jitter=False（除錯／純 policy）
+  - robust：sample=False, jitter=True（選 checkpoint／泛化；learned S 早期先用到 env seed）
+- 可選第三組：sample_policy=True（fork_rng 包住 episode，唔污染 train RNG）。
+- 輸出名要分家：new_vs_new_deterministic / _stochastic 等。
+- 唔好再把「多 seed + deterministic learned S」當成獨立樣本。
+
+D. terminated vs truncated
+- max_steps 截斷 ≠ 死亡：truncated 要 value bootstrap，唔好當 death 罰到底。
+- 記 terminated／truncated flag 入 trajectory。
+
+C. Frame-level gamma／lambda
+- 60Hz 下 gamma=0.99 半衰期 ~1.15s，太短。
+- 選一：gamma≈0.9995（或同等有效 horizon），或 action repeat／frame-skip 後再校準 lambda。
+- 一次只改一個旋鈕，短 A/B。
+
+K／L／M. Diagnostics ＋ best checkpoint ＋ 評估統計
+- 記：approx_kl、clipfrac、ratio mean／std、entropy、explained variance。
+- Best ckpt 用 robust eval（唔用單一 deterministic new×new）。
+- 報告均值±std、n seeds；deterministic 同 stochastic 分開。
+
+v4.x 完成準則
+- ratio-at-update-start test 綠。
+- 同一 learned-S 模型，robust eval 下唔同 seed 生存時間／軌跡有可見差異（唔再 5 條片完全一樣）。
+- truncate bootstrap 有 unit test。
+- 短跑 A/B：temp=1 相對舊預設，PPO diagnostics 正常（ratio~1、kl 可控）。
+
+────────────────────────────────
+v5 — 多樣性同資料配方（v4.x 之後）
+────────────────────────────────
+
+S1. 對稱增廣 ×4（user 提議；CR／SE 同意）
+- 由 1 條 transition 變 4：identity、左右、上下、180°（或等價 4 個 dihedral 子集）。
+- **必須一齊轉**：player／bullet obs、P discrete action、S birth／aim 連續向量；kind 唔使轉。
+- **必須 recompute log_prob**（喺轉換後 obs 上對轉換後 action）；禁止複用舊 log_prob。
+- 只對「而家呢個 on-policy batch」做；唔係 historical replay。
+- 測試：幾何 round-trip、action invert、ratio 仍 ≈1。
+
+S2. Policy 機率抽 action（user 點 2）
+- Train 已係 dist.sample()；**唔再發明第二套 RNG**。
+- v5 只保證：train 維持 sample；eval 提供 stochastic／robust 模式（見 A）。
+- 若要加探索：調 entropy coef，或短暫 ε-greedy／noise，而唔係另寫「用 output 做機率」邏輯。
+
+S3. Replay buffer（user 點 3）— **明確不做（on-policy PPO）**
+- 舊 transition 嘅 log_prob 會過期；disk／FIFO replay 直接丟入 PPO update → 否決（同之前決定一致）。
+- 替代：S1 即時對稱增廣；S5 frozen opponent pool；若將來要 replay，先換 off-policy 或加 IS，另開 RFC。
+
+G. Flee BC → PPO（P1）
+- Player 先 BC 模仿 FleeNearestBullet，再 PPO vs scripted／pool。
+- 避免 v4 冷啟就互訓崩成短局定式。
+
+F. Frozen opponent pool（P1）
+- 定期把 P／S checkpoint 凍結入 pool；sample 對手時混合：scripted、flee、近期 new、舊 best。
+- 減非平穩互訓同 sample 單一化。
+
+E. Environment randomization（P1）
+- 加強 rng_jitter（birth／aim／speed）；考慮更早／更高 double-spawn 機率（只影響 diversity，唔罰 early one-shot）。
+- Train 開 jitter；robust eval 開 jitter。
+
+H／I／J. Reward、S action、empty-bullet attention（P2，可後置）
+- H：Player reward 唔好只睇 nearest distance（多彈威脅／包圍）。
+- I：檢查 Spawner birth 有冇無效自由度（方向 vs 邊緣參數化），簡化可學空間。
+- J：empty-bullet／all-pad attention 路徑要有穩定 test（NaN／collapse）。
+
+v5 完成準則
+- 對稱×4 test 綠；throughput 明顯↑（接近 ×4 有效 sample，overhead 可接受）。
+- newP vs scripted 穩定超過 flee baseline（約定 seed 集合、robust 統計）。
+- flee×newS 同 scripted×flee 可分高下，且跨 seed 方差合理。
+- new×new 唔再鎖死 ~1.8s 同一軌跡；best ckpt 用 pool＋robust 指標選。
+
+────────────────────────────────
+建議落地順序（短迭代）
+────────────────────────────────
+1. v4.1：temp=1.0 預設 ＋ ratio regression test
+2. v4.2：eval 分家 ＋ learned-S rng_jitter；render／demo 可選 stochastic
+3. v4.3：terminated／truncated ＋ bootstrap
+4. v4.4：gamma 或 action-repeat（二選一 A/B）＋ diagnostics／best ckpt
+5. v5.0：對稱×4（recompute log_prob）
+6. v5.1：Flee BC → PPO
+7. v5.2：frozen opponent pool ＋ env randomization 加強
+8. v5.3：reward／birth DOF／attention 邊角（按需要）
+
+刻意不做
+--------
+- On-policy PPO 嘅 historical／disk replay buffer
+- 未修 P0 就加大模型或加長互訓時間
+- 用 temp≠1 當主要探索手段（除非 update 路徑完全對齊）
+
+相關檔案
+--------
+- 現況訓練：qrokkun_env/train/both_v4.py
+- Agent：qrokkun_env/agents/player_v4.py、spawner_v4.py、encoder_v4.py
+- Obs：qrokkun_env/agents/obs_v4.py（或 obs_rich／encode_obs）
+- Demo：qrokkun_env/render_v4_demo.py
+- 對照建議：docs/suggestions/1788785426_gpt56sol.txt
+- 版本對照：docs/AGENT_VERSIONS.md（落地後更新）
+
+下一步（等人確認）
+------------------
+預設由 **v4.1（temp＋ratio test）** 開工；確認後開 PR／喺 GB10 短 A/B。
