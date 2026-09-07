@@ -7,10 +7,9 @@ from dataclasses import fields
 import torch
 
 from qrokkun_env.env import Qrokkun26Env
-from qrokkun_env.obs import vectorize
-from qrokkun_env.train_player import PlayerMLP, Rollout, collect_episode
-from qrokkun_env.train_player_gpu import ActorCritic, bc_pretrain, shaped_reward
-from qrokkun_env.train_spawner_gpu import PlayerAC, player_act
+from qrokkun_env.train.player_v0 import PlayerMLP, Rollout, collect_episode
+from qrokkun_env.train.player_v1 import ActorCritic, bc_pretrain, shaped_reward
+from qrokkun_env.train.spawner_v1 import PlayerAC, player_act
 
 
 def test_train_player_rollout_is_dataclass() -> None:
@@ -40,3 +39,10 @@ def test_spawner_player_act_unpacks_tuple() -> None:
     a = player_act(player, env, torch.device("cpu"))
     assert isinstance(a, int)
     assert 0 <= a < 9
+
+
+def test_shims_still_import() -> None:
+    import qrokkun_env.train_both_v3_gpu as shim
+    from qrokkun_env.agents.player_v3 import PlayerV3
+
+    assert shim.PlayerAC is PlayerV3
