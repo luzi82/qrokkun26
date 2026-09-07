@@ -35,3 +35,30 @@ Train loops must alias agent classes (e.g. `PlayerAC = PlayerV4` / `SpawnerAC = 
 (CLI names kept). Non-1.0 temperature is not supported: it would desync rollout
 log-probs from the PPO update. Exploration uses on-policy sampling + entropy, not
 temperature scaling.
+
+## v4.3 evaluation modes + corner probe
+
+Eval modes (`sample_policy`, `rng_jitter`) — see `qrokkun_env/eval_modes.py`:
+
+| Mode tag | sample_policy | rng_jitter | Use |
+|----------|---------------|------------|-----|
+| `det_det` | False | False | Debug / deterministic collapse |
+| `det_stoch` | False | True | Robustness; prefer for flee×newS |
+| `stoch_stoch` | True | True | Deploy sanity; `torch.random.fork_rng()` + `manual_seed(episode_seed)` |
+
+Status/compare keep legacy keys (`new_vs_new`, …) as **det_det** means, and add
+suffixed fields (`new_vs_new_det_stoch`, …) plus optional `by_mode` summaries.
+Paired seeds: `PAIRED_EVAL_SEEDS` (3000..3029).
+
+**Corner probe** (independent diagnostic — do **not** mix into new×new mean):
+
+```bash
+python -m qrokkun_env.corner_probe --spawner runs/both_v4_spawner.pt \
+  --out runs/both_v4_corner_probe.json
+# or: python -m qrokkun_env.train.both_v4 --corner-probe
+```
+
+Player is **locked** (idle + force `px,py` each frame) at 9 sites: center, 4 corners
+(including bottom-right), 4 edge midpoints. Records first-hit, hit rate, closest
+approach, birth/aim stats.
+

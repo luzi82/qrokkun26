@@ -158,7 +158,7 @@ def run_episode(
                 lp = v = 0.0
                 p, b, m = encode_obs(env)
             else:
-                a, lp, v, p, b, m = act_player(player, env, device, sample and train_player, temp_p)
+                a, lp, v, p, b, m = act_player(player, env, device, sample, temp_p)
             if train_player:
                 ptraj.player.append(p); ptraj.bullets.append(b); ptraj.pad.append(m)
                 ptraj.actions.append(a); ptraj.log_probs.append(lp); ptraj.values.append(v)
@@ -177,7 +177,7 @@ def run_episode(
         spawns = 0
         while env.spawn_acc >= interval:
             env.spawn_acc -= interval
-            act, lp, v, p, b, m = act_spawner(spawner, env, device, sample and train_spawner, temp_s)
+            act, lp, v, p, b, m = act_spawner(spawner, env, device, sample, temp_s)
             spawn_continuous(env, act["birth"], act["aim"], act["kind"], rng_jitter=rng_jitter)
             spawns += 1
             if train_spawner:
@@ -198,7 +198,7 @@ def run_episode(
             lp = v = 0.0
             p, b, m = encode_obs(env)
         else:
-            a, lp, v, p, b, m = act_player(player, env, device, sample and train_player, temp_p)
+            a, lp, v, p, b, m = act_player(player, env, device, sample, temp_p)
         if train_player:
             ptraj.player.append(p); ptraj.bullets.append(b); ptraj.pad.append(m)
             ptraj.actions.append(a); ptraj.log_probs.append(lp); ptraj.values.append(v)
@@ -302,17 +302,59 @@ def ppo_update_spawner(net, opt, trajs, device, clip, epochs, minibatch, entropy
 
 
 @torch.no_grad()
-def eval_pair(player, spawner, device, seeds, max_steps) -> float:
-    times = []
-    for seed in seeds:
-        env = Qrokkun26Env(seed=seed)
-        _p, _s, t = run_episode(
-            env, player, spawner, device, max_steps,
-            sample=False, train_player=False, train_spawner=False,
-            temp_p=1.0, temp_s=1.0, rng_jitter=False,
-        )
-        times.append(t)
+def eval_pair(
+    player,
+    spawner,
+    device,
+    seeds,
+    max_steps,
+    *,
+    sample_policy: bool = False,
+    rng_jitter: bool = False,
+) -> float:
+    """Mean survival over seeds. Defaults = det_policy+det_env (v4.2 compat)."""
+    from qrokkun_env.eval_modes import eval_survival_times
+
+    times = eval_survival_times(
+        run_episode,
+        lambda seed: Qrokkun26Env(seed=seed),
+        player,
+        spawner,
+        device,
+        seeds,
+        max_steps,
+        sample_policy=sample_policy,
+        rng_jitter=rng_jitter,
+    )
     return sum(times) / max(len(times), 1)
+
+
+@torch.no_grad()
+def eval_pair_stats(
+    player,
+    spawner,
+    device,
+    seeds,
+    max_steps,
+    *,
+    sample_policy: bool = False,
+    rng_jitter: bool = False,
+) -> dict:
+    """Mean/median/std/n (+ times) for paired-seed reports."""
+    from qrokkun_env.eval_modes import eval_survival_times, summarize_times
+
+    times = eval_survival_times(
+        run_episode,
+        lambda seed: Qrokkun26Env(seed=seed),
+        player,
+        spawner,
+        device,
+        seeds,
+        max_steps,
+        sample_policy=sample_policy,
+        rng_jitter=rng_jitter,
+    )
+    return summarize_times(times)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -349,6 +391,14 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--seed", type=int, default=4)
     ap.add_argument("--d-model", type=int, default=128)
     ap.add_argument("--hidden", type=int, default=256)
+    ap.add_argument(
+        "--corner-probe",
+        type=Path,
+        nargs="?",
+        const=Path("runs/both_v4_corner_probe.json"),
+        default=None,
+        help="If set, run locked-P corner probe at end and write JSON (default path if flag alone).",
+    )
     return ap
 
 
@@ -421,59 +471,124 @@ def main() -> None:
 
             row = {"update": update, "surv_mean": sum(survs) / len(survs), "wall_h": (time.time() - t0) / 3600}
             if update % 5 == 0:
+                # Mode 1 (det_det) — old keys; Mode 2 (det_stoch) for new×new / flee×newS.
                 vs_scripted = eval_pair(player, None, device, range(2100, 2112), args.max_steps)
                 new_vs_new = eval_pair(player, spawner, device, range(2200, 2212), args.max_steps)
                 flee_vs_new = eval_pair("flee", spawner, device, range(2300, 2312), args.max_steps)
-                row.update({"newP|scripted": vs_scripted, "new|new": new_vs_new, "flee|newS": flee_vs_new})
+                new_vs_new_ds = eval_pair(
+                    player, spawner, device, range(2200, 2212), args.max_steps,
+                    sample_policy=False, rng_jitter=True,
+                )
+                flee_vs_new_ds = eval_pair(
+                    "flee", spawner, device, range(2300, 2312), args.max_steps,
+                    sample_policy=False, rng_jitter=True,
+                )
+                row.update({
+                    "newP|scripted": vs_scripted,
+                    "new|new": new_vs_new,
+                    "flee|newS": flee_vs_new,
+                    "new|new_det_stoch": new_vs_new_ds,
+                    "flee|newS_det_stoch": flee_vs_new_ds,
+                })
                 if vs_scripted > best_vs_scripted:
                     best_vs_scripted = vs_scripted
                 torch.save({"state_dict": player.state_dict(), "d_model": args.d_model, "hidden": args.hidden,
                             "algo": "both-v4-player", "eval_vs_scripted": vs_scripted, "update": update}, args.out_player)
                 torch.save({"state_dict": spawner.state_dict(), "d_model": args.d_model, "hidden": args.hidden,
-                            "algo": "both-v4-spawner", "aim_scale": AIM_SCALE, "eval_flee_vs_newS": flee_vs_new,
+                            "algo": "both-v4-spawner", "aim_scale": AIM_SCALE, "eval_flee_vs_newS": flee_vs_new_ds,
                             "update": update}, args.out_spawner)
                 status = {
                     "update": update,
                     "wall_hours": (time.time() - t0) / 3600,
+                    # Compat keys = det_policy+det_env
                     "newP_vs_scripted": vs_scripted,
                     "best_newP_vs_scripted": best_vs_scripted,
                     "new_vs_new": new_vs_new,
                     "flee_vs_newS": flee_vs_new,
                     "flee_vs_scripted_ref": flee_vs_scripted,
+                    # Distinct mode-suffixed fields (v4.3)
+                    "newP_vs_scripted_det_det": vs_scripted,
+                    "new_vs_new_det_det": new_vs_new,
+                    "new_vs_new_det_stoch": new_vs_new_ds,
+                    "flee_vs_newS_det_det": flee_vs_new,
+                    "flee_vs_newS_det_stoch": flee_vs_new_ds,
                     "aim_scale": AIM_SCALE,
+                    "eval_note": "new×new is observation only; prefer newP|scripted + flee|newS_det_stoch",
                     "done": False,
                 }
                 args.status.write_text(json.dumps(status, indent=2) + "\n")
                 print(
                     f"upd={update:5d} train={row['surv_mean']:5.2f} "
-                    f"newP|scripted={vs_scripted:.2f} new|new={new_vs_new:.2f} "
-                    f"flee|newS={flee_vs_new:.2f} (flee|scripted={flee_vs_scripted:.2f}) "
+                    f"newP|scripted={vs_scripted:.2f} new|new={new_vs_new:.2f}/{new_vs_new_ds:.2f} "
+                    f"flee|newS={flee_vs_new:.2f}/{flee_vs_new_ds:.2f} "
+                    f"(flee|scripted={flee_vs_scripted:.2f}) "
                     f"wall={status['wall_hours']:.2f}h",
                     flush=True,
                 )
             logf.write(json.dumps(row) + "\n"); logf.flush()
             update += 1
 
-    seeds = range(3000, 3030)
+    from qrokkun_env.eval_modes import PAIRED_EVAL_SEEDS, metric_key
+
+    seeds = PAIRED_EVAL_SEEDS
+    newP_dd = eval_pair_stats(player, None, device, seeds, args.max_steps)
+    new_dd = eval_pair_stats(player, spawner, device, seeds, args.max_steps)
+    new_ds = eval_pair_stats(
+        player, spawner, device, seeds, args.max_steps, sample_policy=False, rng_jitter=True,
+    )
+    flee_dd = eval_pair_stats("flee", spawner, device, seeds, args.max_steps)
+    flee_ds = eval_pair_stats(
+        "flee", spawner, device, seeds, args.max_steps, sample_policy=False, rng_jitter=True,
+    )
+    flee_sc = eval_pair_stats("flee", None, device, seeds, args.max_steps)
     cmp = {
-        "newP_vs_scripted": eval_pair(player, None, device, seeds, args.max_steps),
-        "new_vs_new": eval_pair(player, spawner, device, seeds, args.max_steps),
-        "flee_vs_newS": eval_pair("flee", spawner, device, seeds, args.max_steps),
-        "flee_vs_scripted": eval_pair("flee", None, device, seeds, args.max_steps),
-        "n_seeds": 30,
+        # Compat means (det_det)
+        "newP_vs_scripted": newP_dd["mean"],
+        "new_vs_new": new_dd["mean"],
+        "flee_vs_newS": flee_dd["mean"],
+        "flee_vs_scripted": flee_sc["mean"],
+        # Distinct mode fields
+        metric_key("newP_vs_scripted", False, False): newP_dd["mean"],
+        metric_key("new_vs_new", False, False): new_dd["mean"],
+        metric_key("new_vs_new", False, True): new_ds["mean"],
+        metric_key("flee_vs_newS", False, False): flee_dd["mean"],
+        metric_key("flee_vs_newS", False, True): flee_ds["mean"],
+        metric_key("flee_vs_scripted", False, False): flee_sc["mean"],
+        "by_mode": {
+            "newP_vs_scripted_det_det": newP_dd,
+            "new_vs_new_det_det": new_dd,
+            "new_vs_new_det_stoch": new_ds,
+            "flee_vs_newS_det_det": flee_dd,
+            "flee_vs_newS_det_stoch": flee_ds,
+            "flee_vs_scripted_det_det": flee_sc,
+        },
+        "paired_seeds": list(seeds),
+        "n_seeds": len(seeds),
         "wall_hours": (time.time() - t0) / 3600,
         "updates": update,
         "aim_scale": AIM_SCALE,
-        "notes": "v4 continuous S + masked attention; no offline replay",
+        "notes": "v4.3 eval modes; new×new not sole selection metric; paired seeds",
     }
+    # Drop bulky times from compare JSON by_mode for readability (keep summary stats).
+    for _k, block in cmp["by_mode"].items():
+        block.pop("times", None)
     torch.save({"state_dict": player.state_dict(), "d_model": args.d_model, "hidden": args.hidden,
                 "algo": "both-v4-player", "eval_vs_scripted": cmp["newP_vs_scripted"], "update": update}, args.out_player)
     torch.save({"state_dict": spawner.state_dict(), "d_model": args.d_model, "hidden": args.hidden,
-                "algo": "both-v4-spawner", "aim_scale": AIM_SCALE, "eval_flee_vs_newS": cmp["flee_vs_newS"],
+                "algo": "both-v4-spawner", "aim_scale": AIM_SCALE,
+                "eval_flee_vs_newS": cmp[metric_key("flee_vs_newS", False, True)],
                 "update": update}, args.out_spawner)
     args.compare.write_text(json.dumps(cmp, indent=2) + "\n")
     args.status.write_text(json.dumps({**cmp, "done": True}, indent=2) + "\n")
     print(json.dumps(cmp, indent=2), flush=True)
+
+    if args.corner_probe is not None:
+        from qrokkun_env.corner_probe import run_corner_probe
+
+        probe = run_corner_probe(spawner, device, max_steps=min(args.max_steps, 60 * 40))
+        args.corner_probe.parent.mkdir(parents=True, exist_ok=True)
+        args.corner_probe.write_text(json.dumps(probe, indent=2) + "\n")
+        print(f"corner_probe -> {args.corner_probe}", flush=True)
 
 
 if __name__ == "__main__":
