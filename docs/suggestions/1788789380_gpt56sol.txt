@@ -1,0 +1,208 @@
+Randomized starts / burn-in states 訓練建議
+==========================================
+
+問題
+----
+考慮在訓練 episode 開場時，把 Player 放在隨機位置，並加入幾顆隨機子彈，以改善 sample diversity，避免每局都從中央、靜止、空場開始。
+
+結論
+----
+這個方向值得做，尤其對 PlayerV4 有幫助，但只能解決一部分 sample diversity 問題，不能取代以下 correctness 與訓練配方修正：
+
+- PPO temperature/log-prob contract。
+- terminated/truncated 與 final-value bootstrap。
+- Player/Spawner 不同 decision time scale。
+- learned-Spawner stochastic evaluation。
+- Flee behavior cloning。
+- frozen opponent pool。
+
+最推薦的做法不是直接任意放置子彈，而是用正常環境 dynamics 產生合法的 burn-in state，再從該狀態開始收集 PPO trajectory。
+
+能改善的問題
+------------
+Randomized starts 可帶來以下收益：
+
+1. 避免每局前幾秒重複中央、零速度、沒有子彈的 observation。
+2. 提高 Player 對場地不同位置、邊界、多彈與不同速度方向的 state coverage。
+3. 減少 learned Player/Spawner 在 episode 早期鎖定同一條 deterministic trajectory。
+4. 讓 Player 更早接觸真正需要避彈的狀態，提升單位 wall-clock 的有效訓練資料。
+5. 減少 all-pad/empty-bullet attention state 在資料中的比例。
+6. 可作為 curriculum，讓 Player 逐步學習由簡單局面到密集局面。
+
+但它不會自動解決：
+
+- PPO ratio 算錯。
+- gamma/lambda horizon 過短或時間尺度不一致。
+- live-only self-play 的 non-stationarity。
+- reward shaping 與 survival objective 不一致。
+- learned Spawner evaluation 關閉 RNG。
+
+直接隨機放子彈的風險
+--------------------
+若只是隨機產生 bullet position/velocity，容易得到不屬於真實遊戲 distribution 的狀態：
+
+- 子彈與 Player 重疊，開場立即死亡。
+- 下一 frame 必死且沒有合法逃生 action。
+- 子彈從場內不合理位置出生。
+- 速度、方向、kind 與正常 spawner 分布不一致。
+- 多顆子彈形成真實 dynamics 不可能產生的 configuration。
+- 訓練大量處理 artificial states，evaluation 卻從正常空場開始，產生 distribution mismatch。
+
+另外，預置子彈不是 live SpawnerV4 的 action。如果預置子彈殺死 Player，卻把 kill reward 分配給 live Spawner，會造成錯誤 credit assignment。
+
+推薦方案：合法 burn-in state
+----------------------------
+每個訓練 episode 可選擇先執行一段不收集 gradient/trajectory 的 warm-up：
+
+1. 正常 env.reset()。
+2. 依 episode seed 隨機選 burn_in_frames，例如 0 至 180 frames。
+3. Burn-in 期間用 scripted spawner 或 frozen historical spawner 正常生成子彈。
+4. Burn-in 期間 Player 使用 FleeNearestBullet、隨機合法 policy，或二者混合。
+5. 若 Player 在 burn-in 中死亡，丟棄該 state 並重新產生，或回退到較短 burn-in。
+6. 檢查 state 通過安全條件後，才開始記錄 on-policy PPO trajectory。
+
+這樣初始 bullets 的位置、速度、kind、density、moved flag 與 spawn timing 都來自真實環境 dynamics，不需要手寫近似分布。
+
+重要：burn-in 只用來建立初始 state，不可把 burn-in transition 混入當前 policy 的 PPO batch，除非那些 action 確實由當前 behavior policy 採樣並有正確 old log-prob。
+
+建議混合比例
+------------
+第一階段可使用：
+
+    50% 正常中央空場 reset
+    25% 隨機 Player 位置、空場
+    25% 合法 burn-in state
+
+確認沒有明顯 distribution shift 或訓練不穩後，可測試：
+
+    30% 正常中央空場 reset
+    30% 隨機 Player 位置、空場
+    40% 合法 burn-in state
+
+不要一開始把 100% episode 都改成隨機危險狀態。正常空場仍是實際遊戲與 evaluation 的起始分布，也能讓 Spawner 學習如何從零建立攻勢。
+
+Player 初始位置 randomization
+-----------------------------
+不建議直接在整個 field 內均勻取樣。這會讓靠近邊界的初始狀態比例過高，且可能改變訓練重心。
+
+建議先在中央附近取樣：
+
+    px = center_x + uniform(-0.25, 0.25) * FIELD_W
+    py = center_y + uniform(-0.25, 0.25) * FIELD_H
+
+之後依 A/B 結果逐步擴大到 +/-0.35 或其他範圍。
+
+必須符合：
+
+- Player 在 FIELD 邊界與 PLAYER_MARGIN 內。
+- 與每顆 bullet 保持安全距離。
+- 建議最小距離至少為 player_radius + bullet_radius + 12 px。
+- 可另外檢查短期 closest approach/time-to-collision，排除即使當下未碰撞但已不可避免的死亡。
+
+可選 randomization：
+
+- 小幅初始 pvx/pvy。
+- spawn_acc phase。
+- 小幅 elapsed phase。
+
+注意：隨機 elapsed 不只是 phase noise，也會改變 spawn interval 與 bullet speed，應視為 difficulty curriculum，單獨設參數與記錄。
+
+若必須直接生成初始子彈
+----------------------
+如果 burn-in 成本太高，直接建立 bullets 時至少遵守：
+
+1. 從正常場外邊緣位置出生，或模擬正常 birth geometry。
+2. 使用 _bullet_speed(elapsed) 與正常 speed jitter。
+3. 使用 scripted/learned spawner 的真實 kind/radius 分布。
+4. 正確設定 Bullet.moved，避免第一 frame dynamics 與正常 spawn 不一致。
+5. 排除與 Player 的立即碰撞。
+6. 排除短期無解局面。
+7. 子彈數量使用 curriculum，例如先 0 至 3，再測 0 至 5、0 至 8。
+8. 預置子彈必須標記為非 live-Spawner action，或避免將其 kill reward 歸給 live Spawner。
+
+Player 與 Spawner 必須使用不同配方
+----------------------------------
+Player training：
+
+- 很適合大量使用 randomized/burn-in starts。
+- 目標是增加危險狀態、邊界狀態和多彈 state coverage。
+- p_vs_scripted 與 Player-only curriculum 可提高 burn-in 比例。
+- Flee BC dataset 也可從 burn-in states 取樣，避免只模仿 early empty-field 行為。
+
+Spawner training：
+
+- 應較保守使用 randomized starts。
+- 如果 episode 總是從已有多顆子彈開始，Spawner 可能只學會補最後一擊，而不會從空場建立完整 attack sequence。
+- s_vs_flee 應以正常 reset 為主。
+- 少量中局 state 可由 scripted/frozen spawner 產生，但必須處理 bullet ownership 與 credit assignment。
+
+Self-play：
+
+- 保留一部分 normal reset。
+- 部分使用 burn-in state。
+- Burn-in state 最好由 scripted 或 frozen opponent 產生，不要由即將接受 reward 的 live Spawner 先免費建立優勢。
+
+建議實作介面
+------------
+可新增明確設定，而不要把邏輯散落在 run_episode()：
+
+    reset_mode: normal | random_player | burn_in
+    random_player_fraction
+    burn_in_fraction
+    burn_in_max_frames
+    burn_in_player_policy: flee | random | mixed
+    burn_in_spawner: scripted | frozen
+    initial_position_fraction
+    initial_safe_margin
+
+建立 helper，例如 prepare_initial_state(env, config, ...)，回傳：
+
+    actual_reset_mode
+    burn_in_frames
+    initial_bullet_count
+    rejected_attempts
+
+這些 metadata 應寫入 training log，方便確認 sampler 沒有因大量 rejection 而偏離預期分布。
+
+必要 tests
+---------
+1. 相同 seed 與 config 能重現相同 initial state。
+2. 不同 seed 能產生不同 Player position/bullet fingerprint。
+3. 所有 random starts 都在合法 field bounds。
+4. 初始 state 不會立即 collision。
+5. Burn-in bullets 的 moved flag 與正常 env dynamics 一致。
+6. Normal reset mode 與現有行為完全一致。
+7. Burn-in transition 不會被誤放進 live policy PPO trajectory。
+8. 預置/burn-in bullets 不會錯誤產生 live Spawner credit。
+9. Randomized state 經 encode_obs 後沒有 NaN/Inf，pad mask 正確。
+
+量測與 A/B 實驗
+---------------
+至少比較：
+
+A. 正常 reset baseline。
+B. 50% normal + 25% random Player + 25% burn-in。
+C. 30% normal + 30% random Player + 40% burn-in。
+D. C + Flee BC。
+E. D + frozen opponent pool。
+
+使用相同初始化、training budget 與 paired unseen evaluation seeds。主要指標：
+
+- Player vs scripted mean/median/std survival。
+- Player vs frozen learned-Spawner pool。
+- Flee vs learned Spawner。
+- true termination/truncation 比例。
+- initial state 的 Player position、bullet count、threat level 分布。
+- PPO KL、clip fraction、entropy、value explained variance。
+- wall-clock sample efficiency。
+
+成功條件不是 training return 上升或 observation 看起來更分散，而是 Player 在正常空場與 unseen seeds 上仍能穩定超越 Flee，同時對中局與不同 frozen Spawner 更 robust。
+
+建議優先序
+----------
+1. 先修正 PPO temperature contract、truncation bootstrap 與 discount time scale。
+2. 實作可重現的 prepare_initial_state()，先加入 random Player position。
+3. 加入 scripted/frozen dynamics burn-in，不直接隨機堆 bullets。
+4. 先只套用於 Player-heavy rollouts，保留大量 normal reset。
+5. 確認 credit assignment 後，才在少量 self-play/Spawner rollout 使用中局 states。
+6. 與 Flee BC、frozen opponent pool 做獨立 A/B，避免一次改太多因素。
