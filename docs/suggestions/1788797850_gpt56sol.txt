@@ -1,0 +1,170 @@
+對 docs/suggestions/1788797417_grokbot.txt 的 review
+===================================================
+
+總評
+----
+Grok Bot 對 randomized starts 的主要取捨是合理的：先做薄層 random Player position、Player/Spawner PPO batch 分流，完整 burn-in 留待獨立 A/B。這比直接任意堆放初始子彈安全，也有注意到 Spawner credit assignment。
+
+不過目前版本排序把 diversity change 插到尚未完成的 correctness 修正之前，而且 v4.1 只修正 temperature 預設值，仍可由 CLI 重新觸發原本的 PPO bug。建議先修訂以下事項再把 random start 變成預設訓練配方。
+
+主要問題 1：不要把 randomized start 排在其餘 P0 correctness 前
+-------------------------------------------------------------
+新計劃把 random Player start 排為 v4.2，早於：
+
+- stochastic evaluation 分流。
+- terminated/truncated 與 final-value bootstrap。
+- Player/Spawner discount time-scale correction。
+- PPO diagnostics。
+
+這違反原先「先算對，再增加 diversity」的原則。Random start 會改變資料分布，但目前仍無法可靠判斷 improvement 來自哪裡：time-limit return 仍錯誤、Spawner discount 仍使用變動的 event time scale、learned-Spawner evaluation 仍可能重複同一條 deterministic trajectory。
+
+建議順序：
+
+1. v4.1：完整封閉 temperature contract。
+2. v4.2：三種 evaluation mode + paired seeds + 四角 probe。
+3. v4.3：terminated/truncated + final-value bootstrap。
+4. v4.4：Player/Spawner discount time scale。
+5. v4.5：PPO diagnostics + checkpoint management。
+6. v4.6：random Player starts。
+
+若團隊希望立即測 random start，可先把它做成 feature flag，預設 fraction=0，完成 A/B 後才改 baseline。這樣不會阻止實驗，也不會把尚未驗證的資料分布變更混入 correctness baseline。
+
+主要問題 2：v4.1 只修預設值，沒有完整修好 temperature contract
+-------------------------------------------------------------
+目前 qrokkun_env/train/both_v4.py 已將 temp-p/temp-s 預設改為 1.0，這能修正常用預設路徑，但 CLI 仍允許：
+
+    --temp-p 1.15
+    --temp-s 1.2
+
+使用者一旦指定非 1，rollout 會用 temperature-adjusted distribution 儲存 old log-prob，PPO update 卻用原始 distribution 計算 new log-prob，原本的 mismatch 會立即復發。
+
+因此「v4.1 已完成」目前只適用於 default configuration。
+
+建議三選一：
+
+1. 暫時移除 temp-p/temp-s arguments。
+2. argparse/runtime 明確拒絕任何非 1.0 值。
+3. 完整支援 temperature，在 PPO update 使用與 rollout 完全相同的 transformed distribution。
+
+現階段建議方案 2：保留 CLI 相容性，但在 parse 後檢查 temp-p/temp-s 必須為 1.0，否則立即報錯，避免浪費長時間訓練。
+
+主要問題 3：ratio regression tests 的 state coverage 太弱
+------------------------------------------------------
+現有 qrokkun_env/tests/test_ppo_ratio.py 對 seed 0..3 各自建立 env 並 reset，但 reset 後 observation 實際相同：
+
+- Player 都在中央。
+- pvx/pvy 都為 0。
+- bullets 為空。
+- elapsed 與 spawn_acc 相同。
+
+所以四筆 sample 只是相同 empty-field observation 的重複。測試確實驗證了基本 likelihood contract，但尚未涵蓋：
+
+- 非空 bullet attention。
+- 不同 Player position/velocity。
+- 不同 bullet kind。
+- Spawner 的不同 observation。
+- run_episode -> Traj packing -> PPO update 的實際 integration path。
+
+建議：
+
+- 在每個 env 先執行不同數量的 scripted steps，建立非空且不同的 states。
+- 額外修改 Player position/velocity，但仍保持合法 bounds。
+- 至少涵蓋一個有多種 bullet kind 的 observation。
+- 加入 integration test：由 run_episode 收集短 trajectory，optimizer 尚未 step 時，用 update 相同公式驗證 ratio 約為 1。
+
+目前 test_temp_argparse_defaults_are_one() 使用 inspect.getsource(main) 搜尋字串，較脆弱。建議把 parser 建立抽成 build_parser()，直接 parse empty args 驗證 default；非 1 rejection 也可直接測 parser/runtime validation。
+
+主要問題 4：random Player 空場只能打破 opening position
+----------------------------------------------------
+薄層 random Player position 是合理的小型實驗，但不能描述成已解決 sample diversity。每局仍然會有：
+
+    elapsed = 0
+    spawn_acc = SPAWN_ACC_START
+    bullets = []
+    pvx = pvy = 0
+
+它主要增加：
+
+- Player 的初始空間位置 diversity。
+- Spawner 第一顆子彈所看到的 Player position diversity。
+- deterministic opening trajectory 的部分分歧。
+
+它沒有增加初始 bullet configuration、density、velocity、kind 或 threat-level diversity。文件應把新 v4.2 的目標明確寫成「打破固定 opening position」，完整 state diversity 仍由 burn-in 提供。
+
+主要問題 5：右下角 exploit 不宜等 random start 上線後才處理
+-----------------------------------------------------------
+Grok Bot 已觀察到 new-vs-new 70 秒可能只是 Player 待在右下角，而 Spawner 瞄不準。這代表目前 self-play survival 已可能不是 agent strength 的有效指標。
+
+Random Player start 若增加靠近角落的狀態，可能反而強化這個 exploit。建議在啟用 random starts 前至少先完成四角 probe：
+
+1. 固定 Player 在中央、四個角落及四邊中點。
+2. 固定或分層測試 Spawner birth/aim output。
+3. 記錄 bullet 對 Player 的 closest approach、命中率與首次命中時間。
+4. 分辨問題屬於 policy exploit、AIM_SCALE 限制、birth direction parameterization，還是實際 geometry/normalization bug。
+
+不一定要立即修改 Spawner architecture，但在原因確定前，不應以 new-vs-new=70s 作為成功條件或 best checkpoint 指標。
+
+Random-start 實作需要補充的明確 contract
+--------------------------------------
+1. Fraction：指定明確預設值，例如 0.25；不要只寫 normal + RNG start 混合。
+2. Reproducibility：只使用 env.rng，保證相同 seed/config 產生相同位置。
+3. Bounds：px/py 必須套用 FIELD bounds 和 PLAYER_MARGIN。
+4. Velocity：明確決定 pvx/pvy 保持 0，還是另做獨立 randomization；第一版建議保持 0。
+5. State：第一版保持 elapsed=0、spawn_acc=SPAWN_ACC_START、bullets=[]，避免偷偷混入其他因素。
+6. Metadata：每個 rollout 記錄 reset_mode；每個 update 記錄 normal/random 的數量。
+7. Metrics：normal reset 與 random reset 的 survival 分開報告，總平均不能取代分組結果。
+8. Spawner sample count：mask random-start self-play 的 Spawner trajectory 後，記錄每 update 實際有效 Spawner transitions/rollouts，避免 S batch 靜默縮水。
+9. Evaluation：正式 benchmark 仍以 normal reset 為主，random-start evaluation 另列 robustness 指標。
+10. Test：相同 seed 可重現、不同 seed 會不同、所有位置合法、normal mode 與舊 reset 完全一致。
+
+Player/Spawner batch 分流評價
+-----------------------------
+以下設計值得保留：
+
+- Player PPO 可混合 normal/random starts。
+- Spawner PPO 僅使用 normal-reset trajectories。
+- Self-play 若使用 random start，Spawner trajectory 不進 S batch。
+- Burn-in transition 不進 live PPO batch。
+
+這能避免 live Spawner 因非自身建立的初始優勢獲得錯誤 credit。但需注意：若 random-start fraction 太高，Spawner 每 update 的有效樣本量會下降。應調整 rollout allocation，而不是只 mask 後接受較小 batch。
+
+建議將 modes 明確拆分，例如：
+
+- self_normal：P/S 都訓練。
+- self_random_player：只訓練 P。
+- p_vs_scripted_normal。
+- p_vs_scripted_random_player。
+- s_vs_flee_normal。
+
+這比先建立通用 self mode、再用隱含 mask 修改 ownership 更容易審核與量測。
+
+Evaluation 建議
+---------------
+保留三種互不混淆的 evaluation：
+
+1. deterministic policy + deterministic environment。
+2. deterministic policy + stochastic environment。
+3. stochastic policy + stochastic environment，使用 fork_rng 和 episode seed，不污染 training Torch RNG。
+
+四角/邊界 probe 應是獨立 diagnostic，不應混進一般 seed mean。Player best、Spawner best 也應各有自己的 selection objective；new-vs-new 只用來觀察 self-play dynamics。
+
+認同事項
+--------
+1. 不直接隨機堆放初始子彈是正確的第一步。
+2. 完整 burn-in 留到獨立 A/B，可降低一次修改太多因素的風險。
+3. Player 多用 randomized starts、Spawner 保守使用 normal reset，方向正確。
+4. Spawner batch mask 有處理基本 credit assignment 問題。
+5. 四角/右下角 probe 是必要新增項目。
+6. v4.1 的 Player/Spawner ratio tests 比原先沒有 regression coverage 明顯進步。
+
+批准建議
+--------
+可以實作薄層 prepare_initial_state，但建議採以下條件：
+
+- feature flag 預設關閉，直到 evaluation、truncation 與 discount P0 完成。
+- 先封死 temp!=1 的錯誤 CLI 路徑。
+- 先執行四角 probe，確認 random start 不會放大已知 corner exploit。
+- 明確分拆 Player-only random modes，而不是依賴不透明的 Spawner mask。
+- 記錄 reset-mode 分組 metrics 與有效 Spawner sample count。
+
+若以上條件滿足，random Player position 是低風險且值得進行的 diversity A/B；它應被視為 opening-position randomization，而不是完整 sample-diversity 解法。
