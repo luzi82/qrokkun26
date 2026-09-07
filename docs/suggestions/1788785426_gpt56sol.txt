@@ -1,0 +1,255 @@
+Qrokkun26 both_v4 訓練改善建議
+================================
+
+目標
+----
+改善 qrokkun_env/train/both_v4.py 的訓練正確性與多樣性，使 PlayerV4 有機會穩定超越 FleeNearestBullet，並讓 SpawnerV4 的評估能真實反映對不同生成流程的泛化能力。
+
+已確認的核心結論
+----------------
+1. GodotRNG 本身正常，不同 seed 會產生不同序列。Scripted spawner 也會隨 seed 生成不同子彈。
+2. Learned SpawnerV4 的 deterministic evaluation 幾乎不使用 environment seed：
+   - eval_pair() 固定 sample=False。
+   - act_spawner() 因而使用 birth.mean、aim.mean、kind argmax。
+   - eval_pair() 固定 rng_jitter=False，關閉 birth、aim、speed jitter。
+   - 8 秒前 double-spawn 機率為 0，因此 8 秒前完全不會消耗 env.rng。
+   - 若 player 在 8 秒前死亡，不同 seed 可以得到完全相同的生成流程。
+3. Training 並非完全沒有隨機性：policy sampling 使用 Torch RNG，spawn_continuous() 也在 rng_jitter=True 時使用 env.rng。但是 environment seed 只控制較小的 jitter；主要 action sampling 由 Torch global RNG 控制。
+4. 因此「不同 seed 的生成流程都一樣」在 learned-spawner evaluation 路徑中是目前程式的必然結果，而不是使用者操作錯誤。
+
+P0：先修正訓練與評估正確性
+----------------------------
+
+A. 分離 deterministic 與 stochastic evaluation
+
+目前位置：qrokkun_env/train/both_v4.py 的 eval_pair()。
+
+建議將 eval_pair() 改成明確接收：
+
+    sample_policy: bool = False
+    rng_jitter: bool = False
+
+至少同時記錄兩組指標：
+
+1. deterministic：sample_policy=False, rng_jitter=False
+   用途：除錯、檢查純 network policy 是否退步。
+
+2. stochastic/robust：sample_policy=False, rng_jitter=True
+   用途：checkpoint selection 與衡量不同 seed 下的泛化能力。
+
+Player vs scripted spawner 原本就會使用 env.rng；Player/Flee vs learned spawner 必須開啟 rng_jitter，seed 才能在早期影響生成流程。
+
+若需要 sample_policy=True 的 stochastic policy evaluation，每個 episode 還要依 episode seed 設定 Torch RNG。建議使用 torch.random.fork_rng() 包住 episode，再呼叫 torch.manual_seed(seed)，避免評估改變訓練中的 global RNG state。
+
+評估輸出應保留各自明確名稱，例如：
+
+    new_vs_new_deterministic
+    new_vs_new_stochastic
+    flee_vs_newS_deterministic
+    flee_vs_newS_stochastic
+
+不要將 deterministic 的多個 seeds 當成獨立樣本；在目前實作中，它們可能是同一條 trajectory 的重複測量。
+
+B. 修正 temperature 與 PPO likelihood 不一致
+
+目前 rollout：
+- act_player() 使用 logits / temp_p 採樣並儲存 log_prob。
+- act_spawner() 使用 std * temp_s、kind logits / temp_s 採樣並儲存 log_prob。
+
+目前 update：
+- ppo_update_player() 用原始 network distribution 計算新 log_prob。
+- ppo_update_spawner() 也用原始 distribution 計算新 log_prob。
+
+當 temp != 1 時，stored old log_prob 與 update new log_prob 並非同一個 policy family。即使 network 尚未更新，ratio 也不保證為 1，會破壞 PPO importance ratio 與 clipping 的意義。Player 預設 temp_p=1.15，因此預設設定已受影響。
+
+最簡單且建議的修正：
+
+    --temp-p 1.0
+    --temp-s 1.0
+
+訓練探索依靠 distribution sampling 與 entropy bonus。也建議直接將預設值改成 1.0。
+
+若要保留 temperature，ppo_update_player/spawner 必須用與 rollout 完全相同的 temperature transformation 重建 distribution，且每筆 trajectory 必須記錄其 temperature。
+
+必要 regression test：collect action 後，在 network 尚未更新時重新計算 log_prob，確認 PPO ratio 約等於 1。
+
+C. 修正 frame-level gamma/lambda horizon
+
+Player 每秒做 60 次 decision。目前 gamma=0.99：
+
+- reward discount 半衰期約 69 frames，即 1.15 秒。
+- 30 秒後 reward 權重約 1.39e-8。
+- gamma * lambda = 0.9405，GAE advantage 傳遞時間甚至更短。
+
+這只適合瞬間避彈，難以學到邊界管理、多顆子彈路徑規劃與長期 survival，因此很容易停留在類似 FleeNearestBullet 的局部策略。
+
+短期建議起始值：
+
+    gamma = 0.9995
+    lambda = 0.999
+
+需要用 short-run A/B test 調整，不應直接假設此組一定最佳。
+
+中期更好的方案：加入 action repeat/frame skip，Player 每 3 至 4 frames 才採樣一次 action，期間重複該 action。之後再依實際 decision interval 重算 gamma/lambda。這也能降低 trajectory 記憶體與 PPO update 成本。
+
+D. 區分 terminated 與 truncated
+
+目前 run_episode() 到 max_steps 時會把最後 dones 設為 True，Spawner 還會收到 shaped_spawner_r(env, True, False) 的 -2 penalty。這把「存活到時間上限」錯當成真正 terminal failure。
+
+建議：
+
+- 被子彈擊中：terminated=True，不 bootstrap。
+- 到達 max_steps：truncated=True，從最後 observation 的 value bootstrap。
+- truncation 時不要給 Spawner -2 terminal penalty。
+- Player 與 Spawner 的 GAE 都應支援 last_value，而不是永遠在 values 後加 0.0。
+
+必要 tests：
+
+- death trajectory 的 terminal mask 為 0，last value 不影響 return。
+- truncated trajectory 使用 final value bootstrap。
+- surviving-to-limit 不會使 Spawner 收到 -2。
+
+P1：改善資料分布與探索
+----------------------
+
+E. 增強 environment randomization
+
+目前 learned spawner 的 jitter 偏小，而且 birth vector 先加 component jitter，再 normalize；若 network 輸出向量 magnitude 很大，+/-0.05 幾乎不會改變角度。
+
+建議改為直接對實際物理量加噪音：
+
+- Birth：對 spawn angle 加角度 jitter，例如 +/-5 至 +/-12 度。
+- Aim：由 +/-2 px 起做 A/B test，可測 +/-4、+/-6 px。
+- Speed：由 0.92-1.08 擴展測試至 scripted 使用的 0.88-1.14。
+- Spawn timing：interval 加約 +/-3% 至 +/-8% jitter。
+- Double spawn：8 秒前也保留很小機率，避免 early episode 完全固定。
+- Initial player position：在中央附近做有限 jitter，但 evaluation 必須分開記錄是否啟用。
+
+Randomization 幅度應記錄在 checkpoint metadata，確保可重現。
+
+F. 建立 frozen opponent pool
+
+目前主要是 live PlayerV4 對 live SpawnerV4，兩邊同時更新造成高度 non-stationary。建議定期 snapshot 歷史 policy，訓練時混合：
+
+Player rollouts 建議起始比例：
+- 40% scripted spawner
+- 30% live SpawnerV4
+- 30% historical frozen SpawnerV4
+
+Spawner rollouts 建議混合：
+- FleeNearestBullet
+- live PlayerV4
+- historical frozen PlayerV4
+
+固定 scripted/flee anchor 可避免兩邊共同走向只對彼此有效的 exploit。歷史 pool 不需很大，可保留最近數個 checkpoint 加少量 best checkpoints。
+
+G. 先 behavior cloning Flee，再做 PPO
+
+PlayerV4 從隨機 policy 開始，在強 spawner 下探索成本很高。可用 FleeNearestBullet 產生 observation/action dataset，先做 supervised behavior cloning，讓 PlayerV4 至少達到接近 flee 的初始能力，再以 PPO 尋找超越 flee 的策略。
+
+BC 完成條件不應只看 action accuracy；還要在固定 scripted seeds 上測 survival。BC 後保留少量 imitation loss 或週期性 anchor batch，可降低 PPO 初期快速遺忘。
+
+P2：改善 reward、Spawner action 與模型穩定性
+--------------------------------------------
+
+H. Player reward 不要只看 nearest-bullet distance
+
+目前 shaped_player_r() 只獎勵與最近子彈的距離。問題包括：
+
+- 最近子彈可能已經飛離 player。
+- 遠離最近子彈可能走向第二顆子彈。
+- 靠近邊界可能暫時增加距離，但降低未來逃生空間。
+
+建議保留 survival +dt 與 death penalty，另外測試 potential-based shaping：
+
+- 依 relative position/velocity 計算 time-to-collision 或 closest approach。
+- 聚合前 3 至 5 個威脅，而非只看最近一顆。
+- 加入 boundary risk，但避免過度獎勵固定待在中央。
+
+每次 reward 修改都應量測 cumulative shaped return 與真實 survival time 的相關性，避免 reward hacking。
+
+I. 移除 Spawner birth action 的無效自由度
+
+SpawnerV4 輸出二維 Gaussian birth vector，但 spawn_continuous() 只使用 normalize 後的方向。向量 magnitude 不影響結果，policy 卻仍要學習它，造成不可識別的自由度與額外 variance。
+
+建議以單一 angle distribution 表示 birth direction，例如 bounded angle parameterization、wrapped normal 或 Von Mises。至少也應對 mean vector 正規化，並監控輸出 magnitude。
+
+J. 修正 empty-bullet attention 路徑
+
+BulletSetEncoder 知道 all-pad attention 可能產生 NaN，但目前仍先呼叫 MultiheadAttention，再以 torch.where 將 output 換成 0。forward output 可能有限，但 backward gradient 未必安全。
+
+建議在 attention 前避免 all-pad key set，例如提供一個固定或 learned null token，或只對非 all-pad rows 呼叫 attention。
+
+必要 test：empty bullet observation 做 forward + backward，確認所有 output 與 parameter gradients 都是 finite。
+
+P3：量測與 checkpoint 管理
+--------------------------
+
+K. 增加 PPO diagnostics
+
+每次 update 至少記錄：
+
+- Player action entropy 與 9 種 action frequency。
+- Spawner birth/aim std、kind entropy 與 kind frequency。
+- approximate KL。
+- clip fraction。
+- ratio mean/min/max。
+- policy loss、value loss、entropy loss。
+- value explained variance。
+- trajectory 長度與 true termination/truncation 比例。
+
+這些指標可以區分：探索不足、PPO ratio 錯誤、value function 失效、或 policy collapse。
+
+L. 保存真正的 best checkpoint
+
+目前 best_vs_scripted 只記錄最佳分數，但每次 evaluation 都覆寫同一個 checkpoint，最後保存的也不是最佳 policy。
+
+建議：
+
+- latest_player.pt / latest_spawner.pt：每次定期覆寫。
+- best_player_scripted.pt：stochastic paired-seed evaluation 改善時保存。
+- best_spawner_flee.pt：對 Flee 的 robust evaluation 改善時保存。
+- snapshot/update_N.pt：供 frozen opponent pool 使用。
+
+Checkpoint metadata 應包含 gamma、lambda、temperature、entropy、randomization 幅度、seed、update、evaluation mode 與 seed set。
+
+M. 評估統計
+
+- 所有 matchup 使用相同 paired seed set，方便公平比較。
+- 同時報 mean、median、standard deviation、min/max。
+- checkpoint selection 使用較大的固定 seed set；日常快速 evaluation 可使用較小 subset。
+- 額外保留 unseen seed set，只做最終比較，避免對 selection seeds 過度調參。
+
+建議實作順序
+------------
+1. 將 temp-p/temp-s 預設改為 1.0，增加 ratio-at-update-start regression test。
+2. 將 eval_pair 拆成 deterministic 與 stochastic 模式，learned spawner robust evaluation 開啟 rng_jitter。
+3. 修正 terminated/truncated 與 final-value bootstrap。
+4. 調整 frame-level gamma/lambda，或加入 action repeat 後重新校準。
+5. 增加 PPO diagnostics 與真正的 best checkpoint。
+6. 加入 Flee behavior cloning。
+7. 加入 frozen opponent pool。
+8. 再調 environment randomization、reward shaping 與 Spawner angle action。
+
+最小 A/B 實驗矩陣
+-----------------
+為避免一次修改太多因素，建議每組使用相同初始化與 paired evaluation seeds：
+
+A. baseline 原始 v4。
+B. temp=1.0，其他不變。
+C. B + gamma=0.9995、lambda=0.999。
+D. C + 正確 truncation bootstrap。
+E. D + stochastic learned-spawner evaluation 與較強 environment randomization。
+F. E + Flee behavior cloning。
+G. F + frozen opponent pool。
+
+主要成功條件：
+
+- PlayerV4 在 unseen scripted seeds 的 mean/median survival 穩定超越 FleeNearestBullet。
+- PlayerV4 對多個 frozen learned spawners 都有改善，不只對 current live spawner。
+- SpawnerV4 對 Flee 與歷史 Player policies 都維持攻擊效果。
+- PPO KL、clip fraction、value explained variance 沒有顯示 collapse。
+
+驗證限制
+--------
+本次檢查環境的系統 python3 沒有安裝 torch 與 pytest，因此未能執行模型 backward test 或現有 Torch tests。已使用純 Python 實測確認 GodotRNG 與 scripted spawner 會隨 seed 改變，並數值確認 gamma=0.99 在 60 Hz 下的有效 horizon 過短。
