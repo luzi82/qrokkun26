@@ -1,0 +1,94 @@
+Qrokkun26 v4 roadmap（2026-09-08）
+=================================
+作者：Software Engineer（Grok Bot）
+共識：User + Code reviewer + SE（納入 GPT 1788797850）
+原則：先算對，再改 baseline diversity。唔改 1788786737_grokbot.txt；本檔為現行 roadmap。
+對照：1788787846_gpt56sol.txt、1788789380_gpt56sol.txt、1788797417_grokbot.txt、1788797850_gpt56sol.txt
+
+狀態摘要
+--------
+- v4.1（已合入）：temp-p/temp-s 預設 1.0 + 基本 P/S ratio≈1 tests。
+- 已知缺口：CLI 仍可設 temp≠1 令 PPO ratio 再爛；ratio test 幾乎只覆蓋空場中央；new×new~70s 多半係右下角 aim exploit。
+- 已否決：把 random start 當下一跳 baseline（會同 correctness A/B 分唔清）。
+
+落地順序
+--------
+v4.2（下一個；本檔定義範圍見下節）
+  封閉 temperature contract + 加強 ratio regression。
+
+v4.3
+  三種 evaluation mode（det+det／det+jitter／sample+jitter，fork_rng）
+  + paired unseen seeds
+  + 四角／邊中點／右下角 probe（closest approach、命中率、首次命中時間）
+  正式 benchmark 仍以 normal reset 為主；new×new 只觀察，唔做唯一 best-ckpt 指標。
+
+v4.4
+  terminated vs truncated + final-value bootstrap（含 Spawner 最後一段 delta）。
+
+v4.5
+  Player/Spawner 分離時間尺度（delta_frames variable discount，或分開 gamma_p/λ_p 與 gamma_s/λ_s）。
+
+v4.6
+  PPO diagnostics + latest/best/snapshot checkpoint 管理（P／S 分開 selection objective）。
+
+v4.7
+  薄層 prepare_initial_state（近中央 random P；空場；pvx/pvy=0）
+  + 明確 mode 分流（見下）
+  + feature flag：random fraction **預設 0**
+  正式開 fraction>0 須待 v4.2–4.6 完成後獨立 A/B。
+  完整 burn-in 仍留 v5 前後，唔入呢一版。
+
+v5+
+  對稱×4（frozen old_log_prob_aug）、Flee BC→PPO、frozen opponent pool、
+  合法 dynamics burn-in、reward／birth DOF／attention 邊角（按 diagnostics）。
+
+────────────────────────────────
+v4.2 範圍（唯一下一個實作切片）
+────────────────────────────────
+目標：令「temp=1 嘅 PPO likelihood contract」喺預設同非預設 CLI 都唔會再靜默壞掉，並令 ratio test 有真實 state coverage。
+
+包含
+----
+1. Temperature 封閉（三選一，建議方案 B）
+   A. 移除 --temp-p／--temp-s
+   B. parse／runtime **拒絕任何 temp≠1.0**（保留 CLI 名但立即報錯）← 建議
+   C. 完整支援 temp≠1（rollout 同 update 用同一套 transformed distribution）
+2. 加強 ratio regression tests
+   - 非空 bullet attention（scripted burn 幾步再 sample）
+   - 不同 Player position／velocity（合法 bounds）
+   - 至少一種多 kind bullet observation
+   - Spawner 非空 obs 路徑
+   - 短 integration：run_episode／Traj packing → update 公式，optimizer 未 step 時 ratio≈1
+3. Parser 可測性：抽出 build_parser()（或等價），直接測 defaults 同 temp≠1 rejection；唔靠 inspect.getsource 字串搜尋。
+4. 文件：AGENT_VERSIONS／短註記明「非 1.0 temp 唔支援／會報錯」。
+
+唔包含（明確踢出 v4.2）
+----------------------
+- 三種 eval mode、四角 probe（→ v4.3）
+- truncate／bootstrap（→ v4.4）
+- delta_frames／分開 gamma（→ v4.5）
+- diagnostics／best ckpt（→ v4.6）
+- prepare_initial_state／random start／P-S batch 分流（→ v4.7，flag 預設 0）
+- burn-in、對稱、BC、opponent pool（→ v5+）
+- 修改 Spawner aim／birth 幾何以修右下角 exploit（probe 先；修 bug 另開）
+
+完成準則
+--------
+- temp≠1 無法啟動長訓練（立即錯誤）。
+- ratio tests 喺非空／多位置狀態同短 episode integration 下通過。
+- 預設路徑行為同而家 temp=1.0 一致（無意外 behavior change）。
+
+v4.7 預告（唔做喺 v4.2）
+-----------------------
+可實作但預設關：
+- reset_mode／fraction metadata
+- modes：self_normal、self_random_player（只訓 P）、p_vs_scripted_normal／random、s_vs_flee_normal
+- S 只用 normal-reset samples；P 可混合
+- 分組 survival metrics + 每 update 有效 S sample 數
+- 正式 eval 仍以 normal reset 為主
+
+刻意不做（全局）
+----------------
+- on-policy PPO historical／disk replay
+- 未完成 P0 就改 baseline diversity 或加長互訓當「進步」
+- 用 new×new 長生存當成功條件（已知角落 exploit）
