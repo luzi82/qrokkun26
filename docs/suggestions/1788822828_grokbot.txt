@@ -1,0 +1,126 @@
+Qrokkun26 v4.3 規格（evaluation modes + corner probe）
+=====================================================
+日期：2026-09-08（HKT）
+作者：Software Engineer（Grok Bot）
+狀態：草案，請 Code reviewer review
+對照 roadmap：docs/suggestions/1788798436_grokbot.txt
+對照 GPT：1788785426、1788787846、1788797850
+前提：v4.2 已合入（62e7ed9：拒絕 temp≠1＋加強 ratio＋build_parser）
+
+背景（夜訓觀察）
+----------------
+v4.2 夜訓（4455 upd，~6.22h）終盤：
+- newP×scripted ~7.7s（仍遠低於 flee~19s）
+- new×new ~4.5s；5-seed demo 全部 4.47s 死亡（deterministic 軌跡仍一樣）
+- flee×newS ~4.9s（S 對 flee 很狠）
+- 早期 log 有大量 new×new=70s（角落 exploit）；最後一次 ≥40s 約 upd 1760；**後期 ~500 upd 無長局 exploit**
+→ v4.3 要分清「真強度」同「exploit／deterministic eval 假象」，唔靠加長訓練。
+
+────────────────────────────────
+v4.3 目標
+────────────────────────────────
+令評估可解釋、可重現、可分辨 policy vs env 隨機性，並用固定幾何 probe 量度 Spawner 瞄準／出生幾何有冇系統性死角（尤其右下角）。
+
+包含
+----
+A. 三種 evaluation mode（互不混淆命名）
+
+1. det_policy + det_env
+   sample_policy=False, rng_jitter=False
+   用途：除錯、純 network regression、檢查 deterministic collapse。
+
+2. det_policy + stoch_env
+   sample_policy=False, rng_jitter=True
+   用途：learned Spawner 下 env seed 真正影響早期生成；robustness／選 ckpt 主指標之一。
+
+3. stoch_policy + stoch_env
+   sample_policy=True, rng_jitter=True
+   每個 episode 用 torch.random.fork_rng() + manual_seed(episode_seed)，唔污染 train Torch RNG。
+   用途：部署分布 sanity（可選，頻率低於 1/2）。
+
+API 建議：
+  eval_pair(..., sample_policy: bool, rng_jitter: bool) → 明確 metrics 名，例如
+  new_vs_new_det_det / new_vs_new_det_stoch / flee_vs_newS_det_stoch …
+
+正式 training-loop 報告至少同時打：
+  - newP vs scripted（det_policy；scripted 本身用 env rng → seed 要 paired）
+  - flee vs newS（mode 2 為主；mode 1 作對照）
+  - new vs new（mode 1 同 mode 2 都記；唔好只用 mode 1 多 seed 當獨立樣本）
+
+B. Paired unseen seeds
+- 固定 seed 表（例如 30 個）跨模式、跨 matchup 共用。
+- 報告 mean／median／std／n；可選分位數。
+- 同一 seed 集合比較 run 之間差異。
+
+C. 四角／邊界 probe（獨立 diagnostic，唔混進一般 seed mean）
+
+固定 Player 位置集合（建議）：
+- 中央
+- 四角（含明確「右下角」）
+- 四邊中點
+共 1+4+4 = 9 點（可再加 ±margin 微擾一組，但 v4.3 最小集用 9）。
+
+對每個位置：
+- 凍結或分層 Spawner：deterministic policy（mean／argmax）為主；可選一輪 stoch_env jitter。
+- 記錄：
+  1. 首次命中時間（或 timeout）
+  2. 命中率（多 trial／多 spawn steps）
+  3. bullet 對 Player 嘅 closest approach（min distance over episode）
+  4. Spawner birth／aim 輸出統計（birth 方向、aim offset 相對 Player）
+- 分辨：policy exploit vs AIM_SCALE／tanh 飽和 vs birth ray 幾何／normalization bug。
+- 輸出獨立 JSON／表，例如 runs/both_v4_corner_probe.json；唔併入 new×new mean。
+
+D. Checkpoint／指標契約（輕量，完整 best-ckpt 管理仍屬 v4.6）
+- 明文：new×new **唔做**唯一 selection metric。
+- 建議暫時：
+  - Player 觀察：newP vs scripted（paired，mode 清楚標註）
+  - Spawner 觀察：flee vs newS（prefer det_policy+stoch_env）
+- latest ckpt 照舊存；唔強制改 best 邏輯（留給 v4.6），但 log／docs 寫明。
+
+E. Tests
+1. eval_pair 三種 flag 組合行為：jitter True 時 early frames 消耗 env.rng（learned S）；False 時 8s 前可不耗（若 double-spawn 規則仍如此）——對齊既有結論寫 regression。
+2. sample_policy=True 時 fork_rng：呼叫前後 global torch RNG state 不變。
+3. 同一 (seed, mode) 可重現；不同 seed 喺 mode 2 下 flee/newS 或 newP/scripted 有可見差異（唔要求 new×new mode 1 有差異）。
+4. Corner probe：9 個位置都喺 bounds；右下角 case 必跑；輸出 schema 穩定。
+5. Normal reset eval 路徑同舊行為兼容（mode 1 對 scripted／既有呼叫點）。
+
+F. Docs
+- 更新 docs/AGENT_VERSIONS.md：eval mode 名、probe 入口。
+- 新檔可選 docs/EVAL_MODES.md 短說明（若嫌 AGENT_VERSIONS 太長可只加一節）。
+
+唔包含（踢出 v4.3）
+------------------
+- terminated／truncated bootstrap → v4.4
+- delta_frames／分開 gamma → v4.5
+- 完整 diagnostics／best／snapshot 管理 → v4.6
+- prepare_initial_state／random start → v4.7
+- 對稱、BC、pool、burn-in → v5+
+- **修改** Spawner aim／birth 架構以「修」右下角（probe 先；修 bug 另開 ticket／版本）
+- 改 reward、加長預設訓練、replay buffer
+
+實作落點（建議）
+----------------
+- qrokkun_env/train/both_v4.py：eval_pair 參數化；training 週期報告三模式子集
+- 新 helper：qrokkun_env/eval_modes.py 或 train/eval_v4.py（純函式，方便測）
+- 新：qrokkun_env/corner_probe.py + CLI／train 內可選 --corner-probe
+- render_v4_demo：可選 mode flags（唔迫使每次 render 都 stochastic）
+- tests：test_eval_modes.py、test_corner_probe.py
+
+完成準則
+--------
+1. 訓練／手動腳本可跑三種 mode，metrics 名唔會撞。
+2. 用而家 both_v4 ckpt 跑一次：mode 1 下 new×new 多 seed 可能仍一樣；mode 2 下 flee×newS 或 probe 有 seed 差異——寫進報告。
+3. Corner probe 表清楚顯示右下角相對其他角嘅 closest approach／命中差異（有或無都算完成；目的係量度）。
+4. 相關 unit tests 綠。
+5. 唔改預設訓練 loss／temp 契約（維持 v4.2）。
+
+建議實作順序（v4.3 內部）
+------------------------
+1. 抽出／參數化 eval_pair + fork_rng 測試
+2. 接上 training status／compare JSON 欄位（向後兼容：舊欄位保留，新欄位加後綴）
+3. Corner probe 腳本 + 對現有 ckpt 跑一版 baseline 表
+4. Docs + CR 複檢
+
+下一步（v4.3 之後）
+------------------
+v4.4 truncate／bootstrap；若 probe 證實幾何 bug，另開「aim／birth fix」唔塞入 v4.3。
