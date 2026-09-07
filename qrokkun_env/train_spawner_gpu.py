@@ -105,7 +105,8 @@ def ppo_update(net, opt, trajs, device, clip, epochs, minibatch, entropy_coef, v
 @torch.no_grad()
 def player_act(player: PlayerAC, env: Qrokkun26Env, device: torch.device) -> int:
     x = torch.tensor(vectorize(env), dtype=torch.float32, device=device)
-    return int(player(x).probs.argmax().item())
+    dist, _value = player(x)
+    return int(dist.probs.argmax().item())
 
 
 def run_episode(

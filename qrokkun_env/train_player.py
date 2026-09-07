@@ -25,7 +25,7 @@ from qrokkun_env.sanity import run_episode
 PlayerMLP = PlayerV0
 
 
-
+@dataclass
 class Rollout:
     log_probs: list[torch.Tensor]
     rewards: list[float]
