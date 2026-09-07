@@ -119,8 +119,14 @@ def act_player(net, env, device, sample: bool, temp: float = 1.0):
 
 @torch.no_grad()
 def act_spawner(net, env, device, sample: bool, temp: float = 1.0):
+    from torch.distributions import Categorical, Normal
     pt, bt, mt, p, b, m = _pack_obs(env, device)
     birth, aim, kind, value = net(pt.unsqueeze(0), bt.unsqueeze(0), mt.unsqueeze(0))
+    # Temperature scales continuous exploration std and kind logits.
+    t = max(float(temp), 1e-6)
+    birth = Normal(birth.mean, birth.stddev * t)
+    aim = Normal(aim.mean, aim.stddev * t)
+    kind = Categorical(logits=kind.logits / t)
     if sample:
         bv = birth.sample()
         av = aim.sample()

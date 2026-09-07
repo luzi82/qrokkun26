@@ -115,7 +115,7 @@ class SpawnerV4(nn.Module):
         self, player: torch.Tensor, bullets: torch.Tensor, pad_mask: torch.Tensor
     ) -> tuple[Normal, Normal, Categorical, torch.Tensor]:
         h = self.body(self.encoder(player, bullets, pad_mask))
-        std = self.log_std.exp().expand(h.shape[0], -1)
+        std = self.log_std.clamp(-3.0, 1.0).exp().expand(h.shape[0], -1)
         birth = Normal(self.birth_mean(h), std[:, 0:2])
         aim = Normal(self.aim_mean(h), std[:, 2:4])
         kind = Categorical(logits=self.kind(h))
