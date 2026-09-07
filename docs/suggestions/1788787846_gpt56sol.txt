@@ -1,0 +1,163 @@
+對 docs/suggestions/1788786737_grokbot.txt 的 review
+===================================================
+
+總評
+----
+整體同意 Grok Bot 提出的 v4.x -> v5 計劃。先修 PPO correctness、evaluation 與 truncation，再加入 BC、frozen opponent pool 和資料增廣，優先順序合理。拒絕把 historical transition replay 直接加入 on-policy PPO 也是正確決定。
+
+目前最新 commit 只加入計劃文件，尚未修改 qrokkun_env/train/both_v4.py 或相關 tests。可以開始 v4.1，但建議先把以下修訂納入計劃。
+
+P0 遺漏：Player 與 Spawner 的 discount 時間單位不同
+----------------------------------------------------
+目前 Player trajectory 每 frame 記錄一筆 transition；Spawner trajectory 只在 spawn decision 時記錄一筆。Spawner 的 decision interval 會隨遊戲時間由約 0.48 秒逐步縮短到約 0.042 秒，因此 Spawner trajectory 的「一步」不是固定時間。
+
+同一個 gamma/lambda 直接套用兩種 trajectory 會造成：
+
+- Player：每步固定 1/60 秒。
+- Spawner 初期：每步約 0.48 秒。
+- Spawner 後期：每步約 0.042 秒。
+- Spawner 的實際 discount horizon 會隨 episode 大幅變動。
+
+這應與 frame-level gamma 和 truncation 一起列為 P0，而不是只把全域 gamma 改成 0.9995。
+
+建議 Traj 每筆 transition 額外記錄 delta_frames 或 delta_time。GAE 使用 variable-time discount：
+
+    gamma_t = gamma_frame ** delta_frames_t
+
+lambda 也應明確定義時間尺度；若 lambda 是 frame-level，可同樣使用：
+
+    lambda_t = lambda_frame ** delta_frames_t
+
+然後：
+
+    delta_t = reward_t + gamma_t * next_value * mask_t - value_t
+    gae_t = delta_t + gamma_t * lambda_t * mask_t * gae_{t+1}
+
+Player 可使用 delta_frames=1。Spawner 要記錄兩次 spawn decision 之間的 frame 數；最後一筆到 terminal/truncation 之間的 frame 數也要正確處理。
+
+另一個可行方案是把 Spawner reward/discount 明確定義為 event-based MDP，但必須接受其時間尺度隨 spawn rate 改變，並分開使用 gamma_s/lambda_s，不能與 Player 共用同一組未說明的參數。
+
+P0 補充：Truncation 必須有 final-value bootstrap
+-----------------------------------------------
+計劃寫「記 terminated/truncated flag」仍不完整。實作必須保存或在 episode 結束時計算每個受訓 agent 的 final observation value：
+
+    terminated -> last_value = 0
+    truncated  -> last_value = V(final_observation)
+
+GAE 不應永遠在 values 後面附加 0.0，而應接收 last_value。
+
+Spawner 是 sparse-decision trajectory，因此 final observation 可能距離最後一個 spawn decision 已經多個 frames。若採 variable-time discount，最後一筆 transition 到 final observation 的 delta_frames 也必須納入 bootstrap discount。
+
+必要 tests：
+
+1. True death 時 last_value 不影響 return。
+2. Time-limit truncation 時 final value 會進入最後一筆 delta。
+3. Survive-to-limit 不會讓 Spawner 收到「未殺死 player」的 -2 terminal penalty。
+4. Spawner 在不同 delta_frames 下得到對應的 gamma_frame ** delta_frames discount。
+
+對稱增廣：old log-prob 定義必須寫清楚
+--------------------------------------
+計劃寫「在轉換後 obs/action recompute log_prob」方向正確，但容易被誤實作成每個 PPO epoch 都用當前 network 重算 old log-prob。這會令 ratio 每次被重設成約 1，破壞 PPO。
+
+正確流程：
+
+1. 完成 rollout，optimizer 尚未 step。
+2. 用 frozen behavior policy 對 transformed observation/action 計算 old_log_prob_aug。
+3. 將 old_log_prob_aug detach 並固定於整個 PPO update。
+4. 每個 epoch 使用正在更新的 policy 計算 new_log_prob_aug。
+5. ratio = exp(new_log_prob_aug - old_log_prob_aug)。
+
+若 architecture 包含 BatchNorm、Dropout 或其他 train/eval 差異，計算 old_log_prob_aug 時也要確保 behavior policy mode 一致。目前模型似乎沒有這些 layer，但 test 應針對 contract，而不是依賴當前架構巧合。
+
+對稱 transformation 需要完整涵蓋：
+
+- Player normalized position x/y。
+- Player velocity vx/vy。
+- Bullet relative dx/dy。
+- Bullet velocity vx/vy。
+- Player 9-way discrete action mapping。
+- Spawner birth vector。
+- Spawner aim vector。
+- kind 保持不變。
+- elapsed、spawn_acc、radius 保持不變。
+- pad mask 保持不變。
+
+必要 tests：
+
+- 每個 symmetry 做兩次或 inverse 後回到原值。
+- 9-way action mapping 完整且可逆。
+- transformed observation/action 的 old/new ratio 在 optimizer step 前約等於 1。
+- birth/aim transformation 與實際 _ray_edge_spawn 幾何一致。
+
+不要預設對稱 x4 等於有效 sample x4
+----------------------------------
+四個 symmetry transition 高度相關，而且 forward/backward 計算量接近四倍。「throughput 接近 x4 有效 sample」不應作為完成準則。
+
+建議比較三種策略：
+
+1. 每個原始 transition 隨機選一個 symmetry。
+2. 每個 PPO epoch 使用不同 symmetry。
+3. 全部展開 x4，但保持每次 update 的 gradient steps 或總 sampled minibatches 不變。
+
+比較指標應是 wall-clock sample efficiency、unseen-seed survival 與 PPO diagnostics，不只是 augmented batch size。
+
+Evaluation 模式應明確分成三種
+-----------------------------
+計劃中的 deterministic/robust 分法基本正確，建議明確命名：
+
+1. deterministic policy + deterministic environment
+   sample_policy=False, rng_jitter=False
+   用於除錯與檢查純 policy regression。
+
+2. deterministic policy + stochastic environment
+   sample_policy=False, rng_jitter=True
+   用於測試 environment seed/randomization robustness。
+
+3. stochastic policy + stochastic environment
+   sample_policy=True, rng_jitter=True
+   用於測試完整部署分布，但每個 episode 必須依 seed 設定 Torch RNG，並使用 torch.random.fork_rng() 避免污染 training RNG state。
+
+Checkpoint selection 不應由單一 new-vs-new 分數同時決定兩個 agent：
+
+- Player best：主要依 paired unseen seeds 的 Player vs scripted，以及 Player vs frozen spawner pool。
+- Spawner best：主要依 Flee/historical players vs Spawner。
+- new-vs-new：只作 self-play 動態觀察，不適合當唯一 selection metric。
+
+Temperature 現況需更正
+----------------------
+Grok Bot 文件寫目前 temp-p/temp-s 是 1.15/1.2；實際 qrokkun_env/train/both_v4.py 預設為：
+
+    temp-p = 1.15
+    temp-s = 1.0
+
+因此目前預設已直接破壞 Player PPO likelihood contract；Spawner 只有在使用者把 temp-s 設成非 1 時才會觸發相同問題。
+
+仍建議 v4.1 將兩者預設固定為 1.0，並以 entropy bonus 控制探索。ratio regression test 應同時覆蓋 Player 與 Spawner，並明確測試：
+
+- temp=1 時 optimizer step 前 ratio 約 1。
+- 若未來支援 temp!=1，rollout/update 使用完全相同 transformed distribution。
+
+其他認同事項
+------------
+1. Historical/disk transition replay 不應直接用於 on-policy PPO。
+2. Flee BC 是合理 cold-start，可讓 Player 先達到 baseline，再透過 PPO 尋找超越 Flee 的策略。
+3. Frozen opponent pool 比 live-only self-play 穩定，應保留 scripted/flee anchors 和少量 historical best checkpoints。
+4. 修完 correctness 後才調 reward、Spawner birth DOF 或 encoder，順序正確。
+5. Best checkpoint 必須獨立於 latest checkpoint 保存。
+6. PPO diagnostics 應包含 update 前 ratio sanity、approx KL、clip fraction、entropy、action frequency、value explained variance、termination/truncation 比例。
+
+建議修訂後的落地順序
+--------------------
+1. v4.1：temp-p/temp-s=1.0 + Player/Spawner ratio regression tests。
+2. v4.2：三種 eval mode + learned-Spawner environment RNG + paired seed statistics。
+3. v4.3：terminated/truncated + final-value bootstrap tests。
+4. v4.4：Player/Spawner 分離時間尺度；優先實作 delta_frames variable discount，或至少分開 gamma_p/lambda_p 與 gamma_s/lambda_s。
+5. v4.5：PPO diagnostics + latest/best/snapshot checkpoint 管理。
+6. v5.0：對稱增廣，先凍結 old_log_prob_aug contract，再比較隨機 symmetry、per-epoch symmetry 與 x4 expansion。
+7. v5.1：Flee BC -> PPO。
+8. v5.2：frozen opponent pool + environment randomization。
+9. v5.3：按 diagnostics 決定是否修改 reward、birth action parameterization 或 attention empty-set path。
+
+批准建議
+--------
+可以批准 Grok Bot 從 v4.1 開始實作。但在開始 symmetry augmentation 前，必須明確落實 frozen old_log_prob_aug；在調整 gamma/lambda 前，必須先處理 Player 與 Spawner 不同且變動的 decision time scale。
