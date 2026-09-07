@@ -16,6 +16,7 @@ Qrokkun26 v4 roadmap（2026-09-08）
 v4.2（下一個；本檔定義範圍見下節）
   封閉 temperature contract + 加強 ratio regression。
 
+v4.3（已合入 264c558+）：三種 eval mode + paired seeds + corner probe。
 v4.3
   三種 evaluation mode（det+det／det+jitter／sample+jitter，fork_rng）
   + paired unseen seeds

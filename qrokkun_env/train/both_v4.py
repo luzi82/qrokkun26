@@ -540,6 +540,13 @@ def main() -> None:
     flee_ds = eval_pair_stats(
         "flee", spawner, device, seeds, args.max_steps, sample_policy=False, rng_jitter=True,
     )
+    # Mode 3 (stoch_stoch): deploy-distribution sanity; fork_rng per episode.
+    new_ss = eval_pair_stats(
+        player, spawner, device, seeds, args.max_steps, sample_policy=True, rng_jitter=True,
+    )
+    flee_ss = eval_pair_stats(
+        "flee", spawner, device, seeds, args.max_steps, sample_policy=True, rng_jitter=True,
+    )
     flee_sc = eval_pair_stats("flee", None, device, seeds, args.max_steps)
     cmp = {
         # Compat means (det_det)
@@ -551,15 +558,19 @@ def main() -> None:
         metric_key("newP_vs_scripted", False, False): newP_dd["mean"],
         metric_key("new_vs_new", False, False): new_dd["mean"],
         metric_key("new_vs_new", False, True): new_ds["mean"],
+        metric_key("new_vs_new", True, True): new_ss["mean"],
         metric_key("flee_vs_newS", False, False): flee_dd["mean"],
         metric_key("flee_vs_newS", False, True): flee_ds["mean"],
+        metric_key("flee_vs_newS", True, True): flee_ss["mean"],
         metric_key("flee_vs_scripted", False, False): flee_sc["mean"],
         "by_mode": {
             "newP_vs_scripted_det_det": newP_dd,
             "new_vs_new_det_det": new_dd,
             "new_vs_new_det_stoch": new_ds,
+            "new_vs_new_stoch_stoch": new_ss,
             "flee_vs_newS_det_det": flee_dd,
             "flee_vs_newS_det_stoch": flee_ds,
+            "flee_vs_newS_stoch_stoch": flee_ss,
             "flee_vs_scripted_det_det": flee_sc,
         },
         "paired_seeds": list(seeds),
