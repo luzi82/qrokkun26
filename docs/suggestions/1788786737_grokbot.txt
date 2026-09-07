@@ -130,3 +130,44 @@ v5 完成準則
 下一步（等人確認）
 ------------------
 預設由 **v4.1（temp＋ratio test）** 開工；確認後開 PR／喺 GB10 短 A/B。
+
+────────────────────────────────
+Amend 2026-09-07 (GPT 1788787846)
+────────────────────────────────
+納入 docs/suggestions/1788787846_gpt56sol.txt 嘅 review 修訂（唔改本檔上文歷史敘述，只追加共識）：
+
+1. 修訂落地順序：v4.1→v4.5 然後先開 v5
+   - v4.1：temp-p/temp-s=1.0 + Player/Spawner ratio regression
+   - v4.2：三種 eval mode + learned-S RNG + paired seed stats
+   - v4.3：terminated/truncated + final-value bootstrap
+   - v4.4：Player/Spawner 分離時間尺度（優先 delta_frames variable discount，或至少分開 gamma_p/λ_p 與 gamma_s/λ_s）
+   - v4.5：PPO diagnostics + latest/best/snapshot checkpoint 管理
+   - 之後先 v5.0 對稱增廣，再 BC／pool／randomization
+
+2. Temperature 現況更正
+   - 上文寫「而家 1.15／1.2」有誤；實際 both_v4.py 預設係 temp-p=1.15、temp-s=1.0。
+   - v4.1 仍將兩者預設固定 1.0；探索靠 sampling + entropy，唔靠 temp≠1。
+
+3. v4.4 時間尺度（P0 遺漏）
+   - Player 每 frame 一筆；Spawner 只喺 spawn decision 記一筆，interval 由 ~0.48s 縮到 ~0.042s。
+   - 同一組未說明嘅 gamma/lambda 套兩種 trajectory 會令 Spawner horizon 隨 episode 飄。
+   - Traj 應記 delta_frames／delta_time；GAE 用 gamma_t = gamma_frame ** delta_frames（lambda 同樣定義時間尺度）。
+   - 或者把 Spawner 明確當 event-based MDP，並分開 gamma_s/lambda_s。
+
+4. Truncation：final-value bootstrap 要寫清
+   - 唔只記 terminated／truncated flag。
+   - terminated → last_value = 0；truncated → last_value = V(final_obs)。
+   - GAE 接收 last_value，唔好永遠喺 values 後加 0.0。
+   - Spawner sparse decision：最後一筆到 final obs 嘅 delta_frames 都要納入 bootstrap discount。
+
+5. 對稱增廣：frozen behavior-policy old_log_prob_aug
+   - Rollout 完、optimizer 未 step 時，用凍結 behavior policy 對 transformed obs/action 計 old_log_prob_aug，detach 一次並固定成個 PPO update。
+   - 每個 epoch 只用正在更新嘅 policy 計 new_log_prob_aug；ratio = exp(new - old)。
+   - 禁止每個 epoch 用當前 network 重算 old（會令 ratio 被重設成 ~1）。
+   - 唔好宣稱「對稱×4 = 有效 sample×4」；四個 symmetry 高度相關。比較：隨機選一個／每 epoch 換一個／全展開但保持 gradient steps 不變；指標用 wall-clock sample efficiency、unseen-seed survival、PPO diagnostics。
+
+6. 三種 eval mode（明確命名）
+   - deterministic policy + deterministic env：sample=False, jitter=False（除錯／純 policy）
+   - deterministic policy + stochastic env：sample=False, jitter=True（env robustness／選 ckpt）
+   - stochastic policy + stochastic env：sample=True, jitter=True（部署分布；fork_rng 包住 episode）
+   - Player／Spawner best 用 paired／pool 指標；new×new 只作 self-play 觀察，唔做唯一 selection metric。

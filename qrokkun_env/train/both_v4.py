@@ -325,8 +325,18 @@ def main() -> None:
     ap.add_argument("--log", type=Path, default=Path("runs/both_v4.jsonl"))
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--rollouts", type=int, default=16)
-    ap.add_argument("--temp-p", type=float, default=1.15)
-    ap.add_argument("--temp-s", type=float, default=1.0)
+    ap.add_argument(
+        "--temp-p",
+        type=float,
+        default=1.0,
+        help="Player action temperature (default 1.0). Exploration uses sampling+entropy, not temp!=1.",
+    )
+    ap.add_argument(
+        "--temp-s",
+        type=float,
+        default=1.0,
+        help="Spawner action temperature (default 1.0). Exploration uses sampling+entropy, not temp!=1.",
+    )
     ap.add_argument("--entropy-p", type=float, default=0.04)
     ap.add_argument("--entropy-s", type=float, default=0.02)
     ap.add_argument("--lr", type=float, default=2.5e-4)
