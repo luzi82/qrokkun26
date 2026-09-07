@@ -10,7 +10,7 @@ Canonical under `qrokkun_env/agents/`.
 | v1 | `agents/player_v1.py` | `agents/spawner_v1.py` |
 | v2 | `agents/player_v2.py` | `agents/spawner_v2.py` |
 | v3 | `agents/player_v3.py` | `agents/spawner_v3.py` |
-| v4 | *(planned)* | *(planned)* |
+| v4 | `agents/player_v4.py` | `agents/spawner_v4.py` |
 
 ## Training loops
 
@@ -25,5 +25,6 @@ Canonical under `qrokkun_env/train/`. Top-level `train_*.py` files are **back-co
 | v1 both | `train/both_v1.py` | `train_both_gpu.py` |
 | v2 both | `train/both_v2.py` | `train_both_v2_gpu.py` |
 | v3 both | `train/both_v3.py` | `train_both_v3_gpu.py` |
+| v4 both | `train/both_v4.py` | `train_both_v4_gpu.py` |
 
 Train loops must alias agent classes (`PlayerAC = PlayerV3`, etc.), not redefine nets.

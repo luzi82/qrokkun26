@@ -1,7 +1,4 @@
-"""Versioned player/spawner agent modules (networks + obs/action helpers).
-
-Training loops stay in qrokkun_env/train_*.py and import from here.
-"""
+"""Versioned player/spawner agent modules (networks + obs/action helpers)."""
 
 from __future__ import annotations
 
@@ -13,4 +10,6 @@ __all__ = [
     "spawner_v2",
     "player_v3",
     "spawner_v3",
+    "player_v4",
+    "spawner_v4",
 ]
