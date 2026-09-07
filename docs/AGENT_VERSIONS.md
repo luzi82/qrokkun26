@@ -27,4 +27,4 @@ Canonical under `qrokkun_env/train/`. Top-level `train_*.py` files are **back-co
 | v3 both | `train/both_v3.py` | `train_both_v3_gpu.py` |
 | v4 both | `train/both_v4.py` | `train_both_v4_gpu.py` |
 
-Train loops must alias agent classes (`PlayerAC = PlayerV3`, etc.), not redefine nets.
+Train loops must alias agent classes (e.g. `PlayerAC = PlayerV4` / `SpawnerAC = SpawnerV4`), not redefine nets.

@@ -43,7 +43,9 @@ def test_aim_tanh_scale_bound() -> None:
 
 def test_act_spawner_temp_changes_std() -> None:
     import torch
+    from torch.distributions import Normal
     from qrokkun_env.agents.spawner_v4 import SpawnerV4
+    from qrokkun_env.agents.obs_v4 import encode_obs
     from qrokkun_env.train.both_v4 import act_spawner
     from qrokkun_env.env import Qrokkun26Env
 
@@ -51,10 +53,17 @@ def test_act_spawner_temp_changes_std() -> None:
     net = SpawnerV4(d_model=32, hidden=64)
     env = Qrokkun26Env(seed=0)
     env.reset()
-    # Compare log-prob under different temps by checking std scaling path doesn't crash
-    # and sampling with high temp still returns valid action dict.
-    a1, lp1, _, _, _, _ = act_spawner(net, env, torch.device("cpu"), sample=True, temp=1.0)
-    a2, lp2, _, _, _, _ = act_spawner(net, env, torch.device("cpu"), sample=True, temp=2.0)
+    p, b, m = encode_obs(env)
+    birth, aim, kind, _v = net(
+        torch.tensor(p).unsqueeze(0),
+        torch.tensor(b).unsqueeze(0),
+        torch.tensor(m).unsqueeze(0),
+    )
+    std1 = float(birth.stddev.mean().detach())
+    std2 = float(Normal(birth.mean, birth.stddev * 2.0).stddev.mean().detach())
+    assert std2 == std1 * 2.0
+    a1, _, _, _, _, _ = act_spawner(net, env, torch.device("cpu"), sample=True, temp=1.0)
+    a2, _, _, _, _, _ = act_spawner(net, env, torch.device("cpu"), sample=True, temp=2.0)
     assert "birth" in a1 and "aim" in a1 and "kind" in a1
     assert 0 <= a2["kind"] < 4
 
