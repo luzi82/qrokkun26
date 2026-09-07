@@ -1,3 +1,5 @@
+"""Canonical nets: agents.player_v1 + agents.spawner_v1"""
+
 #!/usr/bin/env python3
 """Train spawner PPO vs a frozen player policy (GB10)."""
 

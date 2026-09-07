@@ -1,3 +1,5 @@
+"""Canonical net: qrokkun_env.agents.player_v0"""
+
 #!/usr/bin/env python3
 """Train a tiny player MLP vs the scripted spawner (CPU-friendly REINFORCE)."""
 

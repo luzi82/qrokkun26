@@ -1,3 +1,5 @@
+"""Canonical net: qrokkun_env.agents.player_v1"""
+
 #!/usr/bin/env python3
 """GPU player training: flee BC pretrain + PPO vs scripted spawner."""
 

@@ -1,3 +1,5 @@
+"""Canonical net: qrokkun_env.agents.player_v1 (long AC run)"""
+
 #!/usr/bin/env python3
 """Time-boxed CPU training: tiny actor-critic vs scripted spawner.
 

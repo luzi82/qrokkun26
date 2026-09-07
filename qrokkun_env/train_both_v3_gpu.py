@@ -21,6 +21,8 @@ from qrokkun_env.env import ACTIONS, ACTION_TO_DIR, Bullet, Qrokkun26Env, _bulle
 from qrokkun_env.godot_rng import f32
 from qrokkun_env.obs_rich import OBS_DIM_RICH, vectorize_rich
 from qrokkun_env.policies import FleeNearestBullet
+from qrokkun_env.agents.player_v3 import PlayerV3
+from qrokkun_env.agents.spawner_v3 import SpawnerV3, SPAWNER_ACTIONS as _SA_V3, spawn_from_action as _spawn_v3, decode_spawner as _dec_v3
 
 # edge(4) * along(8) * aim(9) * kind(4)
 N_EDGE, N_ALONG, N_AIM, N_KIND = 4, 8, 9, 4

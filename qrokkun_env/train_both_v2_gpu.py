@@ -1,3 +1,5 @@
+"""Canonical nets: agents.player_v2 + agents.spawner_v2"""
+
 #!/usr/bin/env python3
 """train-both v2: diversity (RNG+pool+entropy), spawner chooses bullet kind. No early-kill penalty."""
 
