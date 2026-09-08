@@ -3,6 +3,9 @@
 
 Canonical nets: agents.player_v4 + agents.spawner_v4.
 No offline replay; diversity via sample/entropy, env jitter, flee/scripted pool.
+
+v4.4: terminated vs truncated + final-value bootstrap (last_value into GAE).
+v4.5: per-transition delta_frames; gamma_t = gamma_frame ** delta_frames.
 """
 
 from __future__ import annotations
@@ -41,16 +44,51 @@ class Traj:
     log_probs: list = field(default_factory=list)
     rewards: list = field(default_factory=list)
     values: list = field(default_factory=list)
-    dones: list = field(default_factory=list)
+    # v4.4: true death only (truncation keeps False so GAE can bootstrap)
+    terminateds: list = field(default_factory=list)
+    # v4.5: frames until next decision / episode end (Player usually 1)
+    delta_frames: list = field(default_factory=list)
+    last_value: float = 0.0  # v4.4: 0 if terminated else V(final_obs)
+    terminated: bool = False
+    truncated: bool = False
 
 
-def gae(rewards, values, dones, gamma, lam, device):
-    vals = [float(v) for v in values] + [0.0]
+def gae(
+    rewards,
+    values,
+    terminateds,
+    gamma,
+    lam,
+    device,
+    *,
+    last_value: float = 0.0,
+    delta_frames=None,
+):
+    """GAE with optional final-value bootstrap and variable-time discount.
+
+    gamma / lam are **per-frame**. For each step t:
+      gamma_t = gamma ** delta_frames_t
+      lambda_t = lam ** delta_frames_t
+    terminateds[t] True → no bootstrap through that step (true death).
+    Truncation: terminateds[-1]=False and last_value=V(final_obs).
+    """
+    n = len(rewards)
+    if delta_frames is None:
+        dfs = [1] * n
+    else:
+        dfs = [max(int(d), 0) for d in delta_frames]
+        if len(dfs) != n:
+            raise ValueError(f"delta_frames length {len(dfs)} != rewards length {n}")
+    if len(terminateds) != n:
+        raise ValueError(f"terminateds length {len(terminateds)} != rewards length {n}")
+    vals = [float(v) for v in values] + [float(last_value)]
     adv, gae_v = [], 0.0
-    for t in reversed(range(len(rewards))):
-        mask = 0.0 if dones[t] else 1.0
-        delta = rewards[t] + gamma * vals[t + 1] * mask - vals[t]
-        gae_v = delta + gamma * lam * mask * gae_v
+    for t in reversed(range(n)):
+        mask = 0.0 if terminateds[t] else 1.0
+        g_t = gamma ** dfs[t]
+        l_t = lam ** dfs[t]
+        delta = rewards[t] + g_t * vals[t + 1] * mask - vals[t]
+        gae_v = delta + g_t * l_t * mask * gae_v
         adv.append(gae_v)
     adv.reverse()
     adv_t = torch.tensor(adv, dtype=torch.float32, device=device)
@@ -68,15 +106,14 @@ def shaped_player_r(env: Qrokkun26Env, done: bool) -> float:
     return r
 
 
-def shaped_spawner_r(env: Qrokkun26Env, done: bool, is_spawn: bool) -> float:
+def shaped_spawner_r(env: Qrokkun26Env, terminated: bool, is_spawn: bool) -> float:
+    """Spawner shaping. Terminal +5 only on true death — never on time-limit truncation."""
     r = -0.02 if is_spawn else 0.0
     if env.bullets:
         d2 = min((b.x - env.px) ** 2 + (b.y - env.py) ** 2 for b in env.bullets)
         r += 0.01 * (1.0 - min(math.sqrt(d2) / 100.0, 1.0))
-    if done and env.dead:
+    if terminated and env.dead:
         r += 5.0
-    elif done and not env.dead:
-        r -= 2.0
     return r
 
 
@@ -144,12 +181,66 @@ def act_spawner(net, env, device, sample: bool, temp: float = 1.0):
     return action, float(lp.item()), float(value.item()), p, b, m
 
 
+@torch.no_grad()
+def player_value(net, env, device) -> float:
+    pt, bt, mt, _, _, _ = _pack_obs(env, device)
+    _dist, value = net(pt.unsqueeze(0), bt.unsqueeze(0), mt.unsqueeze(0))
+    return float(value.item())
+
+
+@torch.no_grad()
+def spawner_value(net, env, device) -> float:
+    pt, bt, mt, _, _, _ = _pack_obs(env, device)
+    _birth, _aim, _kind, value = net(pt.unsqueeze(0), bt.unsqueeze(0), mt.unsqueeze(0))
+    return float(value.item())
+
+
+def _finalize_player_end(ptraj: Traj, env, player, device, *, terminated: bool) -> None:
+    if not ptraj.rewards:
+        return
+    if terminated:
+        ptraj.terminateds[-1] = True
+        ptraj.terminated = True
+        ptraj.truncated = False
+        ptraj.last_value = 0.0
+    else:
+        ptraj.terminateds[-1] = False
+        ptraj.terminated = False
+        ptraj.truncated = True
+        if player not in (None, "flee"):
+            ptraj.last_value = player_value(player, env, device)
+        else:
+            ptraj.last_value = 0.0
+
+
+def _finalize_spawner_end(straj: Traj, env, spawner, device, *, terminated: bool, frames_since_spawn: int) -> None:
+    if not straj.rewards:
+        return
+    straj.delta_frames[-1] = max(int(frames_since_spawn), 0)
+    if terminated:
+        straj.rewards[-1] += shaped_spawner_r(env, True, False)
+        straj.terminateds[-1] = True
+        straj.terminated = True
+        straj.truncated = False
+        straj.last_value = 0.0
+    else:
+        # Time-limit: bootstrap V(final); do NOT apply fail-to-kill penalty.
+        straj.terminateds[-1] = False
+        straj.terminated = False
+        straj.truncated = True
+        if spawner is not None:
+            straj.last_value = spawner_value(spawner, env, device)
+        else:
+            straj.last_value = 0.0
+
+
 def run_episode(
     env, player, spawner, device, max_steps, *, sample, train_player, train_spawner, temp_p, temp_s, rng_jitter
 ):
     ptraj, straj = Traj(), Traj()
     env.reset()
     flee = FleeNearestBullet() if player == "flee" else None
+    frames_since_spawn = 0
 
     for _ in range(max_steps):
         if spawner is None:
@@ -162,12 +253,13 @@ def run_episode(
             if train_player:
                 ptraj.player.append(p); ptraj.bullets.append(b); ptraj.pad.append(m)
                 ptraj.actions.append(a); ptraj.log_probs.append(lp); ptraj.values.append(v)
-                ptraj.rewards.append(0.0); ptraj.dones.append(False)
+                ptraj.rewards.append(0.0); ptraj.terminateds.append(False); ptraj.delta_frames.append(1)
             _o, _r, done, _ = env.step(a)
             if train_player and ptraj.rewards:
                 ptraj.rewards[-1] = shaped_player_r(env, done)
-                ptraj.dones[-1] = done
             if done:
+                if train_player:
+                    _finalize_player_end(ptraj, env, player, device, terminated=True)
                 return ptraj, straj, env.elapsed
             continue
 
@@ -181,9 +273,14 @@ def run_episode(
             spawn_continuous(env, act["birth"], act["aim"], act["kind"], rng_jitter=rng_jitter)
             spawns += 1
             if train_spawner:
+                if straj.rewards:
+                    straj.delta_frames[-1] = frames_since_spawn
                 straj.player.append(p); straj.bullets.append(b); straj.pad.append(m)
                 straj.actions.append(act); straj.log_probs.append(lp); straj.values.append(v)
-                straj.rewards.append(shaped_spawner_r(env, False, True)); straj.dones.append(False)
+                straj.rewards.append(shaped_spawner_r(env, False, True))
+                straj.terminateds.append(False)
+                straj.delta_frames.append(0)  # filled at next spawn or episode end
+                frames_since_spawn = 0
             thr, p_double = 8.0, 0.0
             if env.elapsed > 18.0:
                 p_double = 0.20
@@ -202,7 +299,7 @@ def run_episode(
         if train_player:
             ptraj.player.append(p); ptraj.bullets.append(b); ptraj.pad.append(m)
             ptraj.actions.append(a); ptraj.log_probs.append(lp); ptraj.values.append(v)
-            ptraj.rewards.append(0.0); ptraj.dones.append(False)
+            ptraj.rewards.append(0.0); ptraj.terminateds.append(False); ptraj.delta_frames.append(1)
 
         apply_player_action(env, a)
         env._integrate_bullets()
@@ -211,18 +308,24 @@ def run_episode(
             env.dead = True
         if train_player and ptraj.rewards:
             ptraj.rewards[-1] = shaped_player_r(env, done)
-            ptraj.dones[-1] = done
+        # One physics frame elapsed after any spawn decisions this step.
+        frames_since_spawn += 1
         if done:
-            if train_spawner and straj.rewards:
-                straj.rewards[-1] += shaped_spawner_r(env, True, False)
-                straj.dones[-1] = True
+            if train_player:
+                _finalize_player_end(ptraj, env, player, device, terminated=True)
+            if train_spawner:
+                _finalize_spawner_end(
+                    straj, env, spawner, device, terminated=True, frames_since_spawn=frames_since_spawn
+                )
             return ptraj, straj, env.elapsed
 
-    if train_player and ptraj.rewards:
-        ptraj.dones[-1] = True
-    if train_spawner and straj.rewards:
-        straj.rewards[-1] += shaped_spawner_r(env, True, False)
-        straj.dones[-1] = True
+    # max_steps time-limit → truncated (bootstrap), not terminated.
+    if train_player:
+        _finalize_player_end(ptraj, env, player, device, terminated=False)
+    if train_spawner:
+        _finalize_spawner_end(
+            straj, env, spawner, device, terminated=False, frames_since_spawn=frames_since_spawn
+        )
     return ptraj, straj, env.elapsed
 
 
@@ -231,7 +334,16 @@ def ppo_update_player(net, opt, trajs, device, clip, epochs, minibatch, entropy_
     for tr in trajs:
         if not tr.rewards:
             continue
-        adv, ret = gae(tr.rewards, tr.values, tr.dones, gamma, lam, device)
+        adv, ret = gae(
+            tr.rewards,
+            tr.values,
+            tr.terminateds,
+            gamma,
+            lam,
+            device,
+            last_value=tr.last_value,
+            delta_frames=tr.delta_frames,
+        )
         packs.append((
             torch.tensor(tr.player, dtype=torch.float32, device=device),
             torch.tensor(tr.bullets, dtype=torch.float32, device=device),
@@ -267,7 +379,16 @@ def ppo_update_spawner(net, opt, trajs, device, clip, epochs, minibatch, entropy
     for tr in trajs:
         if not tr.rewards:
             continue
-        adv, ret = gae(tr.rewards, tr.values, tr.dones, gamma, lam, device)
+        adv, ret = gae(
+            tr.rewards,
+            tr.values,
+            tr.terminateds,
+            gamma,
+            lam,
+            device,
+            last_value=tr.last_value,
+            delta_frames=tr.delta_frames,
+        )
         births = torch.tensor([a["birth"] for a in tr.actions], dtype=torch.float32, device=device)
         aims = torch.tensor([a["aim"] for a in tr.actions], dtype=torch.float32, device=device)
         kinds = torch.tensor([a["kind"] for a in tr.actions], dtype=torch.int64, device=device)
@@ -386,8 +507,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--entropy-p", type=float, default=0.04)
     ap.add_argument("--entropy-s", type=float, default=0.02)
     ap.add_argument("--lr", type=float, default=2.5e-4)
-    ap.add_argument("--gamma", type=float, default=0.99)
-    ap.add_argument("--lam", type=float, default=0.95)
+    ap.add_argument("--gamma", type=float, default=0.99, help="Per-frame discount; GAE uses gamma**delta_frames (v4.5).")
+    ap.add_argument("--lam", type=float, default=0.95, help="Per-frame GAE lambda; uses lam**delta_frames (v4.5).")
     ap.add_argument("--clip", type=float, default=0.2)
     ap.add_argument("--ppo-epochs", type=int, default=3)
     ap.add_argument("--minibatch", type=int, default=256)
