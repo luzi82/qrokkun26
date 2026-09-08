@@ -84,3 +84,30 @@ kill bonus (+5) applies only on true death.
 - Per step: `gamma_t = gamma_frame ** delta_frames_t` (and `lam` similarly).
 - CLI `--gamma` / `--lam` are **per-frame**; prefer this over an undocumented shared
   event-level gamma for both agents.
+
+## v4.6 PPO diagnostics + latest/best/snapshot checkpoints
+
+Logged each update on jsonl (`ppo_p` / `ppo_s`) and on status when eval runs:
+
+| Field | Meaning |
+|-------|---------|
+| `ratio_mean` / `ratio_std` | Full-batch ratio at **update start** (sanity ≈1) |
+| `approx_kl` | Mean Schulman approx KL over minibatches |
+| `clipfrac` | Fraction of ratios outside `[1-clip, 1+clip]` |
+| `entropy` | Policy entropy |
+| `explained_variance` | Value vs GAE returns (pre-update) |
+| `term_rate_*` / `trunc_rate_*` | True death vs time-limit fractions |
+
+### Checkpoint selection (separate P / S objectives)
+
+| Artifact | Path (defaults) | When | Selection metric |
+|----------|-----------------|------|------------------|
+| latest player | `runs/both_v4_player.pt` | each eval cadence | — (always overwrite) |
+| latest spawner | `runs/both_v4_spawner.pt` | each eval cadence | — |
+| **best_player** | `runs/both_v4_player_best.pt` | metric **improves** (maximize) | primarily **newP×scripted** (`newP_vs_scripted` / prefer `*_det_stoch` if present) |
+| **best_spawner** | `runs/both_v4_spawner_best.pt` | metric **improves** (minimize flee survival) | primarily **flee×newS_det_stoch** |
+| snapshot | `runs/snapshots/{player,spawner}_update_N.pt` | `--snapshot-every N` (>0) | copy of latest |
+
+**Do not** use `new_vs_new_det_det` / `new×new` as the sole selector for either agent (known corner exploit; observation only). See `qrokkun_env/train/checkpoints_v4.py`.
+
+CLI: `--out-player-best`, `--out-spawner-best`, `--snapshot-every`, `--snapshot-dir`.

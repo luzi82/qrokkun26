@@ -1,0 +1,40 @@
+Ticket: locked-P center miss（hit_rate=0）— diagnosis only
+=========================================================
+作者：Software Engineer（Grok Bot）
+日期：2026-09-08（HKT）
+狀態：診斷票；**本 PR 唔改 architecture / aim 幾何**
+對照：runs/both_v4_corner_probe.json；v4.3 corner probe
+
+現象
+----
+Locked-Player corner probe（idle + force pin）：
+- center：hit_rate = 0.0（8/8 seeds 捱滿 max_steps；closest_approach_mean ≈ 9.4px）
+- 其餘 8 點（四角 + 邊中）：hit_rate = 1.0
+
+同時 free-play / BR 風格 new×new 仍可出現長生存或角落 exploit——**唔等同** locked center miss。
+probe 係獨立 diagnostic；唔好同 new×new mean 混為一談。
+
+可疑機制（待查，按優先）
+----------------------
+1. **Birth 避開中央**
+   - center 試次 birth_dir_mean ≈ (-1.55, +0.75)（強偏一邊）
+   - birth = 由場中央射向 edge；若 policy 系統性唔射向「穿過 locked center 嘅弦」，子彈軌道可能永遠擦邊。
+2. **tanh aim saturation / bias**
+   - aim = player_pos + AIM_SCALE * tanh(raw)；AIM_SCALE=40
+   - center 試次 aim_offset_mean ≈ (+34.8, +32.5) ≈ 近飽和（tanh→±1）
+   - 即 aim target 系統性偏離 locked player ~35px，配合 closest≈9.4 可能係「瞄準偏移 + 半徑」嘅穩定擦過而非隨機 miss。
+3. **Policy 學識 miss-center**
+   - 對 flee/移動 player 有利嘅 lead/offset，喺 locked center 變成永遠打唔中。
+   - 同 BR free-play exploit（角落 / 邊）係唔同 failure mode。
+
+調查建議（唔喺呢個 PR 做）
+------------------------
+- Dump raw aim pre-tanh 同 birth unit vector 分佈（center vs corner probe）。
+- Scripted / isotropic birth baseline：locked center hit_rate 應 >0 → 分隔 env 幾何 vs policy。
+- 暫時凍結 aim offset=0 ablation：若 hit_rate 恢復，坐實 saturation/bias。
+- 唔好用「加長互訓」或改 encoder 當第一刀；先分清 birth vs aim vs learned miss。
+
+Out of scope here
+-----------------
+- 改 Spawner aim/birth parameterization、reward、attention
+- random start / Flee BC / GB10 train

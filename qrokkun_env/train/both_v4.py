@@ -6,6 +6,7 @@ No offline replay; diversity via sample/entropy, env jitter, flee/scripted pool.
 
 v4.4: terminated vs truncated + final-value bootstrap (last_value into GAE).
 v4.5: per-transition delta_frames; gamma_t = gamma_frame ** delta_frames.
+v4.6: PPO diagnostics + latest/best/snapshot ckpts (P/S separate selection).
 """
 
 from __future__ import annotations
@@ -17,6 +18,18 @@ import random
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
+
+from qrokkun_env.train.checkpoints_v4 import (
+    CheckpointManager,
+    default_best_path,
+    pack_player_ckpt,
+    pack_spawner_ckpt,
+    player_selection_key,
+    player_selection_score,
+    spawner_selection_key,
+    spawner_selection_score,
+)
 
 import torch
 import torch.nn as nn
@@ -329,7 +342,33 @@ def run_episode(
     return ptraj, straj, env.elapsed
 
 
+def explained_variance(y_pred: torch.Tensor, y_true: torch.Tensor) -> float:
+    """1 - Var(y_true - y_pred) / Var(y_true); 0 if y_true is constant."""
+    y_pred = y_pred.detach().float().view(-1)
+    y_true = y_true.detach().float().view(-1)
+    var_y = torch.var(y_true, unbiased=False)
+    if float(var_y.item()) < 1e-8:
+        return 0.0
+    return float((1.0 - torch.var(y_true - y_pred, unbiased=False) / (var_y + 1e-8)).item())
+
+
+def traj_end_rates(trajs) -> dict[str, float]:
+    """Fraction of non-empty trajs that terminated vs truncated."""
+    nonempty = [t for t in trajs if t.rewards]
+    n = len(nonempty)
+    if n == 0:
+        return {"termination_rate": 0.0, "truncation_rate": 0.0, "n_traj": 0}
+    n_term = sum(1 for t in nonempty if t.terminated)
+    n_trunc = sum(1 for t in nonempty if t.truncated)
+    return {
+        "termination_rate": n_term / n,
+        "truncation_rate": n_trunc / n,
+        "n_traj": n,
+    }
+
+
 def ppo_update_player(net, opt, trajs, device, clip, epochs, minibatch, entropy_coef, value_coef, gamma, lam):
+    """PPO update for Player. Returns (n_samples, diagnostics dict)."""
     packs = []
     for tr in trajs:
         if not tr.rewards:
@@ -352,14 +391,37 @@ def ppo_update_player(net, opt, trajs, device, clip, epochs, minibatch, entropy_
             torch.tensor([float(x) for x in tr.log_probs], device=device),
             adv, ret,
         ))
+    empty: dict[str, Any] = {
+        "approx_kl": 0.0,
+        "clipfrac": 0.0,
+        "ratio_mean": 1.0,
+        "ratio_std": 0.0,
+        "entropy": 0.0,
+        "explained_variance": 0.0,
+        "n": 0,
+    }
     if not packs:
-        return 0
+        return 0, empty
     P = torch.cat([p[0] for p in packs]); B = torch.cat([p[1] for p in packs])
     M = torch.cat([p[2] for p in packs]); A = torch.cat([p[3] for p in packs])
     old = torch.cat([p[4] for p in packs])
     adv = torch.cat([p[5] for p in packs]); ret = torch.cat([p[6] for p in packs])
     adv = (adv - adv.mean()) / (adv.std(unbiased=False) + 1e-8)
     N = P.shape[0]
+
+    # Sanity diagnostics at update start (before any optimizer step).
+    with torch.no_grad():
+        dist0, value0 = net(P, B, M)
+        lp0 = dist0.log_prob(A)
+        ratio0 = torch.exp(lp0 - old)
+        ratio_mean = float(ratio0.mean().item())
+        ratio_std = float(ratio0.std(unbiased=False).item())
+        entropy0 = float(dist0.entropy().mean().item())
+        ev0 = explained_variance(value0, ret)
+
+    kl_acc = []
+    clip_acc = []
+    ent_acc = []
     for _ in range(epochs):
         perm = torch.randperm(N, device=device)
         for s in range(0, N, minibatch):
@@ -367,14 +429,30 @@ def ppo_update_player(net, opt, trajs, device, clip, epochs, minibatch, entropy_
             dist, value = net(P[mb], B[mb], M[mb])
             lp = dist.log_prob(A[mb])
             ratio = torch.exp(lp - old[mb])
+            with torch.no_grad():
+                log_ratio = lp - old[mb]
+                # Schulman approx KL; also clipfrac
+                kl_acc.append(float(((ratio - 1.0) - log_ratio).mean().item()))
+                clip_acc.append(float(((ratio - 1.0).abs() > clip).float().mean().item()))
+                ent_acc.append(float(dist.entropy().mean().item()))
             surr1 = ratio * adv[mb]
             surr2 = torch.clamp(ratio, 1 - clip, 1 + clip) * adv[mb]
             loss = -torch.min(surr1, surr2).mean() + value_coef * F.mse_loss(value, ret[mb]) - entropy_coef * dist.entropy().mean()
             opt.zero_grad(); loss.backward(); nn.utils.clip_grad_norm_(net.parameters(), 1.0); opt.step()
-    return N
+    diag = {
+        "approx_kl": sum(kl_acc) / max(len(kl_acc), 1),
+        "clipfrac": sum(clip_acc) / max(len(clip_acc), 1),
+        "ratio_mean": ratio_mean,
+        "ratio_std": ratio_std,
+        "entropy": entropy0 if not ent_acc else sum(ent_acc) / len(ent_acc),
+        "explained_variance": ev0,
+        "n": int(N),
+    }
+    return N, diag
 
 
 def ppo_update_spawner(net, opt, trajs, device, clip, epochs, minibatch, entropy_coef, value_coef, gamma, lam):
+    """PPO update for Spawner. Returns (n_samples, diagnostics dict)."""
     packs = []
     for tr in trajs:
         if not tr.rewards:
@@ -400,13 +478,37 @@ def ppo_update_spawner(net, opt, trajs, device, clip, epochs, minibatch, entropy
             torch.tensor([float(x) for x in tr.log_probs], device=device),
             adv, ret,
         ))
+    empty: dict[str, Any] = {
+        "approx_kl": 0.0,
+        "clipfrac": 0.0,
+        "ratio_mean": 1.0,
+        "ratio_std": 0.0,
+        "entropy": 0.0,
+        "explained_variance": 0.0,
+        "n": 0,
+    }
     if not packs:
-        return 0
+        return 0, empty
     P = torch.cat([p[0] for p in packs]); B = torch.cat([p[1] for p in packs]); M = torch.cat([p[2] for p in packs])
     birth_a = torch.cat([p[3] for p in packs]); aim_a = torch.cat([p[4] for p in packs]); kind_a = torch.cat([p[5] for p in packs])
     old = torch.cat([p[6] for p in packs]); adv = torch.cat([p[7] for p in packs]); ret = torch.cat([p[8] for p in packs])
     adv = (adv - adv.mean()) / (adv.std(unbiased=False) + 1e-8)
     N = P.shape[0]
+
+    with torch.no_grad():
+        birth0, aim0, kind0, value0 = net(P, B, M)
+        lp0 = birth0.log_prob(birth_a).sum(-1) + aim0.log_prob(aim_a).sum(-1) + kind0.log_prob(kind_a)
+        ratio0 = torch.exp(lp0 - old)
+        ratio_mean = float(ratio0.mean().item())
+        ratio_std = float(ratio0.std(unbiased=False).item())
+        entropy0 = float(
+            (birth0.entropy().sum(-1).mean() + aim0.entropy().sum(-1).mean() + kind0.entropy().mean()).item()
+        )
+        ev0 = explained_variance(value0, ret)
+
+    kl_acc = []
+    clip_acc = []
+    ent_acc = []
     for _ in range(epochs):
         perm = torch.randperm(N, device=device)
         for s in range(0, N, minibatch):
@@ -415,11 +517,25 @@ def ppo_update_spawner(net, opt, trajs, device, clip, epochs, minibatch, entropy
             lp = birth.log_prob(birth_a[mb]).sum(-1) + aim.log_prob(aim_a[mb]).sum(-1) + kind.log_prob(kind_a[mb])
             ent = birth.entropy().sum(-1).mean() + aim.entropy().sum(-1).mean() + kind.entropy().mean()
             ratio = torch.exp(lp - old[mb])
+            with torch.no_grad():
+                log_ratio = lp - old[mb]
+                kl_acc.append(float(((ratio - 1.0) - log_ratio).mean().item()))
+                clip_acc.append(float(((ratio - 1.0).abs() > clip).float().mean().item()))
+                ent_acc.append(float(ent.item()))
             surr1 = ratio * adv[mb]
             surr2 = torch.clamp(ratio, 1 - clip, 1 + clip) * adv[mb]
             loss = -torch.min(surr1, surr2).mean() + value_coef * F.mse_loss(value, ret[mb]) - entropy_coef * ent
             opt.zero_grad(); loss.backward(); nn.utils.clip_grad_norm_(net.parameters(), 1.0); opt.step()
-    return N
+    diag = {
+        "approx_kl": sum(kl_acc) / max(len(kl_acc), 1),
+        "clipfrac": sum(clip_acc) / max(len(clip_acc), 1),
+        "ratio_mean": ratio_mean,
+        "ratio_std": ratio_std,
+        "entropy": entropy0 if not ent_acc else sum(ent_acc) / len(ent_acc),
+        "explained_variance": ev0,
+        "n": int(N),
+    }
+    return N, diag
 
 
 @torch.no_grad()
@@ -524,6 +640,30 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="If set, run locked-P corner probe at end and write JSON (default path if flag alone).",
     )
+    ap.add_argument(
+        "--out-player-best",
+        type=Path,
+        default=None,
+        help="Best player ckpt (default: <out-player>_best.pt). Selection: newP×scripted.",
+    )
+    ap.add_argument(
+        "--out-spawner-best",
+        type=Path,
+        default=None,
+        help="Best spawner ckpt (default: <out-spawner>_best.pt). Selection: flee×newS_det_stoch.",
+    )
+    ap.add_argument(
+        "--snapshot-every",
+        type=int,
+        default=0,
+        help="If >0, copy latest weights to snapshot-dir every N updates (0=off).",
+    )
+    ap.add_argument(
+        "--snapshot-dir",
+        type=Path,
+        default=Path("runs/snapshots"),
+        help="Directory for periodic snapshot copies (v4.6).",
+    )
     return ap
 
 
@@ -551,12 +691,23 @@ def main() -> None:
     opt_p = torch.optim.Adam(player.parameters(), lr=args.lr)
     opt_s = torch.optim.Adam(spawner.parameters(), lr=args.lr)
     args.out_player.parent.mkdir(parents=True, exist_ok=True)
+    out_player_best = args.out_player_best or default_best_path(args.out_player)
+    out_spawner_best = args.out_spawner_best or default_best_path(args.out_spawner)
+    ckpt = CheckpointManager(
+        latest_player=args.out_player,
+        latest_spawner=args.out_spawner,
+        best_player=out_player_best,
+        best_spawner=out_spawner_best,
+        snapshot_dir=args.snapshot_dir if args.snapshot_every > 0 else None,
+        snapshot_every=args.snapshot_every,
+    )
 
     flee_vs_scripted = eval_pair("flee", None, device, range(2000, 2015), args.max_steps)
     print(
         f"device={device} aim_scale={AIM_SCALE} flee|scripted={flee_vs_scripted:.2f}s "
         f"player_params={sum(p.numel() for p in player.parameters())} "
-        f"spawner_params={sum(p.numel() for p in spawner.parameters())}",
+        f"spawner_params={sum(p.numel() for p in spawner.parameters())} "
+        f"best_p={out_player_best} best_s={out_spawner_best}",
         flush=True,
     )
 
@@ -564,6 +715,7 @@ def main() -> None:
     deadline = t0 + args.hours * 3600
     update = 0
     best_vs_scripted = -1.0
+    best_flee_vs_new_ds = float("inf")
     modes = ["self", "self", "p_vs_scripted", "s_vs_flee", "self", "s_vs_flee"]
 
     with args.log.open("w") as logf:
@@ -589,12 +741,28 @@ def main() -> None:
                     strajs.append(st)
                 survs.append(surv)
 
-            ppo_update_player(player, opt_p, ptrajs, device, args.clip, args.ppo_epochs, args.minibatch,
-                              args.entropy_p, 0.5, args.gamma, args.lam)
-            ppo_update_spawner(spawner, opt_s, strajs, device, args.clip, args.ppo_epochs, args.minibatch,
-                               args.entropy_s, 0.5, args.gamma, args.lam)
+            _n_p, diag_p = ppo_update_player(
+                player, opt_p, ptrajs, device, args.clip, args.ppo_epochs, args.minibatch,
+                args.entropy_p, 0.5, args.gamma, args.lam,
+            )
+            _n_s, diag_s = ppo_update_spawner(
+                spawner, opt_s, strajs, device, args.clip, args.ppo_epochs, args.minibatch,
+                args.entropy_s, 0.5, args.gamma, args.lam,
+            )
+            end_p = traj_end_rates(ptrajs)
+            end_s = traj_end_rates(strajs)
 
-            row = {"update": update, "surv_mean": sum(survs) / len(survs), "wall_h": (time.time() - t0) / 3600}
+            row = {
+                "update": update,
+                "surv_mean": sum(survs) / len(survs),
+                "wall_h": (time.time() - t0) / 3600,
+                "ppo_p": diag_p,
+                "ppo_s": diag_s,
+                "term_rate_p": end_p["termination_rate"],
+                "trunc_rate_p": end_p["truncation_rate"],
+                "term_rate_s": end_s["termination_rate"],
+                "trunc_rate_s": end_s["truncation_rate"],
+            }
             if update % 5 == 0:
                 # Mode 1 (det_det) — old keys; Mode 2 (det_stoch) for new×new / flee×newS.
                 vs_scripted = eval_pair(player, None, device, range(2100, 2112), args.max_steps)
@@ -617,17 +785,58 @@ def main() -> None:
                 })
                 if vs_scripted > best_vs_scripted:
                     best_vs_scripted = vs_scripted
-                torch.save({"state_dict": player.state_dict(), "d_model": args.d_model, "hidden": args.hidden,
-                            "algo": "both-v4-player", "eval_vs_scripted": vs_scripted, "update": update}, args.out_player)
-                torch.save({"state_dict": spawner.state_dict(), "d_model": args.d_model, "hidden": args.hidden,
-                            "algo": "both-v4-spawner", "aim_scale": AIM_SCALE, "eval_flee_vs_newS": flee_vs_new_ds,
-                            "update": update}, args.out_spawner)
+                eval_metrics = {
+                    "newP_vs_scripted": vs_scripted,
+                    "newP|scripted": vs_scripted,
+                    "new_vs_new": new_vs_new,
+                    "new_vs_new_det_det": new_vs_new,
+                    "new_vs_new_det_stoch": new_vs_new_ds,
+                    "flee_vs_newS": flee_vs_new,
+                    "flee_vs_newS_det_det": flee_vs_new,
+                    "flee_vs_newS_det_stoch": flee_vs_new_ds,
+                    "flee|newS_det_stoch": flee_vs_new_ds,
+                }
+                # Selection scores (separate objectives; NOT new×new_det_det).
+                p_sel = player_selection_score(eval_metrics)
+                s_sel = spawner_selection_score(eval_metrics)
+                p_key = player_selection_key(eval_metrics)
+                s_key = spawner_selection_key(eval_metrics)
+                p_payload = pack_player_ckpt(
+                    player,
+                    d_model=args.d_model,
+                    hidden=args.hidden,
+                    update=update,
+                    eval_metrics=eval_metrics,
+                    selection_score_value=p_sel,
+                    selection_key=p_key,
+                )
+                s_payload = pack_spawner_ckpt(
+                    spawner,
+                    d_model=args.d_model,
+                    hidden=args.hidden,
+                    update=update,
+                    aim_scale=AIM_SCALE,
+                    eval_metrics=eval_metrics,
+                    selection_score_value=s_sel,
+                    selection_key=s_key,
+                )
+                ckpt.save_latest(p_payload, s_payload)
+                saved_best_p = ckpt.maybe_save_best_player(p_sel, p_payload)
+                saved_best_s = ckpt.maybe_save_best_spawner(s_sel, s_payload)
+                if saved_best_s:
+                    best_flee_vs_new_ds = s_sel
+                ckpt.maybe_snapshot(update, p_payload, s_payload)
                 status = {
                     "update": update,
                     "wall_hours": (time.time() - t0) / 3600,
                     # Compat keys = det_policy+det_env
                     "newP_vs_scripted": vs_scripted,
                     "best_newP_vs_scripted": best_vs_scripted,
+                    "best_player_selection": ckpt.best_player_score,
+                    "best_player_selection_key": p_key,
+                    "best_spawner_selection": ckpt.best_spawner_score if ckpt.best_spawner_score < float("inf") else None,
+                    "best_spawner_selection_key": s_key,
+                    "best_flee_vs_newS_det_stoch": None if best_flee_vs_new_ds == float("inf") else best_flee_vs_new_ds,
                     "new_vs_new": new_vs_new,
                     "flee_vs_newS": flee_vs_new,
                     "flee_vs_scripted_ref": flee_vs_scripted,
@@ -638,7 +847,22 @@ def main() -> None:
                     "flee_vs_newS_det_det": flee_vs_new,
                     "flee_vs_newS_det_stoch": flee_vs_new_ds,
                     "aim_scale": AIM_SCALE,
-                    "eval_note": "new×new is observation only; prefer newP|scripted + flee|newS_det_stoch",
+                    "ppo_p": diag_p,
+                    "ppo_s": diag_s,
+                    "term_rate_p": end_p["termination_rate"],
+                    "trunc_rate_p": end_p["truncation_rate"],
+                    "term_rate_s": end_s["termination_rate"],
+                    "trunc_rate_s": end_s["truncation_rate"],
+                    "ckpt_latest_player": str(args.out_player),
+                    "ckpt_latest_spawner": str(args.out_spawner),
+                    "ckpt_best_player": str(out_player_best),
+                    "ckpt_best_spawner": str(out_spawner_best),
+                    "saved_best_player": saved_best_p,
+                    "saved_best_spawner": saved_best_s,
+                    "eval_note": (
+                        "v4.6: best_player←newP×scripted; best_spawner←flee×newS_det_stoch (minimize); "
+                        "new×new observation only — not sole selection metric"
+                    ),
                     "done": False,
                 }
                 args.status.write_text(json.dumps(status, indent=2) + "\n")
@@ -647,7 +871,10 @@ def main() -> None:
                     f"newP|scripted={vs_scripted:.2f} new|new={new_vs_new:.2f}/{new_vs_new_ds:.2f} "
                     f"flee|newS={flee_vs_new:.2f}/{flee_vs_new_ds:.2f} "
                     f"(flee|scripted={flee_vs_scripted:.2f}) "
-                    f"wall={status['wall_hours']:.2f}h",
+                    f"kl_p={diag_p.get('approx_kl', 0):.4f} kl_s={diag_s.get('approx_kl', 0):.4f} "
+                    f"wall={status['wall_hours']:.2f}h"
+                    f"{' [bestP]' if saved_best_p else ''}"
+                    f"{' [bestS]' if saved_best_s else ''}",
                     flush=True,
                 )
             logf.write(json.dumps(row) + "\n"); logf.flush()
@@ -703,17 +930,58 @@ def main() -> None:
         "wall_hours": (time.time() - t0) / 3600,
         "updates": update,
         "aim_scale": AIM_SCALE,
-        "notes": "v4.3 eval modes; new×new not sole selection metric; paired seeds",
+        "notes": "v4.6; new×new not sole selection metric; paired seeds",
     }
     # Drop bulky times from compare JSON by_mode for readability (keep summary stats).
     for _k, block in cmp["by_mode"].items():
         block.pop("times", None)
-    torch.save({"state_dict": player.state_dict(), "d_model": args.d_model, "hidden": args.hidden,
-                "algo": "both-v4-player", "eval_vs_scripted": cmp["newP_vs_scripted"], "update": update}, args.out_player)
-    torch.save({"state_dict": spawner.state_dict(), "d_model": args.d_model, "hidden": args.hidden,
-                "algo": "both-v4-spawner", "aim_scale": AIM_SCALE,
-                "eval_flee_vs_newS": cmp[metric_key("flee_vs_newS", False, True)],
-                "update": update}, args.out_spawner)
+    final_metrics = {
+        "newP_vs_scripted": cmp["newP_vs_scripted"],
+        "newP|scripted": cmp["newP_vs_scripted"],
+        "new_vs_new": cmp["new_vs_new"],
+        "new_vs_new_det_det": cmp["new_vs_new"],
+        "new_vs_new_det_stoch": cmp[metric_key("new_vs_new", False, True)],
+        "flee_vs_newS": cmp["flee_vs_newS"],
+        "flee_vs_newS_det_det": cmp["flee_vs_newS"],
+        "flee_vs_newS_det_stoch": cmp[metric_key("flee_vs_newS", False, True)],
+        "flee|newS_det_stoch": cmp[metric_key("flee_vs_newS", False, True)],
+    }
+    p_sel = player_selection_score(final_metrics)
+    s_sel = spawner_selection_score(final_metrics)
+    p_payload = pack_player_ckpt(
+        player,
+        d_model=args.d_model,
+        hidden=args.hidden,
+        update=update,
+        eval_metrics=final_metrics,
+        selection_score_value=p_sel,
+        selection_key=player_selection_key(final_metrics),
+    )
+    s_payload = pack_spawner_ckpt(
+        spawner,
+        d_model=args.d_model,
+        hidden=args.hidden,
+        update=update,
+        aim_scale=AIM_SCALE,
+        eval_metrics=final_metrics,
+        selection_score_value=s_sel,
+        selection_key=spawner_selection_key(final_metrics),
+    )
+    ckpt.save_latest(p_payload, s_payload)
+    ckpt.maybe_save_best_player(p_sel, p_payload)
+    ckpt.maybe_save_best_spawner(s_sel, s_payload)
+    cmp["selection"] = {
+        "best_player_key": player_selection_key(final_metrics),
+        "best_player_score": ckpt.best_player_score,
+        "best_spawner_key": spawner_selection_key(final_metrics),
+        "best_spawner_score": None if ckpt.best_spawner_score == float("inf") else ckpt.best_spawner_score,
+        "note": "new×new_det_det is observation only; not used as sole P/S selector",
+        "ckpt_best_player": str(out_player_best),
+        "ckpt_best_spawner": str(out_spawner_best),
+    }
+    cmp["notes"] = (
+        "v4.6 eval modes + separate best P/S selection; new×new not sole selection metric; paired seeds"
+    )
     args.compare.write_text(json.dumps(cmp, indent=2) + "\n")
     args.status.write_text(json.dumps({**cmp, "done": True}, indent=2) + "\n")
     print(json.dumps(cmp, indent=2), flush=True)

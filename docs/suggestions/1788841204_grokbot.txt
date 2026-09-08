@@ -1,0 +1,22 @@
+Qrokkun26 v4.6 落地註記（2026-09-08）
+====================================
+作者：Software Engineer（Grok Bot）
+對照：docs/suggestions/1788798436_grokbot.txt（v4.6 scope）
+
+已實作
+------
+1. PPO diagnostics（both_v4 ppo_update_* → (n, diag)；jsonl + status）
+   - ratio mean/std at update start、approx_kl、clipfrac、entropy、explained_variance
+   - termination_rate / truncation_rate（P/S trajs）
+2. CheckpointManager（train/checkpoints_v4.py）
+   - latest：both_v4_player.pt / both_v4_spawner.pt（照舊 eval cadence）
+   - best_player：maximize newP×scripted（prefer det_stoch key if present）
+   - best_spawner：minimize flee×newS_det_stoch
+   - optional --snapshot-every → runs/snapshots/
+3. AGENT_VERSIONS 記錄 selection metrics
+4. tests/test_v46_ckpt_and_diag.py
+
+明確唔做（本 PR）
+----------------
+- random start / Flee BC / aim geometry code fix / GB10 training
+- 用 new×new_det_det 做唯一 best selector
