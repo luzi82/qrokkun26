@@ -4,6 +4,8 @@ Modes (sample_policy, rng_jitter):
   det_det   — False, False  (debug / deterministic collapse)
   det_stoch — False, True   (robustness / primary ckpt signal for learned S)
   stoch_stoch — True, True  (deploy-distribution sanity; fork_rng per episode)
+
+Invalid: (True, False) — sample_policy without rng_jitter is rejected (ValueError).
 """
 
 from __future__ import annotations
@@ -22,6 +24,17 @@ MODE_DET_DET = (False, False)
 MODE_DET_STOCH = (False, True)
 MODE_STOCH_STOCH = (True, True)
 
+
+def validate_eval_mode(sample_policy: bool, rng_jitter: bool) -> None:
+    """Reject unsupported (sample_policy=True, rng_jitter=False)."""
+    if bool(sample_policy) and not bool(rng_jitter):
+        raise ValueError(
+            "Invalid eval mode (sample_policy=True, rng_jitter=False): "
+            "stoch_policy requires stoch_env; use stoch_stoch (rng_jitter=True) "
+            "or disable sample_policy."
+        )
+
+
 MODE_NAME = {
     MODE_DET_DET: "det_det",
     MODE_DET_STOCH: "det_stoch",
@@ -30,6 +43,7 @@ MODE_NAME = {
 
 
 def mode_tag(sample_policy: bool, rng_jitter: bool) -> str:
+    validate_eval_mode(sample_policy, rng_jitter)
     return MODE_NAME[(bool(sample_policy), bool(rng_jitter))]
 
 
@@ -62,6 +76,7 @@ def run_eval_episode(
     episode_seed: int,
 ) -> tuple:
     """Run one eval episode; when sample_policy, fork Torch RNG so train RNG is untouched."""
+    validate_eval_mode(sample_policy, rng_jitter)
     kwargs = dict(
         sample=bool(sample_policy),
         train_player=False,
@@ -89,6 +104,7 @@ def eval_survival_times(
     sample_policy: bool = False,
     rng_jitter: bool = False,
 ) -> list[float]:
+    validate_eval_mode(sample_policy, rng_jitter)
     times: list[float] = []
     for seed in seeds:
         env = env_factory(int(seed))

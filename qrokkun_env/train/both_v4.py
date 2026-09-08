@@ -313,7 +313,9 @@ def eval_pair(
     rng_jitter: bool = False,
 ) -> float:
     """Mean survival over seeds. Defaults = det_policy+det_env (v4.2 compat)."""
-    from qrokkun_env.eval_modes import eval_survival_times
+    from qrokkun_env.eval_modes import eval_survival_times, validate_eval_mode
+
+    validate_eval_mode(sample_policy, rng_jitter)
 
     times = eval_survival_times(
         run_episode,
@@ -341,7 +343,9 @@ def eval_pair_stats(
     rng_jitter: bool = False,
 ) -> dict:
     """Mean/median/std/n (+ times) for paired-seed reports."""
-    from qrokkun_env.eval_modes import eval_survival_times, summarize_times
+    from qrokkun_env.eval_modes import eval_survival_times, summarize_times, validate_eval_mode
+
+    validate_eval_mode(sample_policy, rng_jitter)
 
     times = eval_survival_times(
         run_episode,

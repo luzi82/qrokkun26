@@ -16,6 +16,7 @@ from qrokkun_env.eval_modes import (
     metric_key,
     mode_tag,
     run_eval_episode,
+    validate_eval_mode,
 )
 from qrokkun_env.train.both_v4 import eval_pair, eval_pair_stats, run_episode
 
@@ -122,13 +123,40 @@ def test_same_seed_mode_reproducible(tiny_nets):
 
 
 def test_mode2_seed_difference_visible_flee_news(tiny_nets):
-    """Different seeds under det_policy+stoch_env should differ for flee×newS."""
+    """Different seeds under det_policy+stoch_env must produce unequal survival times for flee×newS.
+
+    Short horizons often collapse to the same early death; use enough steps + seeds so
+    jittered spawn diversity shows up as n_unique >= 2 (not a vacuous equal-and-positive pass).
+    """
     _player, spawner, device = tiny_nets
-    t0 = eval_pair("flee", spawner, device, [21], 120, sample_policy=False, rng_jitter=True)
-    t1 = eval_pair("flee", spawner, device, [22], 120, sample_policy=False, rng_jitter=True)
-    # With jitter, trajectories diverge; allow equality only if both timeout identically —
-    # for random tiny nets they should differ almost always.
-    assert t0 != t1 or (t0 == t1 and t0 > 0)
+    seeds = list(range(21, 41))
+    stats = eval_pair_stats(
+        "flee", spawner, device, seeds, 600, sample_policy=False, rng_jitter=True,
+    )
+    times = stats["times"]
+    n_unique = len({round(float(t), 6) for t in times})
+    assert n_unique >= 2, (
+        f"det_stoch flee×newS expected seed diversity, got n_unique={n_unique} times={times}"
+    )
+
+
+def test_reject_sample_policy_without_rng_jitter(tiny_nets):
+    """(sample_policy=True, rng_jitter=False) is not a supported mode."""
+    player, spawner, device = tiny_nets
+    with pytest.raises(ValueError, match=r"sample_policy=True, rng_jitter=False"):
+        validate_eval_mode(True, False)
+    with pytest.raises(ValueError, match=r"sample_policy=True, rng_jitter=False"):
+        mode_tag(True, False)
+    with pytest.raises(ValueError, match=r"sample_policy=True, rng_jitter=False"):
+        metric_key("new_vs_new", True, False)
+    with pytest.raises(ValueError, match=r"sample_policy=True, rng_jitter=False"):
+        eval_pair(
+            player, spawner, device, [21], 40, sample_policy=True, rng_jitter=False,
+        )
+    with pytest.raises(ValueError, match=r"sample_policy=True, rng_jitter=False"):
+        eval_pair_stats(
+            player, spawner, device, [21], 40, sample_policy=True, rng_jitter=False,
+        )
 
 
 def test_eval_pair_default_is_det_det_compat(tiny_nets):
