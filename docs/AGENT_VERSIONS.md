@@ -62,3 +62,25 @@ Player is **locked** (idle + force `px,py` each frame) at 9 sites: center, 4 cor
 (including bottom-right), 4 edge midpoints. Records first-hit, hit rate, closest
 approach, birth/aim stats.
 
+
+## v4.4 terminated vs truncated + final-value bootstrap
+
+On episode end for each trained agent trajectory (`train/both_v4.py`):
+
+| End | `terminated` | `truncated` | `last_value` | GAE mask on last step |
+|-----|--------------|------------|--------------|------------------------|
+| True death (`env.dead`) | True | False | `0` | no bootstrap |
+| `max_steps` time-limit | False | True | `V(final_obs)` | bootstrap |
+
+GAE accepts `last_value` (does **not** always append `0.0` after values). Spawner
+time-limit must **not** receive the old “failed to kill” (−2) terminal shaping;
+kill bonus (+5) applies only on true death.
+
+## v4.5 Player / Spawner time scales
+
+- Player transitions: `delta_frames=1` (one physics frame).
+- Spawner: frames between spawn decisions; last transition also records frames to
+  terminal/truncation (included in bootstrap discount).
+- Per step: `gamma_t = gamma_frame ** delta_frames_t` (and `lam` similarly).
+- CLI `--gamma` / `--lam` are **per-frame**; prefer this over an undocumented shared
+  event-level gamma for both agents.

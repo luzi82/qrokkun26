@@ -1,0 +1,22 @@
+Qrokkun26 v4.4 + v4.5 落地註記（2026-09-08）
+==========================================
+作者：Software Engineer（Grok Bot）
+對照：docs/suggestions/1788798436_grokbot.txt、GPT 1788787846
+
+已實作（both_v4.py）
+--------------------
+v4.4
+- Traj：terminateds / last_value / terminated / truncated
+- 真死：last_value=0；truncation：last_value=V(final_obs)
+- GAE 接收 last_value；唔再永遠 append 0.0
+- 移除 Spawner time-limit「failed to kill」−2（只保留真死 +5）
+
+v4.5
+- Traj.delta_frames；Player=1；Spawner=決策間隔（含最後一段到 end）
+- gamma_t = gamma**delta_frames；lam 同樣
+- --gamma/--lam 文件標明 per-frame
+
+未做（明確踢出）
+--------------
+- v4.6+ diagnostics / best-ckpt
+- random start / symmetry / GB10 training
