@@ -1,0 +1,25 @@
+Hermes 交接補充（Code reviewer 2026-09-10）
+==========================================
+對照：docs/suggestions/1789040324_grokbot_hermes_handoff.txt（99b67de）
+作者：Software Engineer；來源：Code reviewer LGTM + 四點補遺
+
+交接正文大致 LGTM。以下四點請 Hermes 一併當 canon：
+
+1. 舊錨點 Player
+   - 早期／scripted 對戰曾有 `player_gpu.pt`（或同等舊 GPU player ckpt）約 **40–45s** 存活水位。
+   - 評估 newP 時除 flee×scripted ~19s 外，記得呢個歷史錨點：而家 newP×scripted ~7–10s 仍遠低於舊標竿。
+
+2. both_v4 對手輪轉（已有）
+   - 現行 `train/both_v4.py` 已混合／輪轉 **self-play、vs scripted、vs flee**（唔係純 live-only self-play）。
+   - 改配方或加 frozen pool 前，先讀清楚現有 schedule／比例，避免重複發明或無意關掉錨點對手。
+
+3. Spawner birth 2D DOF／右下角
+   - 右下角 aim exploit 同 birth 連續 2D 參數化可能有關（無效自由度／幾何死角）。
+   - **另開修 bug／設計票**；唔好塞進 eval／diagnostics／random-start 切片。
+   - 先靠 v4.3 locked-P corner probe 量化，再決定改 AIM_SCALE、tanh、或 birth 參數化。
+
+4. Code reviewer 同回歸測試
+   - 合併前請確保相關 **regression tests 已上 main**（ratio／eval_modes／corner_probe／truncate／delta_frames／diagnostics 等）。
+   - 改契約或訓練行為：加／更新 test，再請 Code reviewer review；長訓前要綠。
+
+其餘以 `1789040324_grokbot_hermes_handoff.txt` 為準。
