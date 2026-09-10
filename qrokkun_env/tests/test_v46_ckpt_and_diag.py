@@ -267,7 +267,7 @@ def test_ppo_spawner_diag_ratio_near_one_at_start() -> None:
         player,
         spawner,
         device,
-        max_steps=40,
+        max_steps=120,
         sample=True,
         train_player=False,
         train_spawner=True,
