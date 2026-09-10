@@ -367,6 +367,35 @@ def traj_end_rates(trajs) -> dict[str, float]:
     }
 
 
+def snapshot_gate_payloads(
+    update: int,
+    eval_ran: bool,
+    eval_p_payload: dict | None,
+    eval_s_payload: dict | None,
+    player,
+    spawner,
+    *,
+    d_model: int,
+    hidden: int,
+    aim_scale: float,
+) -> tuple[dict, dict]:
+    """Build the (player, spawner) payloads to hand to ckpt.maybe_snapshot for
+    this update, independent of eval cadence.
+
+    --snapshot-every N must fire every N updates regardless of whether this
+    update happened to also be an eval tick (update % 5 == 0). When it *was*
+    an eval tick, reuse those payloads (they carry eval metrics); otherwise
+    build lightweight weights-only payloads so every update is snapshot-capable.
+    """
+    if eval_ran and eval_p_payload is not None and eval_s_payload is not None:
+        return eval_p_payload, eval_s_payload
+    p_payload = pack_player_ckpt(player, d_model=d_model, hidden=hidden, update=update)
+    s_payload = pack_spawner_ckpt(
+        spawner, d_model=d_model, hidden=hidden, update=update, aim_scale=aim_scale,
+    )
+    return p_payload, s_payload
+
+
 def ppo_update_player(net, opt, trajs, device, clip, epochs, minibatch, entropy_coef, value_coef, gamma, lam):
     """PPO update for Player. Returns (n_samples, diagnostics dict)."""
     packs = []
@@ -825,7 +854,6 @@ def main() -> None:
                 saved_best_s = ckpt.maybe_save_best_spawner(s_sel, s_payload)
                 if saved_best_s:
                     best_flee_vs_new_ds = s_sel
-                ckpt.maybe_snapshot(update, p_payload, s_payload)
                 status = {
                     "update": update,
                     "wall_hours": (time.time() - t0) / 3600,
@@ -877,6 +905,22 @@ def main() -> None:
                     f"{' [bestS]' if saved_best_s else ''}",
                     flush=True,
                 )
+            # Snapshot cadence is independent of the eval cadence (update % 5 == 0
+            # above): --snapshot-every N must fire every N updates, not only on
+            # eval ticks.
+            eval_ran = update % 5 == 0
+            snap_p_payload, snap_s_payload = snapshot_gate_payloads(
+                update,
+                eval_ran,
+                p_payload if eval_ran else None,
+                s_payload if eval_ran else None,
+                player,
+                spawner,
+                d_model=args.d_model,
+                hidden=args.hidden,
+                aim_scale=AIM_SCALE,
+            )
+            ckpt.maybe_snapshot(update, snap_p_payload, snap_s_payload)
             logf.write(json.dumps(row) + "\n"); logf.flush()
             update += 1
 

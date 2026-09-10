@@ -12,7 +12,9 @@ from qrokkun_env.env import Qrokkun26Env
 from qrokkun_env.train.both_v4 import (
     explained_variance,
     ppo_update_player,
+    ppo_update_spawner,
     run_episode,
+    snapshot_gate_payloads,
     traj_end_rates,
 )
 from qrokkun_env.train.checkpoints_v4 import (
@@ -158,6 +160,72 @@ def test_explained_variance_and_traj_rates() -> None:
     assert abs(rates["truncation_rate"] - 0.5) < 1e-9
 
 
+def test_snapshot_every_3_fires_independent_of_eval_cadence(tmp_path: Path) -> None:
+    """Regression for the v4.6 cadence bug: --snapshot-every 3 must fire at
+    updates 0, 3, 6, 9, ... even though eval only runs on update % 5 == 0.
+    If maybe_snapshot were only reachable inside the `update % 5 == 0` eval
+    gate, updates 3, 6, and 9 (all not multiples of 5) would never snapshot.
+    """
+    latest_p = tmp_path / "p.pt"
+    latest_s = tmp_path / "s.pt"
+    mgr = CheckpointManager(
+        latest_player=latest_p,
+        latest_spawner=latest_s,
+        best_player=default_best_path(latest_p),
+        best_spawner=default_best_path(latest_s),
+        snapshot_dir=tmp_path / "snapshots",
+        snapshot_every=3,
+    )
+    player = PlayerV4(d_model=16, hidden=16)
+    spawner = SpawnerV4(d_model=16, hidden=16)
+
+    fired = []
+    for update in range(10):
+        eval_ran = update % 5 == 0  # mirrors the training loop's eval gate
+        eval_p_payload = eval_s_payload = None
+        if eval_ran:
+            eval_p_payload = pack_player_ckpt(player, d_model=16, hidden=16, update=update)
+            eval_s_payload = pack_spawner_ckpt(
+                spawner, d_model=16, hidden=16, update=update, aim_scale=40.0,
+            )
+        p_payload, s_payload = snapshot_gate_payloads(
+            update, eval_ran, eval_p_payload, eval_s_payload, player, spawner,
+            d_model=16, hidden=16, aim_scale=40.0,
+        )
+        if mgr.maybe_snapshot(update, p_payload, s_payload):
+            fired.append(update)
+
+    # Multiples of 3 in [0, 10): includes 3, 6, 9 which are NOT multiples of 5.
+    assert fired == [0, 3, 6, 9]
+    for u in (3, 6, 9):
+        assert (tmp_path / "snapshots" / f"player_update_{u}.pt").exists()
+        assert (tmp_path / "snapshots" / f"spawner_update_{u}.pt").exists()
+
+
+def test_snapshot_gate_reuses_eval_payload_on_eval_tick() -> None:
+    player = PlayerV4(d_model=16, hidden=16)
+    spawner = SpawnerV4(d_model=16, hidden=16)
+    eval_p = pack_player_ckpt(
+        player, d_model=16, hidden=16, update=5, eval_metrics={"newP_vs_scripted": 3.0},
+    )
+    eval_s = pack_spawner_ckpt(
+        spawner, d_model=16, hidden=16, update=5, aim_scale=40.0,
+        eval_metrics={"flee_vs_newS_det_stoch": 1.0},
+    )
+    p_payload, s_payload = snapshot_gate_payloads(
+        5, True, eval_p, eval_s, player, spawner, d_model=16, hidden=16, aim_scale=40.0,
+    )
+    assert p_payload is eval_p and s_payload is eval_s
+    assert "eval" in p_payload and "eval" in s_payload
+
+    # Non-eval tick: freshly built payloads without eval metrics.
+    p2, s2 = snapshot_gate_payloads(
+        6, False, None, None, player, spawner, d_model=16, hidden=16, aim_scale=40.0,
+    )
+    assert "eval" not in p2 and "eval" not in s2
+    assert p2["update"] == 6 and s2["update"] == 6
+
+
 def test_ppo_player_diag_ratio_near_one_at_start() -> None:
     device = torch.device("cpu")
     player = PlayerV4(d_model=32, hidden=32)
@@ -178,6 +246,37 @@ def test_ppo_player_diag_ratio_near_one_at_start() -> None:
     )
     n, diag = ppo_update_player(
         player, opt, [pt], device, clip=0.2, epochs=1, minibatch=64,
+        entropy_coef=0.01, value_coef=0.5, gamma=0.99, lam=0.95,
+    )
+    assert n > 0
+    assert "approx_kl" in diag and "clipfrac" in diag
+    assert "ratio_mean" in diag and "ratio_std" in diag
+    assert "entropy" in diag and "explained_variance" in diag
+    # Sanity at update start: ratio ~ 1 before first step (diag captures pre-step)
+    assert abs(diag["ratio_mean"] - 1.0) < 0.05
+
+
+def test_ppo_spawner_diag_ratio_near_one_at_start() -> None:
+    device = torch.device("cpu")
+    player = PlayerV4(d_model=32, hidden=32)
+    spawner = SpawnerV4(d_model=32, hidden=32)
+    opt = torch.optim.Adam(spawner.parameters(), lr=1e-3)
+    env = Qrokkun26Env(seed=11)
+    _pt, st, _surv = run_episode(
+        env,
+        player,
+        spawner,
+        device,
+        max_steps=40,
+        sample=True,
+        train_player=False,
+        train_spawner=True,
+        temp_p=1.0,
+        temp_s=1.0,
+        rng_jitter=False,
+    )
+    n, diag = ppo_update_spawner(
+        spawner, opt, [st], device, clip=0.2, epochs=1, minibatch=64,
         entropy_coef=0.01, value_coef=0.5, gamma=0.99, lam=0.95,
     )
     assert n > 0
