@@ -1,0 +1,138 @@
+Qrokkun26 → Hermes Agent 開發交接
+================================
+日期：2026-09-10（HKT）
+作者：Software Engineer（Grok Bot）
+對象：Hermes Agent（接手後續開發／訓練）
+Repo：https://github.com/luzi82/qrokkun26  （main）
+現行 HEAD（寫本文時）：1ef258c — v4.6: PPO diagnostics + separate best P/S checkpoint selection
+
+────────────────────────────────
+1. 專案是什麼
+────────────────────────────────
+- Godot 4 bullet-hell「Qrokkun26」；RL 用純 Python 環境 `Qrokkun26Env`（同 Godot 有 monkey parity）。
+- 同時訓 Player（避彈存活）同 Spawner（出彈殺 P）。
+- 現行主力網路：PlayerV4 / SpawnerV4（masked attention bullet set + Spawner 連續 birth/aim + 離散 kind）。
+- 訓練入口：`python -m qrokkun_env.train.both_v4`（shim：`train_both_v4_gpu.py`）。
+
+────────────────────────────────
+2. 目錄地圖（先讀這些）
+────────────────────────────────
+- `docs/AGENT_VERSIONS.md` — P/S/train 版本對照；v4.2–v4.6 契約摘要
+- `qrokkun_env/env.py` — 環境
+- `qrokkun_env/agents/` — player_v4 / spawner_v4 / encoder_v4 / obs
+- `qrokkun_env/train/both_v4.py` — 現行 both 訓練＋eval＋diagnostics＋best ckpt
+- `qrokkun_env/train/checkpoints_v4.py` — v4.6 snapshot/best 輔助
+- `qrokkun_env/eval_modes.py` — 三模式 eval、paired seeds
+- `qrokkun_env/corner_probe.py` — 九點鎖定 P probe
+- `docs/suggestions/` — 歷次 GPT／Grok 建議與規格（見文末索引）
+
+原則：suggestions 檔用 **新 timestamp 檔** 追加共識；唔好改舊檔內容（用戶要求）。
+
+────────────────────────────────
+3. 運算／部署（GB10）
+────────────────────────────────
+- 訓練機：家用 NVIDIA GB10（intranet），SSH 經 **grokbot-2609a** → `grokbot@192.168.0.41`
+- Repo on GB10：`~/qrokkun26`；`export PYTHONPATH=~/qrokkun26`；用 `.venv/bin/python`
+- 若 `git fetch` HTTPS 卡住：`git -c http.version=HTTP/1.1 fetch origin main`
+- 同步：`git fetch` + `git reset --hard origin/main`（唔好只 scp 半套檔）
+- 典型啟動：
+  nohup .venv/bin/python -u -m qrokkun_env.train.both_v4 \
+    --hours <H> --device cuda \
+    --out-player runs/both_v4_player.pt \
+    --out-spawner runs/both_v4_spawner.pt \
+    --status runs/both_v4_status.json \
+    --compare runs/both_v4_compare.json \
+    --log runs/both_v4.jsonl \
+    > runs/both_v4.stdout 2>&1 &
+- Artifacts：`runs/both_v4_*.pt`、`*_status.json`、`*_compare.json`、`*.jsonl`、`*.stdout`
+- Demo：`qrokkun_env/render_v4_demo.py`（可能曾 untracked；以 repo 現況為準）
+- 用戶時區 Asia/Hong_Kong；報告時間用 HKT。
+
+────────────────────────────────
+4. 已落地版本（code 已在 main）
+────────────────────────────────
+v4.1 — temp 預設 1.0 + 基本 PPO ratio≈1 tests
+v4.2 — **拒絕 temp≠1**；加強 ratio（非空彈／integration）；`build_parser()`
+v4.3 — 三模式 eval + paired seeds + **locked-P** 九點 corner probe
+v4.4 — terminated vs truncated + final-value bootstrap
+v4.5 — per-transition `delta_frames`；`gamma_t = gamma_frame ** delta_frames`
+v4.6 — PPO diagnostics + latest/best/snapshot；**P／S 分開** selection
+        （best P ← newP×scripted；best S ← flee×newS det_stoch 等；new×new 唔做唯一指標）
+
+Roadmap 原文：`docs/suggestions/1788798436_grokbot.txt`
+v4.3 規格：`docs/suggestions/1788822828_grokbot.txt`
+
+────────────────────────────────
+5. 訓練結果現況（重要：唔好誤讀）
+────────────────────────────────
+最後一輪 SE 完整夜訓（v4.2 code，`62e7ed9`，~06:57 HKT 2026-09-08）：
+- ~4455 updates，~6.22h，30-seed 終盤約：
+  - newP×scripted ~7.7s（遠低於 flee×scripted ~19s）
+  - new×new ~4.5s
+  - flee×newS ~4.9s（S 對 flee 很狠）
+- **早期** log 大量 new×new=70s＝右下角 aim **exploit**（P 企角落 S 瞄唔準），唔係變強。
+- **後期** ~500 upd 無 ≥40s 長局；5-seed demo 全 ~4.47s 同死（deterministic learned-S 軌跡仍易一樣）。
+- v4.3–v4.6 **code 已合入**，但 SE **未**用 v4.6 再開過等長正式訓練（2026-09-10 確認）。
+  → 「v4.6 已 code 好、訓練未必用過最新」——接手時先確認 GB10 HEAD 同 compare JSON。
+
+────────────────────────────────
+6. 硬契約／唔好踩坑
+────────────────────────────────
+1. `--temp-p`／`--temp-s` **必須 1.0**（否則立即拒絕）。探索靠 sample + entropy。
+2. PPO：rollout old log_prob 同 update 必須同一 policy family；對稱增廣若做，要用 **frozen behavior policy** 計一次 `old_log_prob_aug` 再 detach（唔好每 epoch 重算 old）。
+3. Eval 三種模式要分開記名；learned-S 要看 seed 差異請開 **rng_jitter**；唔好把 det+det 多 seed 當獨立樣本。
+4. Corner probe：**鎖死 P 位置**（唔走位）；獨立 JSON，唔混進 new×new mean。
+5. Truncation ≠ death：truncated 要 V(s_T) bootstrap。
+6. P 同 S decision 時間尺度唔同：用 delta_frames；`--gamma`／`--lam` 係 **per-frame**。
+7. **唔做** on-policy PPO 嘅 historical／disk transition replay。
+8. new×new 長生存 **唔做** 成功條件／唯一 best-ckpt 指標。
+
+────────────────────────────────
+7. 未做／下一步建議
+────────────────────────────────
+已討論、未當 baseline 正式開：
+- **v4.7**：`prepare_initial_state`（近中央 random P）；S 只用 normal reset samples；P 可混合；
+  feature flag **fraction 預設 0**；完整 burn-in 再後；見 GPT `1788789380`、`1788797850`。
+- **v5+**：對稱×4、Flee BC→PPO、frozen opponent pool、合法 dynamics burn-in、reward／birth DOF。
+- **Gamma A/B**：計劃有提（0.99 vs 0.9995），**從未正式跑過**；而家預設仍 0.99／0.95。
+  補 A/B 時唔好同 reward／random-start 一齊改。
+- **右下角 aim**：probe 能量度；**改 S 幾何／AIM_SCALE** 屬另開修 bug，唔塞進 eval-only 版本。
+
+Reward（2026-09-10 room 共識方向，SE）：
+- 主信號＝存活／time；子彈距離只宜 **細 shaping**。
+- 唔好只優化 nearest-bullet distance（易忽略多彈／同存活目標不一致）。
+- 改 reward 要獨立短 A/B，並用 scripted／flee 錨點評估。
+
+────────────────────────────────
+8. 測試同品質
+────────────────────────────────
+- `PYTHONPATH=. .venv/bin/python -m pytest qrokkun_env/tests/ -q`（至少 ratio／eval_modes／corner_probe／v4_*）
+- 有 Code reviewer agent：改完請佢 review；規格 LGTM 再開長訓。
+- 用戶溝通：書面粵語（繁中）；room 短訊；大檔／片用 1:1 DM。
+- 用戶有 Copilot／ChatGPT：適宜用戶側出草稿／設計，Hermes／bot 落 code、對齊 repo、跑測／訓——唔好當 bot 可直接 call 呢啲 subscription API。
+
+────────────────────────────────
+9. 建議 Hermes 接手檢查清單
+────────────────────────────────
+1. `git pull`；讀 `AGENT_VERSIONS.md` + 本文 + `1788798436` roadmap。
+2. GB10：確認 HEAD ≥ `1ef258c`；有無殘留舊 train process。
+3. 跑 corner probe 對現有 best／latest ckpt，存 JSON。
+4. 用 v4.6 eval 欄位報 det_det／det_stoch；唔再只報單一 new×new。
+5. 若開新長訓：記錄 gamma／entropy／seed／eval mode／HEAD；best P／S 分開。
+6. 任何 diversity／reward／gamma 變更：一次一旋鈕 + 短 A/B。
+
+────────────────────────────────
+10. suggestions 索引（精選）
+────────────────────────────────
+1788785426_gpt56sol.txt — 初版 P0（temp／eval／truncate／gamma）
+1788786737_grokbot.txt — 早期 v4→v5 計劃（保留原文）
+1788787846_gpt56sol.txt — review：時間尺度、bootstrap、對稱 old_lp
+1788789380_gpt56sol.txt — randomized starts／burn-in
+1788797417_grokbot.txt — 曾把 random 提前（其後被否決做 baseline）
+1788797850_gpt56sol.txt — 反對 random 搶跑；temp 封死；probe 先
+1788798436_grokbot.txt — 現行 roadmap（v4.2 seal → … → v4.7 random flag）
+1788822828_grokbot.txt — v4.3 規格
+1788829000_grokbot.txt 等 — 其後 v4.4／v4.5 合約紀錄（若存在請一併讀）
+（本檔）*_grokbot_hermes_handoff.txt — Hermes 交接
+
+完。
