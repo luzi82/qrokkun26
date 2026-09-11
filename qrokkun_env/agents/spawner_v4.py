@@ -122,6 +122,19 @@ class SpawnerV4(nn.Module):
         value = self.value(h).squeeze(-1)
         return birth, aim, kind, value
 
+    def forward_with_attn(
+        self, player: torch.Tensor, bullets: torch.Tensor, pad_mask: torch.Tensor
+    ) -> tuple[Normal, Normal, Categorical, torch.Tensor, torch.Tensor]:
+        """Like forward() but also returns per-head cross-attention weights [B, nhead, K]."""
+        feat, attn = self.encoder.forward_with_attn(player, bullets, pad_mask)
+        h = self.body(feat)
+        std = self.log_std.clamp(-3.0, 1.0).exp().expand(h.shape[0], -1)
+        birth = Normal(self.birth_mean(h), std[:, 0:2])
+        aim = Normal(self.aim_mean(h), std[:, 2:4])
+        kind = Categorical(logits=self.kind(h))
+        value = self.value(h).squeeze(-1)
+        return birth, aim, kind, value, attn
+
 
 def obs_tensors(env, device: torch.device):
     p, b, m = encode_obs(env)

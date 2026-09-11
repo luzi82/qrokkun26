@@ -45,13 +45,18 @@ def _pad_bullet() -> list[float]:
     return [0.0, 0.0, 0.0, 0.0, PAD_RADIUS, 0.0, 0.0, 0.0, 0.0]
 
 
-def encode_obs(env: Qrokkun26Env, max_bullets: int = MAX_BULLETS_V4) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return (player[P], bullets[K,F], pad_mask[K]) with pad_mask True = empty slot."""
-    player = np.asarray(_player_feats(env), dtype=np.float32)
-    ordered = sorted(
+def order_bullets_v4(env: Qrokkun26Env, max_bullets: int = MAX_BULLETS_V4) -> list:
+    """Return bullets nearest-first (same order used by encode_obs), truncated to max_bullets."""
+    return sorted(
         env.bullets,
         key=lambda b: (b.x - env.px) ** 2 + (b.y - env.py) ** 2,
     )[:max_bullets]
+
+
+def encode_obs(env: Qrokkun26Env, max_bullets: int = MAX_BULLETS_V4) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return (player[P], bullets[K,F], pad_mask[K]) with pad_mask True = empty slot."""
+    player = np.asarray(_player_feats(env), dtype=np.float32)
+    ordered = order_bullets_v4(env, max_bullets)
     bullets = np.zeros((max_bullets, BULLET_FEAT_V4), dtype=np.float32)
     pad = np.ones((max_bullets,), dtype=np.bool_)
     for i, b in enumerate(ordered):

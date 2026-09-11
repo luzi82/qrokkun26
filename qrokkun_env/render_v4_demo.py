@@ -13,13 +13,40 @@ import torch
 from PIL import Image, ImageDraw
 
 from qrokkun_env import constants as C
-from qrokkun_env.agents.obs_v4 import encode_obs
+from qrokkun_env.agents.obs_v4 import MAX_BULLETS_V4, encode_obs, order_bullets_v4
 from qrokkun_env.agents.player_v4 import PlayerV4
 from qrokkun_env.agents.spawner_v4 import SpawnerV4, spawn_continuous
 from qrokkun_env.env import ACTIONS, ACTION_TO_DIR, Qrokkun26Env, _move_toward, _spawn_interval
 from qrokkun_env.godot_rng import f32
 from qrokkun_env.policies import FleeNearestBullet
 from qrokkun_env.render_player_demo import BULLET_COLORS, load_sprite, paste_centered
+
+# 4-head cross-attention overlay: one distinct outline color per head.
+HEAD_COLORS = [(255, 70, 70), (70, 170, 255), (255, 215, 70), (100, 235, 150)]
+ATTN_BASE_R = 3.0  # world px, before scale
+ATTN_GROW = 14.0  # world px added at attn weight == 1.0
+ATTN_EPS = 0.03  # skip drawing near-zero weights
+
+
+@torch.no_grad()
+def render_attn(player: PlayerV4 | None, spawner: SpawnerV4 | None, env: Qrokkun26Env):
+    """Cross-attention [nhead, K] for the current env state, from whichever net is live.
+
+    Uses Player's encoder if a learned Player is in the matchup, else falls back to
+    Spawner's encoder (flee x newS). Returns None if neither net is present.
+    """
+    net = player if player is not None else spawner
+    if net is None:
+        return None
+    p, b, m = encode_obs(env)
+    pt = torch.tensor(p).unsqueeze(0)
+    bt = torch.tensor(b).unsqueeze(0)
+    mt = torch.tensor(m).unsqueeze(0)
+    if isinstance(net, PlayerV4):
+        _dist, _v, attn = net.forward_with_attn(pt, bt, mt)
+    else:
+        _birth, _aim, _kind, _v, attn = net.forward_with_attn(pt, bt, mt)
+    return attn[0].numpy()  # [nhead, K]
 
 
 @torch.no_grad()
@@ -66,7 +93,7 @@ def apply_player(env: Qrokkun26Env, a: int) -> None:
     env.py = f32(min(max(env.py, C.FIELD_Y + C.PLAYER_MARGIN), C.FIELD_Y + C.FIELD_H - C.PLAYER_MARGIN))
 
 
-def render(env, scale, ps, bs, last, title):
+def render(env, scale, ps, bs, last, title, ordered_bullets=None, attn=None):
     W, H = int(C.VIEW_W) * scale, int(C.VIEW_H) * scale
     img = Image.new("RGBA", (W, H), (18, 18, 28, 255))
     d = ImageDraw.Draw(img)
@@ -75,9 +102,27 @@ def render(env, scale, ps, bs, last, title):
     d.rectangle((fx0, fy0, fx1, fy1), fill=(28, 32, 48, 255), outline=(90, 100, 140, 255))
     for b in env.bullets:
         paste_centered(img, bs.get(b.kind, bs[0]), b.x, b.y, scale)
+    if attn is not None and ordered_bullets:
+        nhead = attn.shape[0]
+        for idx, b in enumerate(ordered_bullets):
+            if idx >= attn.shape[1]:
+                break
+            cx, cy = b.x * scale, b.y * scale
+            for h in range(nhead):
+                w = float(attn[h, idx])
+                if w < ATTN_EPS:
+                    continue
+                r = (ATTN_BASE_R + ATTN_GROW * w) * scale
+                d.ellipse((cx - r, cy - r, cx + r, cy + r), outline=HEAD_COLORS[h % len(HEAD_COLORS)], width=1)
     paste_centered(img, ps.get(last, ps["idle"]), env.px, env.py, scale)
     d.rectangle((0, 0, W, 14), fill=(10, 10, 16, 230))
     d.text((6, 2), f"{title}  t={env.elapsed:5.2f}s  bullets={len(env.bullets):3d}", fill=(220, 230, 255, 255))
+    if attn is not None:
+        lx = W - 150
+        for h, color in enumerate(HEAD_COLORS):
+            hx = lx + h * 38
+            d.ellipse((hx, 3, hx + 8, 11), outline=color, width=2)
+            d.text((hx + 11, 2), f"H{h}", fill=color)
     return img.convert("RGB")
 
 
@@ -114,15 +159,21 @@ def run_match(
     max_steps = int(max_seconds / C.DT)
     n = 0
     for i in range(max_steps):
-        render(env, scale, ps, bs, last, title).save(frames / f"f{i:06d}.png")
+        attn = render_attn(player, spawner, env)
+        ordered = order_bullets_v4(env, MAX_BULLETS_V4) if attn is not None else None
+        render(env, scale, ps, bs, last, title, ordered, attn).save(frames / f"f{i:06d}.png")
         if spawner_mode == "scripted":
             a = player_act(player, env, player_mode, flee)
             last = ACTIONS[a]
             _o, _r, done, _ = env.step(a)
             n = i + 1
             if done:
+                hit_attn = render_attn(player, spawner, env)
+                hit_ordered = order_bullets_v4(env, MAX_BULLETS_V4) if hit_attn is not None else None
                 for j in range(30):
-                    render(env, scale, ps, bs, last, title + "  HIT").save(frames / f"f{i+1+j:06d}.png")
+                    render(env, scale, ps, bs, last, title + "  HIT", hit_ordered, hit_attn).save(
+                        frames / f"f{i+1+j:06d}.png"
+                    )
                 break
             continue
 
@@ -147,8 +198,12 @@ def run_match(
         n = i + 1
         if env._check_hit():
             env.dead = True
+            hit_attn = render_attn(player, spawner, env)
+            hit_ordered = order_bullets_v4(env, MAX_BULLETS_V4) if hit_attn is not None else None
             for j in range(30):
-                render(env, scale, ps, bs, last, title + "  HIT").save(frames / f"f{i+1+j:06d}.png")
+                render(env, scale, ps, bs, last, title + "  HIT", hit_ordered, hit_attn).save(
+                    frames / f"f{i+1+j:06d}.png"
+                )
             break
 
     out.parent.mkdir(parents=True, exist_ok=True)
