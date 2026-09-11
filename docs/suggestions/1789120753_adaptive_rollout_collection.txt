@@ -1,0 +1,102 @@
+v4.9 構思（延後）— 以 sample budget 決定 PPO update 嘅 rollout 數量
+==================================================================
+狀態：延後／研究階段。本檔只記錄構思，未揀任何具體 threshold 數值，
+亦冇 authorize 任何實作。唔改舊檔（1788798436_grokbot.txt／
+1789085919_v47_landed.txt／1789102462_v48_landed.txt）。
+
+動機
+----
+而家每個 PPO update 固定收集一個 rollout 數（例如固定 16 個）。episode
+短（例如撞牆／中彈快、或者 corner exploit 令 episode 早完）會令：
+- Player 每個 update 拎到嘅 frame sample 數大幅波動。
+- Spawner 更加受影響——Spawner 嘅 spawn-decision sample 本身就比
+  Player frame sample 疏（唔係每個 frame 都有一個 spawn decision），
+  短 episode 會令 Spawner 有效 sample 數（`n_s_normal`）跌得更快，
+  PPO update 可能用極少 spawn-decision sample 就做咗一次 gradient step。
+固定 rollout 數冇保證任何一方有夠 sample，長短 episode 完全睇運氣。
+
+構思：sample-budget 收集，policy 喺收集期間凍結
+------------------------------------------------
+唔再淨係「收集夠 N 個 rollout 就停」，改為「收集夠 sample budget 先
+停」，並且喺整個收集過程入面 policy 權重維持凍結（同而家一樣，一個
+update 入面所有 rollout 都用同一份 snapshot 收集，唔會邊收集邊更新）：
+
+- 分開設定：
+  - `min_player_samples`：Player frame sample 嘅下限。
+  - `min_spawner_normal_samples`：Spawner **normal-reset** spawn-decision
+    sample 嘅下限（呼應 v4.7 嘅 credit boundary，見下）。
+  - `min_rollouts`：無論 sample 夠唔夠，都要收集嘅最少 rollout 數（避免
+    極端情況下淨係一兩個超長 rollout 就當夠）。
+  - `max_rollouts`：硬上限，防止 pathological 情況（例如 Spawner 一直
+    唔夠 normal-reset sample）令收集無限拖落去。
+- 停止條件：只有喺完成一個完整 `BASE_LOOP` cycle（目前六格係
+  `self, self, p_vs_scripted, s_vs_flee, self, s_vs_flee`，再各自按
+  fraction resolve 成 normal／random mode）之後，先可以
+  檢查係咪已經滿足哂 `min_player_samples` 同
+  `min_spawner_normal_samples`（並且已達 `min_rollouts`）而停止；唔可以
+  喺 cycle 行到一半就停，否則會偷偷改變咗訓練嘅 matchup 比例
+  （self／scripted／flee 幾種 mode 嘅相對次數）。
+- 全部收集返嚟嘅 trajectory 一定係當前 policy／on-policy——收集期間
+  policy 凍結（唔會做緊 update 又同時收集），亦唔會將舊 update 剩低嘅
+  trajectory 拎嚟湊夠 sample、唔會做 disk／historical replay。
+
+v4.7 credit boundary 沿用
+-------------------------
+沿用 v4.7 已定嘅規則：random-reset 嘅 trajectory 只訓 Player，永遠唔計入
+Spawner 嘅 sample／batch（`s_vs_flee_normal` 同任何 random-reset trajectory
+都唔改呢條線）。所以 `min_spawner_normal_samples` 呢個 budget 一定要淨計
+normal-reset 嘅 spawn-decision sample，唔可以將 random-reset trajectory
+嘅 sample 混埋落去湊數。
+
+Logging
+-------
+每次 update 應該記低：
+- 實際收集咗幾多個 rollout。
+- 每個 mode（self_normal／self_random_player／p_vs_scripted_normal／
+  p_vs_scripted_random／s_vs_flee_normal）嘅 episode 數、Player sample
+  數、Spawner sample 數。
+- 用緊嘅 threshold 值（`min_player_samples`／`min_spawner_normal_samples`
+  ／`min_rollouts`／`max_rollouts`）。
+- overshoot 幅度（實際 sample 數 vs threshold）、係咪撞到 `max_rollouts`
+  cap、以及停止原因（sample budget 滿足 / 撞 cap / 其他）。
+- 環境 frame 數同 wall-clock 時間（收集呢個 update 用咗幾耐）。
+
+Evaluation／checkpoint 比較注意事項
+-----------------------------------
+因為唔同 update 收集嘅 rollout 數／sample 數唔再固定，比較唔同 update 嘅
+表現／checkpoint 唔應該淨係睇 update number（例如「update 500 vs update
+500」），因為兩者食落嘅 sample 量可能差好遠。應該同時睇埋累積 env
+frame 數同累積 wall-clock 時間嚟做橫向比較。
+
+已知 caveat（stopping-time／episode-weighting）
+-----------------------------------------------
+用「收夠 sample 就停」會令每個 update 嘅 episode 數同當時 policy 嘅
+survival／spawn rate 相關：短 episode 通常要收更多局，長 episode 就較少
+局；P 同 S 又因 frame sample／spawn-decision sample 定義唔同，最後由邊個
+budget 主導停止亦會改變 batch 組成。完整 cycle 可以守住 episode 層面嘅
+matchup 比例，但唔保證各 mode 嘅 sample 比例固定。研究時要將呢種
+stopping-time／episode-weighting 效應同真正嘅 optimizer 改善分開分析。
+
+同 v4.8 嘅關係
+--------------
+呢個構思同 v4.8（`--random-fraction` fraction-only A/B）係兩件獨立嘅事：
+v4.8 只係開咗一個 fraction knob 做 A/B 比較，完全冇改 rollout 收集方式
+（依然係固定 rollout 數）。本檔嘅 sample-budget 收集機制唔應該同 v4.8
+嘅 fraction A/B 混喺同一個實驗度做，要分開驗證。
+
+建議嘅未來 v4.9 A/B（未 authorize，只係構思）
+----------------------------------------------
+如果將來要驗證 sample-budget 收集係咪真係好過固定 rollout 數，建議做法：
+- 用 `--random-fraction 0`（即完全冇 v4.8 嘅 random-reset 影響）嚟隔離
+  變因。
+- 對比組：sample-budget 收集 vs 固定 16 rollout（而家嘅做法）。
+- 比較指標：唔淨係睇 update number，要用累積 wall-clock 時間同累積
+  environment sample 數嚟對齊比較（呼應上面「evaluation／checkpoint 比較
+  注意事項」）。
+
+明確聲明
+--------
+本檔未揀任何具體 threshold 數值（`min_player_samples`／
+`min_spawner_normal_samples`／`min_rollouts`／`max_rollouts` 全部未定），
+亦冇 authorize 開始實作。呢個構思純粹存檔待日後研究、討論、同排入
+roadmap 先再決定。
