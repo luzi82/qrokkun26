@@ -1,0 +1,25 @@
+Phase 1 eval card — historical PlayerV1 (2026-09-11 HKT)
+======================================================
+ckpt：artifacts/nas_tmp_runs/player_gpu.pt
+SHA-256：1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1
+loader：PlayerV1 + obs.vectorize；argmax det；scripted env.step
+完整 JSON：docs/suggestions/1789126118_phase1_eval_player_v1.json
+
+historical（seeds 300–329，90s cap）
+  player  mean 45.83  median 46.87  std 10.23  min 14.28  max 61.10  timeout 0
+  flee    mean 18.11  median 18.43
+  idle    mean  7.18
+  random  mean  7.99
+  對齊 ckpt 內 eval_mean_s=45.83s（train 時 range(300,330)）
+
+current both_v4 契約（seeds 3000–3029，70s cap）
+  player  mean 43.42  median 47.15  std 13.32  min 6.18  max 63.38  timeout 0
+  flee    mean 19.16  median 19.25
+  idle    mean  8.47
+  random  mean  7.84
+
+結論
+- 45s 唔係單一 seed／90s cap 假象；現行 70s＋paired seeds 仍然 mean 43s／median 47s，遠超 flee～19s。
+- 無人 timeout 70s／90s（max 63s）。
+- Gate 1 過：historical Player baseline card 可重跑。
+- 未做：V4 distill（Phase 2）。
