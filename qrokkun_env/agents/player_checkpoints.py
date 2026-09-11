@@ -114,8 +114,18 @@ def pack_player_checkpoint(
     source_commit: str | None = None,
     source_tool: str | None = None,
     extra: Mapping[str, Any] | None = None,
+    experimental: bool = False,
+    production_compatible: bool = True,
 ) -> dict[str, Any]:
-    """Pack a production-compatible checkpoint for the ranked top-k Player."""
+    """Pack a checkpoint for the ranked top-k Player.
+
+    By default the checkpoint is marked production-compatible
+    (``experimental=False``/``production_compatible=True``), matching every
+    existing caller. Callers that produce non-production artifacts (e.g. a
+    PPO retention control snapshot) must pass ``experimental=True,
+    production_compatible=False`` explicitly -- this never changes the
+    strict loading/validation contract, only the declared provenance flags.
+    """
     if not isinstance(net, PlayerRankedTopK):
         raise CheckpointArchitectureError(f"pack_player_checkpoint only supports PlayerRankedTopK, got {type(net)!r}")
     net_device = next(net.parameters()).device
@@ -126,8 +136,8 @@ def pack_player_checkpoint(
         "ckpt_role": CKPT_ROLE_PLAYER,
         "architecture": meta["architecture"],
         "architecture_version": meta["architecture_version"],
-        "production_compatible": True,
-        "experimental": False,
+        "production_compatible": bool(production_compatible),
+        "experimental": bool(experimental),
         "top_k": meta["top_k"],
         "hidden": meta["hidden"],
         "actions": list(ACTIONS),
@@ -164,10 +174,18 @@ def save_player_checkpoint(
     source_commit: str | None = None,
     source_tool: str | None = None,
     extra: Mapping[str, Any] | None = None,
+    experimental: bool = False,
+    production_compatible: bool = True,
 ) -> dict[str, Any]:
     """Pack and write a checkpoint; returns the packed dict (without weights copy)."""
     ckpt = pack_player_checkpoint(
-        net, state_dict=state_dict, source_commit=source_commit, source_tool=source_tool, extra=extra
+        net,
+        state_dict=state_dict,
+        source_commit=source_commit,
+        source_tool=source_tool,
+        extra=extra,
+        experimental=experimental,
+        production_compatible=production_compatible,
     )
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
