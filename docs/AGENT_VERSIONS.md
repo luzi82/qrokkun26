@@ -145,3 +145,45 @@ CLI: `--out-player-best`, `--out-spawner-best`, `--snapshot-every`, `--snapshot-
   `qrokkun_env/train/both_v4_args.py` (argparse only, no torch import) so CLI
   default/plumbing tests don't require torch to be installed; `both_v4.py`
   re-exports both names for backward compatibility.
+
+## v4.8 fraction-only A/B experiment layer (diagnostic only)
+
+`qrokkun_env/train/ab_v48.py` — a standalone config/manifest generator built
+**on top of** `--random-fraction` (v4.7); it does **not** touch
+`both_v4.py`/`both_v4_args.py`, so the trainer's normal one-command behavior
+and default (`--random-fraction 0.0`) are completely unchanged.
+
+- `build_paired_configs(seed=, hours=, treatment_fraction=, out_dir=,
+  extra_argv=())` builds a validated `(baseline_args, treatment_args)` pair
+  (both parsed via the *unmodified* `both_v4_args.build_parser()`): baseline
+  is forced to `--random-fraction 0.0`, treatment gets the caller's
+  fraction, `extra_argv` is applied identically to both arms (guaranteeing
+  matching seed/hours/training knobs by construction), and each arm gets
+  distinct output paths under `out_dir/baseline` / `out_dir/treatment`.
+- `validate_paired_args(baseline_args, treatment_args)` rejects: baseline
+  `random_fraction != 0.0`; treatment fraction outside `0 < f <= 1.0`; any
+  `PAIRED_KNOB_FIELDS` value differing between arms ("incompatible paired
+  config"); any `OUTPUT_PATH_FIELDS` value duplicated between arms.
+- `build_manifest(args, arm, git_head_value=None)` / `write_manifest(...)` /
+  `write_paired_manifests(...)` persist a machine-readable JSON manifest
+  **next to each arm's own `--status` file** (`<status-stem>_ab_manifest_v48.json`),
+  recording: `arm`, `random_fraction`, `seed`, all paired training/eval
+  knobs, `git_head` (best-effort `git rev-parse HEAD`), `eval_reset_mode:
+  "normal"`, `promotion: "forbidden_by_this_tool"`, and the `safety_gates`
+  list (compare normal-reset unseen-seed Player mean+median vs baseline;
+  corner probe must not worsen at any site; monitor P `approx_kl`/`clipfrac`/
+  `explained_variance`; monitor effective Spawner sample count
+  `n_s_normal`/`n_s_total`; new×new is observation only; promotion of a
+  treatment run to the default baseline is forbidden by this script/tool).
+  `write_paired_manifests` validates the pair **before** writing anything.
+- `python -m qrokkun_env.train.ab_v48 --seed S --hours H --treatment-fraction
+  F --out-dir DIR [--extra-argv ...]` is the reproducible, explicit
+  invocation layer: it validates + writes both manifests, then prints the
+  exact `python -m qrokkun_env.train.both_v4 ...` command line for each arm
+  (identical flags except `--random-fraction` and output paths). It never
+  launches training itself and never promotes/renames a checkpoint.
+- Tests: `qrokkun_env/tests/test_v48_ab_experiment.py` (argparse/json only,
+  no torch required — mirrors the v4.7 parser test style).
+- v4.8 does not modify PPO, rewards, gamma/lambda, aim/birth geometry, the
+  checkpoint selector, dynamics burn-in, or any default training mode; it is
+  diagnostic only and does **not** by itself authorize any baseline change.

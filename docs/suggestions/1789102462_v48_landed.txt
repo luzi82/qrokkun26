@@ -1,0 +1,73 @@
+v4.8 landed — fraction-only A/B experiment layer, diagnostic only
+==================================================================
+狀態：v4.8 已合入（本檔為落地記錄，唔改舊檔 1788798436_grokbot.txt /
+1789085919_v47_landed.txt）。
+
+範圍（對照 1789085919_v47_landed.txt「下一步」）
+------------------------------------------------
+v4.8 係「開 --random-fraction > 0 做獨立 A/B」嘅實作，純粹係喺 v4.7 機制
+（`qrokkun_env/reset_modes.py`）之上加一層 config／manifest 工具，唔碰
+`both_v4.py` / `both_v4_args.py`：
+
+已實作
+------
+- 新模組 `qrokkun_env/train/ab_v48.py`（純 argparse／json／subprocess，
+  唔 import torch）：
+  - `build_paired_configs(seed=, hours=, treatment_fraction=, out_dir=,
+    extra_argv=())` — 用未改嘅 `both_v4_args.build_parser()` 建構一對
+    baseline（強制 `--random-fraction 0.0`）／treatment（呼叫者揀嘅
+    fraction）`argparse.Namespace`；`extra_argv` 原封不動套用去兩邊，
+    保證 seed／hours／全部 training knob 一致；輸出路徑分開落
+    `out_dir/baseline` 同 `out_dir/treatment`。
+  - `validate_paired_args(...)` — 拒絕：baseline fraction≠0；treatment
+    fraction 唔喺 `0 < f <= 1.0`；任何一個 paired knob（seed／hours／
+    rollouts／temp_p／temp_s／entropy_p／entropy_s／lr／gamma／lam／
+    clip／ppo_epochs／minibatch／max_steps／d_model／hidden／device）
+    兩邊唔一致（"incompatible paired config"）；任何輸出路徑兩邊撞名。
+  - `build_manifest` / `write_manifest` / `write_paired_manifests` —
+    喺每個 arm 自己嘅 `--status` 檔案旁邊寫一個
+    `<status-stem>_ab_manifest_v48.json`，記低 `arm`、`random_fraction`、
+    `seed`、全部 paired knobs、`git_head`（`git rev-parse HEAD`，攞唔到就
+    `"unknown"`）、`eval_reset_mode: "normal"`、
+    `promotion: "forbidden_by_this_tool"`、同 `safety_gates`（見下）。
+    `write_paired_manifests` 會先 validate 先至寫，validate 唔過乜都唔寫。
+  - CLI：`python -m qrokkun_env.train.ab_v48 --seed S --hours H
+    --treatment-fraction F --out-dir DIR [--extra-argv ...]` — validate +
+    寫兩份 manifest，然後印低兩個 arm 完整可重現嘅
+    `python -m qrokkun_env.train.both_v4 ...` command line（除咗
+    `--random-fraction` 同輸出路徑，其他 flag 完全一樣）。呢個 CLI 本身
+    唔會執行訓練，亦唔會 promote／rename 任何 checkpoint。
+- Safety gates（記錄喺每份 manifest，人手審核，工具唔會自動判定）：
+  1. 用 normal-reset unseen-seed Player mean+median 同 baseline 比較，
+     treatment 唔可以退步。
+  2. corner probe（9 個鎖定 Player 站位）treatment 對 baseline 喺任何一個
+     站位都唔可以變差。
+  3. 監察 Player PPO diagnostics（`approx_kl`／`clipfrac`／
+     `explained_variance`）。
+  4. 監察有效 Spawner sample 數（`n_s_normal`／`n_s_total`）。
+  5. new×new（self-play）繼續係 observation only，唔可以做接受 treatment
+     嘅單一或主要指標。
+  6. Promotion（改 `--random-fraction` 預設值，或者將 treatment
+     checkpoint 改名做 best／default）呢個工具明確唔做；要改 baseline
+     必須另外、明確、人手決定。
+- 測試：`qrokkun_env/tests/test_v48_ab_experiment.py`（16 個 test，純
+  argparse／json，唔靠 torch，跟返 v4.7 `test_v47_parser.py` 嗰種風格）。
+  遵照 TDD：先加測試確認 RED（`ModuleNotFoundError`），先實作
+  `qrokkun_env/train/ab_v48.py` 令全部測試 GREEN。
+
+刻意不做（保持預設不變）
+------------------------
+- 冇改 `--random-fraction` 預設值（依然 `0.0`）、`both_v4.py` 嘅正常
+  one-command 行為完全冇改。
+- 冇改 PPO、reward、gamma/lambda、aim/birth 幾何、checkpoint selector、
+  dynamics burn-in，或者任何預設 training mode。
+- 冇令任何 treatment 跑出嚟嘅結果自動變成新 baseline——呢份文件同
+  `ab_v48.py` 本身都唔 authorize baseline 改變；係咪要改，要睇埋
+  safety gates 嘅人手審核結果先決定。
+- 冇實際跑訓練（真係跑兩個 arm 屬於用者責任，用工具印出嚟嘅 command）。
+
+下一步
+------
+如果人手審核 safety gates 之後覺得某個 fraction 值真係好過 baseline，
+先至再開獨立討論／文件去決定會唔會令 baseline 改變；呢個決定唔屬於
+v4.8 範圍。
