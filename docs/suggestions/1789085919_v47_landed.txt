@@ -1,0 +1,39 @@
+v4.7 landed — reset-mode mechanism only, fraction default 0
+================================================================
+狀態：v4.7 已合入（本檔為落地記錄，唔改舊檔 1788798436_grokbot.txt）。
+
+範圍（對照 1788798436_grokbot.txt「v4.7 預告」）
+------------------------------------------------
+已實作
+- 薄層 `prepare_initial_state`（`qrokkun_env/reset_modes.py`）：借用
+  `env.reset()`（空場、pvx=pvy=0、elapsed/spawn_acc/rng 重置），只改
+  Player 位置為近場中央小半徑內隨機點。無隨機 bullet、無 v5 dynamics
+  burn-in。
+- CLI `--random-fraction`（float，**預設 0.0**）。fraction=0 時完全唔call
+  `prepare_initial_state`，訓練 mix 同 v4.6 一致
+  （self,self,p_vs_scripted,s_vs_flee,self,s_vs_flee，全部 normal reset）。
+- 明確 mode 分流：`self_normal`、`self_random_player`（只訓 Player，Spawner
+  traj 唔 pack）、`p_vs_scripted_normal`／`p_vs_scripted_random`、
+  `s_vs_flee_normal`（**永遠** normal reset，唔理 fraction）。
+- Credit/batch 分流：Spawner PPO batch 只用 normal-reset samples（防禦性
+  filter，見 `both_v4.main()`）；Player 可以喺 fraction>0 時混合
+  normal+random。
+- Metadata：`Traj.reset_mode`、jsonl `surv_by_mode` / `reset_mode_counts` /
+  `random_fraction` / `n_s_total` / `n_s_normal`。
+- 正式 eval（`eval_pair`／`eval_pair_stats`／compare／best-ckpt）完全冇改，
+  永遠 normal reset。
+- Snapshot cadence 冇碰（維持 v4.6 嘅 update%5 gate 外置修正）。
+- 新測試 `qrokkun_env/tests/test_v47_*.py`（parser／prepare_initial_state／
+  fraction schedule／spawner batch split），刻意唔靠 torch（`build_parser`
+  抽咗去 `qrokkun_env/train/both_v4_args.py`）。
+
+刻意不做
+--------
+- 開 `--random-fraction > 0` 做新 baseline（呢個係 v4.8，需要獨立 A/B）。
+- Dynamics burn-in（v5）、對稱、Flee BC、opponent pool、disk replay、改
+  best-ckpt selector、aim/birth 幾何、AIM_SCALE、gamma A/B、reward rewrite。
+
+下一步
+------
+v4.8：獨立 A/B 開 `--random-fraction > 0`，觀察 survival／PPO diagnostics
+是否退化，先決定會唔會變成新預設。

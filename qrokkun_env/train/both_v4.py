@@ -7,17 +7,17 @@ No offline replay; diversity via sample/entropy, env jitter, flee/scripted pool.
 v4.4: terminated vs truncated + final-value bootstrap (last_value into GAE).
 v4.5: per-transition delta_frames; gamma_t = gamma_frame ** delta_frames.
 v4.6: PPO diagnostics + latest/best/snapshot ckpts (P/S separate selection).
+v4.7: mechanism-only reset-mode plumbing (--random-fraction, default 0.0);
+see qrokkun_env/reset_modes.py. Default path is unchanged: env.reset() only.
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import math
 import random
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from qrokkun_env.train.checkpoints_v4 import (
@@ -42,6 +42,18 @@ from qrokkun_env.agents.obs_v4 import encode_obs
 from qrokkun_env.env import ACTIONS, ACTION_TO_DIR, Qrokkun26Env, _move_toward, _spawn_interval
 from qrokkun_env.godot_rng import f32
 from qrokkun_env.policies import FleeNearestBullet
+from qrokkun_env.reset_modes import (
+    BASE_LOOP,
+    RESET_NORMAL,
+    prepare_initial_state,
+    reset_kind_for_mode,
+    resolve_mode,
+    trains_player,
+    trains_spawner,
+    uses_scripted_spawner,
+    uses_flee_player,
+)
+from qrokkun_env.train.both_v4_args import build_parser, reject_non_unit_temp
 
 PlayerAC = PlayerV4
 SpawnerAC = SpawnerV4
@@ -64,6 +76,7 @@ class Traj:
     last_value: float = 0.0  # v4.4: 0 if terminated else V(final_obs)
     terminated: bool = False
     truncated: bool = False
+    reset_mode: str = "normal"  # v4.7: "normal" or "random_player"
 
 
 def gae(
@@ -248,10 +261,23 @@ def _finalize_spawner_end(straj: Traj, env, spawner, device, *, terminated: bool
 
 
 def run_episode(
-    env, player, spawner, device, max_steps, *, sample, train_player, train_spawner, temp_p, temp_s, rng_jitter
+    env, player, spawner, device, max_steps, *, sample, train_player, train_spawner, temp_p, temp_s, rng_jitter,
+    initial_reset: bool = True, reset_mode: str = RESET_NORMAL,
 ):
+    """Run one episode.
+
+    v4.7: if ``initial_reset`` is False, the caller has already prepared the
+    env's initial state (e.g. via reset_modes.prepare_initial_state) and this
+    function must NOT call env.reset() again. ``reset_mode`` is metadata only
+    ("normal" / "random_player"), tagged onto the returned trajectories.
+    Official eval (eval_pair / eval_pair_stats) always calls this with the
+    defaults (initial_reset=True, reset_mode="normal") — i.e. normal reset.
+    """
     ptraj, straj = Traj(), Traj()
-    env.reset()
+    ptraj.reset_mode = reset_mode
+    straj.reset_mode = reset_mode
+    if initial_reset:
+        env.reset()
     flee = FleeNearestBullet() if player == "flee" else None
     frames_since_spawn = 0
 
@@ -627,85 +653,6 @@ def eval_pair_stats(
     return summarize_times(times)
 
 
-def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--hours", type=float, default=6.0)
-    ap.add_argument("--out-player", type=Path, default=Path("runs/both_v4_player.pt"))
-    ap.add_argument("--out-spawner", type=Path, default=Path("runs/both_v4_spawner.pt"))
-    ap.add_argument("--status", type=Path, default=Path("runs/both_v4_status.json"))
-    ap.add_argument("--compare", type=Path, default=Path("runs/both_v4_compare.json"))
-    ap.add_argument("--log", type=Path, default=Path("runs/both_v4.jsonl"))
-    ap.add_argument("--device", default="cuda")
-    ap.add_argument("--rollouts", type=int, default=16)
-    ap.add_argument(
-        "--temp-p",
-        type=float,
-        default=1.0,
-        help="Player action temperature (default 1.0). Exploration uses sampling+entropy, not temp!=1. Non-1.0 is rejected.",
-    )
-    ap.add_argument(
-        "--temp-s",
-        type=float,
-        default=1.0,
-        help="Spawner action temperature (default 1.0). Exploration uses sampling+entropy, not temp!=1. Non-1.0 is rejected.",
-    )
-    ap.add_argument("--entropy-p", type=float, default=0.04)
-    ap.add_argument("--entropy-s", type=float, default=0.02)
-    ap.add_argument("--lr", type=float, default=2.5e-4)
-    ap.add_argument("--gamma", type=float, default=0.99, help="Per-frame discount; GAE uses gamma**delta_frames (v4.5).")
-    ap.add_argument("--lam", type=float, default=0.95, help="Per-frame GAE lambda; uses lam**delta_frames (v4.5).")
-    ap.add_argument("--clip", type=float, default=0.2)
-    ap.add_argument("--ppo-epochs", type=int, default=3)
-    ap.add_argument("--minibatch", type=int, default=256)
-    ap.add_argument("--max-steps", type=int, default=60 * 70)
-    ap.add_argument("--seed", type=int, default=4)
-    ap.add_argument("--d-model", type=int, default=128)
-    ap.add_argument("--hidden", type=int, default=256)
-    ap.add_argument(
-        "--corner-probe",
-        type=Path,
-        nargs="?",
-        const=Path("runs/both_v4_corner_probe.json"),
-        default=None,
-        help="If set, run locked-P corner probe at end and write JSON (default path if flag alone).",
-    )
-    ap.add_argument(
-        "--out-player-best",
-        type=Path,
-        default=None,
-        help="Best player ckpt (default: <out-player>_best.pt). Selection: newP×scripted.",
-    )
-    ap.add_argument(
-        "--out-spawner-best",
-        type=Path,
-        default=None,
-        help="Best spawner ckpt (default: <out-spawner>_best.pt). Selection: flee×newS_det_stoch.",
-    )
-    ap.add_argument(
-        "--snapshot-every",
-        type=int,
-        default=0,
-        help="If >0, copy latest weights to snapshot-dir every N updates (0=off).",
-    )
-    ap.add_argument(
-        "--snapshot-dir",
-        type=Path,
-        default=Path("runs/snapshots"),
-        help="Directory for periodic snapshot copies (v4.6).",
-    )
-    return ap
-
-
-def reject_non_unit_temp(args: argparse.Namespace) -> None:
-    """v4.2: keep CLI names but refuse any temperature other than 1.0."""
-    if float(args.temp_p) != 1.0 or float(args.temp_s) != 1.0:
-        raise SystemExit(
-            "error: non-1.0 temperature is not supported "
-            f"(got --temp-p={args.temp_p}, --temp-s={args.temp_s}). "
-            "Exploration uses sampling+entropy, not temp!=1."
-        )
-
-
 def main() -> None:
     ap = build_parser()
     args = ap.parse_args()
@@ -746,44 +693,72 @@ def main() -> None:
     best_vs_scripted = -1.0
     best_flee_vs_new_ds = float("inf")
     modes = ["self", "self", "p_vs_scripted", "s_vs_flee", "self", "s_vs_flee"]
+    assert tuple(modes) == BASE_LOOP  # v4.7: BASE_LOOP is the canonical default mix.
+    mode_rng = random.Random(args.seed)
 
     with args.log.open("w") as logf:
         while time.time() < deadline:
             ptrajs, strajs, survs = [], [], []
+            surv_by_mode: dict[str, list[float]] = {}
+            reset_mode_counts: dict[str, int] = {}
             for i in range(args.rollouts):
                 env = Qrokkun26Env(seed=args.seed + update * 200 + i)
-                mode = modes[i % len(modes)]
-                if mode == "p_vs_scripted":
-                    p_net, s_net, tp, ts = player, None, True, False
-                elif mode == "s_vs_flee":
-                    p_net, s_net, tp, ts = "flee", spawner, False, True
+                base = modes[i % len(modes)]
+                mode = resolve_mode(base, args.random_fraction, mode_rng)
+                reset_kind = reset_kind_for_mode(mode)
+                if uses_scripted_spawner(mode):
+                    p_net, s_net = player, None
+                elif uses_flee_player(mode):
+                    p_net, s_net = "flee", spawner
                 else:
-                    p_net, s_net, tp, ts = player, spawner, True, True
+                    p_net, s_net = player, spawner
+                tp, ts = trains_player(mode), trains_spawner(mode)
+                initial_reset = reset_kind == RESET_NORMAL
+                if not initial_reset:
+                    # v4.7: near-center random Player, empty field, pvx=pvy=0.
+                    # No random bullets, no dynamics burn-in (v5).
+                    prepare_initial_state(env, rng=mode_rng)
                 pt, st, surv = run_episode(
                     env, p_net, s_net, device, args.max_steps,
                     sample=True, train_player=tp, train_spawner=ts,
                     temp_p=args.temp_p, temp_s=args.temp_s, rng_jitter=True,
+                    initial_reset=initial_reset, reset_mode=reset_kind,
                 )
                 if tp:
                     ptrajs.append(pt)
                 if ts:
                     strajs.append(st)
                 survs.append(surv)
+                surv_by_mode.setdefault(mode, []).append(surv)
+                reset_mode_counts[reset_kind] = reset_mode_counts.get(reset_kind, 0) + 1
+
+            # v4.7: Spawner PPO batch uses ONLY normal-reset samples. In practice
+            # trains_spawner() already restricts packing to always-normal modes,
+            # so this filter is a defensive no-op today — it becomes load-bearing
+            # once v4.8 allows random-reset self-play to also train the Spawner.
+            n_s_total = len(strajs)
+            strajs_normal = [st for st in strajs if st.reset_mode == RESET_NORMAL]
+            n_s_normal = len(strajs_normal)
 
             _n_p, diag_p = ppo_update_player(
                 player, opt_p, ptrajs, device, args.clip, args.ppo_epochs, args.minibatch,
                 args.entropy_p, 0.5, args.gamma, args.lam,
             )
             _n_s, diag_s = ppo_update_spawner(
-                spawner, opt_s, strajs, device, args.clip, args.ppo_epochs, args.minibatch,
+                spawner, opt_s, strajs_normal, device, args.clip, args.ppo_epochs, args.minibatch,
                 args.entropy_s, 0.5, args.gamma, args.lam,
             )
             end_p = traj_end_rates(ptrajs)
-            end_s = traj_end_rates(strajs)
+            end_s = traj_end_rates(strajs_normal)
 
             row = {
                 "update": update,
                 "surv_mean": sum(survs) / len(survs),
+                "surv_by_mode": {m: sum(vs) / len(vs) for m, vs in surv_by_mode.items()},
+                "reset_mode_counts": reset_mode_counts,
+                "random_fraction": args.random_fraction,
+                "n_s_total": n_s_total,
+                "n_s_normal": n_s_normal,
                 "wall_h": (time.time() - t0) / 3600,
                 "ppo_p": diag_p,
                 "ppo_s": diag_s,

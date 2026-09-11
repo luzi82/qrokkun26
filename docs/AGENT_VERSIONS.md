@@ -111,3 +111,37 @@ Logged each update on jsonl (`ppo_p` / `ppo_s`) and on status when eval runs:
 **Do not** use `new_vs_new_det_det` / `new×new` as the sole selector for either agent (known corner exploit; observation only). See `qrokkun_env/train/checkpoints_v4.py`.
 
 CLI: `--out-player-best`, `--out-spawner-best`, `--snapshot-every`, `--snapshot-dir`.
+
+## v4.7 reset-mode plumbing (mechanism only; fraction default 0.0)
+
+`--random-fraction` (float, default **0.0**) — CLI plumbing only. Opening
+`fraction > 0` as a new training baseline is **v4.8**, out of scope here.
+
+- `prepare_initial_state(env, ...)` (`qrokkun_env/reset_modes.py`): thin reset
+  reusing `env.reset()` (empty field, `pvx=pvy=0`, elapsed/spawn_acc/rng
+  reset), then overrides only the Player position to a uniformly random point
+  within a small radius (`RANDOM_PLAYER_RADIUS`, 40px) of the field center.
+  Does **not** spawn bullets and does **not** run any dynamics burn-in
+  (deferred to v5).
+- Explicit training modes (`qrokkun_env/reset_modes.py`): `self_normal`,
+  `self_random_player` (trains **Player only**; Spawner traj never packed),
+  `p_vs_scripted_normal` / `p_vs_scripted_random`, `s_vs_flee_normal`
+  (**always** normal reset regardless of `--random-fraction`).
+- Credit/batch split: Spawner PPO batch (`ppo_update_spawner`) is filtered to
+  **only** normal-reset trajectories (`reset_mode == "normal"`) each update;
+  Player may mix normal + random-reset trajectories when fraction>0.
+- Metadata: `Traj.reset_mode`, per-update jsonl fields `surv_by_mode`,
+  `reset_mode_counts`, `random_fraction`, `n_s_total` / `n_s_normal`
+  (effective Spawner sample count before/after the normal-reset filter).
+- Official eval (`eval_pair`, `eval_pair_stats`, `compare`, best-ckpt
+  selection) is **unchanged**: always calls `run_episode` with its defaults
+  (`initial_reset=True`, `reset_mode="normal"`) — i.e. normal `env.reset()`
+  only. Never evaluates from random starts.
+- **Default path** (`--random-fraction 0.0`, the default): `prepare_initial_state`
+  is never called; the loop mix reduces to the v4.6 proportions
+  (`self, self, p_vs_scripted, s_vs_flee, self, s_vs_flee`, all normal reset) —
+  no behavior change vs pre-v4.7.
+- `build_parser()` / `reject_non_unit_temp()` were extracted to
+  `qrokkun_env/train/both_v4_args.py` (argparse only, no torch import) so CLI
+  default/plumbing tests don't require torch to be installed; `both_v4.py`
+  re-exports both names for backward compatibility.
