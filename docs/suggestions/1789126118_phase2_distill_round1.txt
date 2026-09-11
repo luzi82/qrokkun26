@@ -1,0 +1,14 @@
+Phase 2 round 1 — teacher-traj distill V1→V4（未過 Gate 2）
+========================================================
+script：tools/phase2_distill_v1_to_v4.py
+teacher：player_gpu.pt（argmax vs scripted）
+collect：240 eps，train 146688 frames／held 20300，mean_ep_len=695.8
+train：40 epochs，soft CE，cuda GB10
+
+結果（best epoch 38）
+- held-out action agreement **0.37**（random 約 0.11；遠未模仿 teacher）
+- held CE **2.15**、student entropy **2.09**（仍近 uniform log9≈2.20）
+- closed-loop P×scripted 3000–3029 70s：mean **9.04s** median **9.23s**
+- flee baseline 19.16s；V1 teacher 同契約 43.42s
+
+結論：第一輪 **offline teacher BC 未把技能搬過去**。agreement 低，唔係「agreement 高但 closed-loop 差」嗰種，所以下一步應係加強 fit／DAgger（student-state relabel），而唔係急住 PPO。未混入 S／fraction／gamma。

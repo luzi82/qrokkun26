@@ -1,0 +1,26 @@
+{
+  "teacher_ckpt": "/home/ovm-hms-bot/scratch_phase1/player_gpu.pt",
+  "student_ckpt": "/home/ovm-hms-bot/scratch_phase1/phase2/player_v4_distill.pt",
+  "best_epoch": 38,
+  "device": "cuda",
+  "collect_episodes": 240,
+  "held_out_frames": {
+    "agreement": 0.37266009852216747,
+    "cross_entropy": 2.150064186462628,
+    "entropy": 2.0927453913947045,
+    "n": 20300
+  },
+  "closed_loop_report_3000_3029": {
+    "mean": 9.036111111111184,
+    "median": 9.233333333333372,
+    "std": 3.4262577667115544,
+    "n": 30
+  },
+  "closed_loop_selection_8000_8011_best": 11.965277777777926,
+  "flee_baseline_3000_3029": {
+    "mean": 19.15611111111109,
+    "median": 19.25000000000019,
+    "std": 7.700766536320336,
+    "n": 30
+  }
+}
