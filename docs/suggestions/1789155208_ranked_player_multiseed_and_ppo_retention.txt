@@ -1,0 +1,360 @@
+Ranked Player architecture, multi-seed reproduction, and BC-retention PPO control
+================================================================================
+
+Status
+------
+
+The formal ranked top-k Player architecture was implemented and its supervised
+reproducibility gate passed. The subsequent frozen/no-update versus current
+scripted-only PPO retention control failed the pre-registered retention gate.
+No PPO checkpoint is promoted.
+
+The main finding is unambiguous: current scripted PPO rapidly moves the policy
+away from the transferred PlayerV1 skill. Closed-loop survival is statistically
+unchanged through update 100 on paired 30-seed comparisons, while held teacher
+agreement collapses from 0.700 to 0.240. At update 200, agreement reaches 0.173
+and survival falls to 24.53 s mean / 22.62 s median.
+
+Scope and isolation
+-------------------
+
+- Player only, against the scripted Spawner.
+- No learned Spawner, self-play, random-start fraction, entropy A/B,
+  gamma/lambda A/B, reward rewrite, or DAgger.
+- PlayerV1 trajectories were used only for supervised distillation and held
+  diagnostics. They were never inserted into PPO on-policy batches.
+- All NAS artifacts had already been copied locally before evaluation.
+- Branch: player-recovery/phase-0.
+- Formal architecture/multi-seed source commit:
+  d32bfd797060373e5d789000b7e156b85b51d37f
+- PPO-retention source commit:
+  556896f3a366a088878a6446111430aa026fb8a8
+- Git worktree was clean during both formal experiments.
+
+Formal Player architecture
+--------------------------
+
+PlayerRankedTopK preserves distinct ranked bullet slots rather than pooling all
+bullets into one single-query attention context.
+
+- architecture key: player_ranked_topk
+- observation contract: player_feat=6, bullet_feat=9, max_bullets=64
+- ranked slots retained: top_k=8
+- action order: idle, n, ne, e, se, s, sw, w, nw
+- hidden width: 472
+- parameter count: 269,050
+- parameter-count target: 269,050; relative error 0
+- strict checkpoint schema validates architecture, observation metadata,
+  action order, top_k, hidden width, state-dict shapes, and state-dict hash.
+- supervised checkpoints are production-compatible but are not promoted until
+  the reproducibility gate passes.
+- PPO snapshots are explicitly experimental and non-production; they include
+  parent checkpoint hashes, dataset hash, update, knobs, seed windows, and eval
+  summary. They are rejected as production initialization checkpoints.
+
+Canonical teacher and dataset
+-----------------------------
+
+Teacher PlayerV1 checkpoint SHA-256:
+1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1
+
+Teacher dataset:
+- deterministic teacher collection
+- 240 episodes, environment seeds beginning at 20000
+- 211 train / 29 held-out episodes
+- 146,688 train frames / 20,300 held frames
+- 700 sampled frames per episode cap
+- maximum episode length: 4,200 frames (70 s)
+- dataset identity SHA-256:
+  2521bd12ae8b630e65f2645132bde4952fe8f60783ad0e87648ed2af688e558a
+
+Supervised objective and budget:
+- hybrid hard + soft teacher objective
+- training seeds: 4, 5, 6
+- same dataset and split for every seed
+- 80 epochs
+- batch size 1,024
+- learning rate 3e-4
+- checkpoint selection uses held imitation metrics only
+- closed-loop results never select a checkpoint
+
+Multi-training-seed reproduction
+--------------------------------
+
+Every seed passed the held-agreement threshold of 0.65 and then received the
+same deterministic 30-seed closed-loop evaluation on seeds 3000--3029 with a
+4,200-step cap.
+
+Seed 4:
+- selected epoch: 80
+- held agreement: 0.6910
+- held agreement by bullet count: 0 bullets 0.9479; 1--7 0.6085;
+  8--19 0.6702; 20+ 0.7014
+- closed-loop mean / median: 31.2472 s / 33.3750 s
+- std / min / max: 14.2317 s / 5.6500 s / 49.7167 s
+- censored episodes: 0/30
+- checkpoint file SHA-256:
+  441ffa12c3bbb417d284e6e837f47a6d5366ba6cf688914dfc26b457c7516fb5
+
+Seed 5:
+- selected epoch: 80
+- held agreement: 0.7020
+- held agreement by bullet count: 0 bullets 0.9271; 1--7 0.6376;
+  8--19 0.6796; 20+ 0.7126
+- closed-loop mean / median: 36.2689 s / 38.6000 s
+- std / min / max: 15.7146 s / 8.5000 s / 64.4500 s
+- censored episodes: 0/30
+- checkpoint file SHA-256:
+  decc50ba2f781f243814bb0c984499bc6bf3ce66f5bcc9cbf22ae1acd3fd545a
+
+Seed 6:
+- selected epoch: 80
+- held agreement: 0.6999
+- held agreement by bullet count: 0 bullets 0.9479; 1--7 0.6305;
+  8--19 0.6796; 20+ 0.7084
+- closed-loop mean / median: 34.0906 s / 36.7917 s
+- std / min / max: 15.0115 s / 8.0833 s / 58.1667 s
+- censored episodes: 0/30
+- checkpoint file SHA-256:
+  844e029a74fce418e1d97041e66cf5422a25d8f500628d1ff5526640a7a36ad9
+- state-dict SHA-256:
+  a6f95c4621015c15f0e857d1ca0b5a9f561c3e50462472c553d5db7f960064e7
+
+Reproducibility gate:
+- all held agreements >= 0.65: PASS
+- every seed received complete 30-seed coverage: PASS
+- minimum per-seed closed-loop mean >= 25 s: actual 31.2472 s, PASS
+- minimum per-seed closed-loop median >= 25 s: actual 33.3750 s, PASS
+- mean across the three closed-loop means >= 30 s: actual 33.8689 s, PASS
+- canonical training and evaluation seed windows: PASS
+- production reproducibility gate: PASS
+
+This reproduces the earlier experimental 33.12 s result. It is not a single
+training-seed accident. The remaining gap to the PlayerV1 teacher's 43.42 s
+mean is still material, and early deaths remain visible.
+
+Representative BC checkpoint for retention control
+---------------------------------------------------
+
+Seed 6 was preselected as the representative checkpoint because its 34.09 s
+closed-loop mean is the median of the three training-seed means
+(31.25, 34.09, 36.27). This avoids selecting the best seed 5 after seeing
+closed-loop outcomes. Frozen and PPO arms start from the exact same seed 6
+state dict.
+
+BC-retention control contract
+-----------------------------
+
+Frozen/no-update arm:
+- zero optimizer steps
+- one deterministic 30-seed evaluation at update 0, replicated at later
+  scheduled points by construction
+- state-dict SHA-256 before and after that evaluation must be bit-identical
+
+Current scripted-only PPO arm:
+- updates: 200
+- scripted episodes per update: 8
+- rollout seed start: 50000
+- maximum rollout length: 4,200 frames
+- learning rate: 3e-4
+- gamma: 0.99
+- lambda: 0.95
+- PPO clip: 0.2
+- entropy coefficient: 0.02
+- value coefficient: 0.5
+- PPO epochs: 4
+- minibatch: 512
+- Adam epsilon: 1e-8
+- gradient norm limit: 1.0
+- normalized advantages
+- current PlayerV1 behavior preserved: truncation is treated as terminal and
+  there is no value bootstrap at the cap
+- evaluation snapshots: updates 0, 10, 25, 50, 100, 200
+- evaluation: deterministic argmax, seeds 3000--3029, cap 70 s
+
+Initial run gate:
+- mean >= 25 s: 34.0906 s, PASS
+- median >= 25 s: 36.7917 s, PASS
+
+Retention thresholds relative to the PPO arm's update-0 snapshot (numerically
+identical to the frozen evaluation here):
+- mean >= 80% of initial: threshold 27.2724 s
+- median >= 80% of initial: threshold 29.4333 s
+- held teacher agreement decline <= 0.05 absolute: floor 0.6499
+
+Frozen control result
+---------------------
+
+- state dict before and after the single evaluation bit-identical: PASS
+- per-snapshot metrics are replicated by construction, not re-measured
+- optimizer steps: 0
+- mean / median: 34.0906 s / 36.7917 s
+
+The frozen arm demonstrates that evaluation itself does not mutate the model
+weights. It does not independently test repeated-evaluation drift or checkpoint
+reload behavior.
+
+PPO retention curve
+-------------------
+
+Update | mean s | mean delta | median s | median delta | agreement | agreement drop | teacher->student KL
+0      | 34.0906 |   0.00% | 36.7917 |   0.00% | 0.6999 | 0.0000 | 0.1772
+10     | 30.0061 | -11.98% | 30.3833 | -17.42% | 0.5286 | 0.1713 | 0.2537
+25     | 36.9317 |  +8.33% | 35.5000 |  -3.51% | 0.4272 | 0.2727 | 0.2984
+50     | 36.6189 |  +7.42% | 38.9250 |  +5.80% | 0.3151 | 0.3847 | 0.3717
+100    | 36.5872 |  +7.32% | 36.7583 |  -0.09% | 0.2402 | 0.4597 | 0.4715
+200    | 24.5350 | -28.03% | 22.6250 | -38.51% | 0.1731 | 0.5268 | 0.6074
+
+Interpretation:
+- The first retention violation occurs at update 10. Survival remains above
+  its 80% floors, but teacher agreement has already fallen 0.171 absolute.
+- The point estimates at updates 25--100 are 2.50--2.84 s above update 0, but
+  paired 95% confidence intervals all include zero; survival is unchanged
+  within evaluation noise. Agreement nevertheless falls to 0.315 at update 50
+  and 0.240 at update 100.
+- By update 200, both skill measures fail: mean and median are below retention
+  floors and agreement is 0.527 below its initial value.
+- Final teacher-to-student KL is 0.607 versus 0.177 initially.
+
+Paired mean survival differences versus update 0 (same 30 seeds; approximate
+95% t intervals, df=29):
+- update 10: -4.0844 s, CI [-11.9250, 3.7561]
+- update 25: +2.8411 s, CI [-5.1492, 10.8314]
+- update 50: +2.5283 s, CI [-4.9732, 10.0299]
+- update 100: +2.4967 s, CI [-4.1621, 9.1554]
+- update 200: -9.5556 s, CI [-17.1391, -1.9721]
+
+Paired final seed comparison:
+- 10/30 evaluation seeds improve relative to update 0
+- 19/30 worsen
+- 1/30 is unchanged
+- paired mean change: -9.5556 s
+- paired median change: -11.1583 s
+- no evaluation episodes are censored
+
+Training accounting and diagnostics
+-----------------------------------
+
+- 200 PPO updates
+- 1,600 on-policy scripted episodes
+- 2,831,255 environment frames / effective PPO samples
+- 22,520 optimizer steps
+- censored training rollouts: 0
+- mean approximate KL across updates: 0.01308
+- mean clip fraction: 0.18519
+- mean entropy: 1.76749; update 1 1.60443; update 200 1.79562
+- mean explained variance: 0.67209; update 1 -0.36717; update 200 0.74823
+- mean training-rollout survival: 29.4922 s; update 1 30.6042 s;
+  update 200 23.6375 s
+
+The report schema records environment frames, effective samples via per-update
+n_samples, optimizer steps, episode counts, and rollout censoring. It does not
+currently include an explicit wall-clock field. Filesystem timestamps give a
+measured end-to-end interval from output-directory birth
+2026-09-12 03:10:23.843152768 HKT to report write
+2026-09-12 03:32:13.153238766 HKT: 1,309.310086 s (about 21 min 49 s).
+This timestamp-derived duration is reported explicitly rather than presented as
+a field emitted by the harness.
+
+Retention verdict
+-----------------
+
+- mean retention: FAIL
+- median retention: FAIL
+- held teacher agreement retention: FAIL
+- first breaking snapshot: update 10
+- overall retention gate: FAIL
+- promotion: false
+
+Current scripted PPO does not retain the transferred BC skill. It temporarily
+keeps survival statistically indistinguishable from the starting policy through
+update 100 while rapidly destroying teacher agreement. By update 200, the
+paired survival difference is also negative. This matched same-start comparison
+associates the changes with the PPO arm; the frozen implementation itself only
+proves that one evaluation does not mutate weights.
+
+Artifacts and integrity
+-----------------------
+
+Raw multi-seed report local copy:
+artifacts/player_recovery_results/ranked_multiseed_report.json
+SHA-256:
+03a90034ee5826bbcfaf466dea565b00f44828ed7c89a7de4d4043f4695b8adc
+
+Raw retention report local copy:
+artifacts/player_recovery_results/retention/report.json
+SHA-256:
+cddbb4ea005531eb416744353a899d75f88faeb662a67db62b4b7f4ee32e6a0d
+
+PPO update JSONL local copy:
+artifacts/player_recovery_results/retention/ppo_updates.jsonl
+SHA-256:
+26898f6fd32760b18a2a113ba76130610922e675ea4c6738f6a466166b5a6edd
+
+PPO checkpoints are locally readable under
+artifacts/player_recovery_results/retention/. File SHA-256 values:
+- update 0:   e080ef806094a97970c6d4f6b61864f715d80e5581bf3b76908600a3bad962bc
+- update 10:  1acd640e4b1e786ccf680f4706a8877f439271787999ab4a54f4bb81438c62f2
+- update 25:  efe9dbd90c99345e4702844692fe227c0c0aef280935fe13be82876d1dbaab9e
+- update 50:  e3640513f80c7e159e4ce65549b511ce680440c2ad38652d15b3749af44c88cb
+- update 100: 058bee5aa40a2c20f0eb446e55dbda6982a287c505abf50e83ef63076d7cf369
+- update 200: c5c9916bfc44e8cd9a2d1e866788026226dfb8146391d0675d7596441014818b
+- final:      e80ae93cbfd437c8dbd140fb205f5099ec93a5a86e67da5755250f41f986cebe
+
+Runtime:
+- Python 3.12.3
+- PyTorch 2.11.0+cu128
+- NumPy 2.5.2
+- GPU NVIDIA GB10
+
+Verification
+------------
+
+Before the formal run:
+- targeted architecture/checkpoint/multi-seed/retention and existing V4 tests:
+  195 passed, one pre-existing warning
+- final synchronous Copilot Opus 5 review: ACCEPTED, no blocking issues
+- remote GPU quick run: completed with both arms and report serialization
+
+After the retention implementation fix cycles, the full repository suite was
+also inspected by Copilot: 299 passed with two pre-existing failures unrelated
+to this diff (legacy shebang test on untouched train/ab_v48.py and a PlayerV0
+grad test). No new test failure was attributed to this work.
+
+Limitations
+-----------
+
+- The retention control uses one representative BC training seed. It is a
+  matched same-checkpoint causal control, not a claim about PPO variance across
+  all three BC training seeds.
+- The PPO arm itself is a single run (torch seed 0 and one rollout-seed stream
+  beginning at 50000). The curve shape is not separable from PPO run-to-run
+  variance. The agreement collapse from 0.700 to 0.173 is the large primary
+  signal; intermediate survival point estimates are treated as noise-limited.
+- Evaluation uses one fixed 30-seed scripted-Spawner contract. It does not test
+  learned Spawners or live self-play.
+- Agreement is measured on teacher-state held data. It detects retention loss,
+  but not all student-state covariate shift.
+- The 25/50/100 update survival peaks are diagnostic snapshots, not checkpoints
+  selected by a preregistered promotion rule. They must not be promoted after
+  observing their closed-loop outcomes.
+- The harness mirrors historical PlayerV1 PPO truncation semantics. It does not
+  test whether bootstrapping at truncation would change retention.
+
+Decision and next step
+----------------------
+
+1. Promote the formal PlayerRankedTopK supervised architecture contract and
+   record that its multi-seed reproduction gate passed.
+2. Do not promote any checkpoint from the current scripted-only PPO arm.
+3. Keep seed 6 BC as the representative retention baseline; retain all PPO
+   snapshots only as experimental evidence.
+4. The next controlled experiment should add a BC-retention auxiliary objective
+   to scripted PPO, starting from the same seed 6 BC checkpoint and keeping the
+   current PPO configuration, rollout seeds, frame/update budget, and eval
+   contract fixed. Compare against this exact frozen and unregularized PPO
+   result.
+5. Pre-register retention weighting and selection using held imitation metrics;
+   do not select update 25/50/100 retrospectively by survival.
+6. Only after retention is controlled should entropy, gamma/lambda time scale,
+   frozen/pool/lagged Spawner, or live self-play be introduced.
