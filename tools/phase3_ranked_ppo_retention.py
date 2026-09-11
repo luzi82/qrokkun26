@@ -676,6 +676,7 @@ def collect_canonical_dataset(
     frames_cap: int = FRAMES_PER_EPISODE_CAP,
     held_frac: float = HELD_OUT_FRAC,
     teacher_path: Path | str | None = None,
+    include_train_tensors: bool = False,
 ) -> dict[str, Any]:
     """Recollect the canonical V1 teacher dataset locally (once) using the
     EXACT Phase2 ``collect_dataset``/``collect_episode`` contract -- full
@@ -688,7 +689,12 @@ def collect_canonical_dataset(
     PPO batch). The identity hash is Phase2's own
     ``phase2_ranked_multiseed.dataset_identity`` over the actual Frame
     content (player/bullets/pad/teacher_logits/elapsed/episode) -- never a
-    hash of collection parameters alone."""
+    hash of collection parameters alone.
+
+    ``include_train_tensors`` additionally materializes the TRAIN split
+    tensors. This control never uses them (no teacher data ever enters a PPO
+    batch here); they exist for the round-1 auxiliary-retention arm, which
+    trains its retention term on the train split only."""
     rng = random.Random(DATA_SEED)
     train_frames, held_frames = collect_dataset(
         teacher,
@@ -714,6 +720,8 @@ def collect_canonical_dataset(
     }
     if teacher_path is not None:
         result["teacher_file_sha256"] = file_sha256(teacher_path)
+    if include_train_tensors:
+        result["train_tensors"] = frames_to_tensors(train_frames, device)
     return result
 
 
