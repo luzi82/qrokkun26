@@ -1,0 +1,140 @@
+Player V5 命名決定：PlayerRankedTopK 正式定名為 PlayerV5
+================================================================================
+
+Status（狀態）
+--------------
+
+呢份係 architecture decision record（架構命名決定紀錄），非實驗報告。
+由今日起，owner 決定將 PlayerRankedTopK 呢個架構（architecture identity）
+正式命名為 PlayerV5，命名生效即時執行，**唔取決於**日後 PPO / RL 訓練
+是否成功。命名係身份判斷（identity call），唔係訓練成果判斷（training
+outcome call）。
+
+Architecture identity（架構身份）
+---------------------------------
+
+- 代號：PlayerV5
+- 對應現有實作 class：PlayerRankedTopK
+  （文件：qrokkun_env/agents/player_ranked_topk.py）
+- checkpoint architecture key：`player_ranked_topk`（不變，見下方
+  compatibility 章節）
+- 架構特徵：保留 ranked bullet slots（top_k=8），而唔係將所有 bullet
+  pool 做單一 query attention context
+- observation contract：player_feat=6, bullet_feat=9, max_bullets=64
+- action order：idle, n, ne, e, se, s, sw, w, nw
+- hidden width：472；參數量：269,050
+
+Current evidence（現有證據，唔改寫）
+-------------------------------------
+
+1. BC multi-seed reproducibility gate：PASS
+   - gate 定義：三個訓練 seed（4, 5, 6）closed-loop mean 之平均值 >= 30s
+   - 實測：33.8689 s，PASS
+   - 每個 seed 都達到 held agreement >= 0.65 門檻
+   - 來源 commit：d32bfd797060373e5d789000b7e156b85b51d37f
+
+2. 現行 scripted PPO retention control：FAILED
+   - frozen/no-update 對比 current scripted-only PPO retention 嘅
+     pre-registered retention gate 未通過
+   - closed-loop survival 喺 update 100 統計上無顯著變化（30-seed
+     paired comparison），但 held teacher agreement 由 0.700 崩至
+     0.240；update 200 時 agreement 至 0.173，survival 跌到
+     24.53s mean / 22.62s median
+   - 結論：現行 scripted PPO 令 policy 快速偏離由 PlayerV1 transfer
+     過嚟嘅技能
+   - 來源 commit：556896f3a366a088878a6446111430aa026fb8a8
+   - 完整報告 commit（report-only verified）：
+     4ee16a56e783b563adcd3b67ad44f9b111924b61
+   - 完整報告路徑：
+     docs/suggestions/1789155208_ranked_player_multiseed_and_ppo_retention.txt
+
+Promotion status（晉升狀態）
+-----------------------------
+
+- PlayerV5（PlayerRankedTopK）現時係 **candidate**，**唔係** main
+  training 嘅預設架構（not main training default）
+- Supervised（BC）checkpoints：production-compatible，但要待
+  reproducibility gate 一直維持通過先會正式 promote
+- PPO snapshots：明確標記為 experimental / non-production，唔可以
+  當做 production 初始化 checkpoint 使用
+- 未來如果 PPO / RL retention 訓練成功，PlayerV5 呢個名稱**唔會**因此
+  改變或重新分配；反之如果訓練持續失敗，PlayerV5 呢個名稱都**唔會**
+  因此被撤回或改派畀第二個架構。命名同訓練成敗係兩件獨立嘅事。
+
+Compatibility（相容性，向下相容）
+------------------------------------
+
+- checkpoint architecture key 維持 `player_ranked_topk` 不變
+- 現有 class 名稱 `PlayerRankedTopK` 維持不變
+- 現有已產生嘅 checkpoint（多 seed BC checkpoint、PPO snapshot）唔需要
+  重新命名或遷移
+- PlayerV5 只係一個對外／文件層面嘅版本代號（documentation-level
+  version label），**唔係**新嘅 code identifier
+- 如果日後需要將 code-level identifier 改做 player_v5 / PlayerV5
+  class，必須另外實作明確嘅 compatibility migration（例如 checkpoint
+  loader 同時接受 `player_ranked_topk` 舊 key 同新 key），先可以改
+  現有 loader / strict schema 驗證邏輯
+
+Spawner（不受影響）
+----------------------
+
+- Spawner 繼續維持 SpawnerV4（qrokkun_env/agents/spawner_v4.py），
+  呢次命名決定完全唔涉及 Spawner 版本
+- 唔存在「SpawnerV5」；PlayerV5 同 SpawnerV4 係獨立版本序列，唔需要
+  對齊版本號
+
+歷史失敗紀錄（唔可刪除／改寫）
+--------------------------------
+
+- V2、V3、V4、V5 各代 Player/Spawner 曾經出現嘅失敗、限制、或未達標
+  結果（例如 obs 格式唔一致、distillation 失敗、PPO retention gate
+  未過等）必須繼續保留喺原有文件（例如
+  docs/suggestions/1789126118_phase0_player_recovery_provenance.txt、
+  docs/suggestions/1789155208_ranked_player_multiseed_and_ppo_retention.txt）
+- 唔可以因為 PlayerV5 命名生效，就刪除、覆寫、或淡化之前對 V2/V3/V4
+  失敗嘅紀錄。歷史紀錄係後續判斷嘅重要依據，必須完整保留
+
+Decision consequences（決定嘅後果）
+--------------------------------------
+
+1. 之後所有文件、實驗報告、commit message、log 提及呢個架構時，應該
+   使用「PlayerV5（PlayerRankedTopK）」呢個雙重標示，避免歧義
+2. 任何話「PlayerV5 訓練失敗」嘅陳述，必須明確指嘅係 PPO/RL retention
+   訓練失敗，**唔係**指 PlayerV5 呢個架構身份本身有問題；BC gate 已經
+   passed 呢個事實唔會因為之後訓練失敗而被推翻或隱去
+3. 如果後續有其他候選架構亦想爭取「V5」呢個代號，必須喺文件明確指出
+   同現有 PlayerV5（PlayerRankedTopK）嘅關係（例如係咪取代、係咪
+   並存分支），唔可以直接覆蓋呢份命名決定
+4. 本文件係一份持久嘅 decision record，唔屬於單次實驗報告；後續如果
+   有新證據（無論支持定推翻訓練結論），應該以新增文件方式補充，唔好
+   直接修改本文件嘅既有內容
+
+未來文件／實驗嘅命名規則（naming rules）
+-------------------------------------------
+
+1. Architecture identity（例如 PlayerV5）同 promotion status
+   （candidate / default / deprecated）必須分開講清楚，唔可以混為一談
+2. 每份新文件引用某個 Player/Spawner 版本時，應同時列出：
+   (a) 版本代號（PlayerVN / SpawnerVN）
+   (b) 對應 code class 名同 checkpoint architecture key
+   (c) 現時 promotion status
+3. 訓練結果（BC gate、PPO retention gate 等）永遠記錄為「證據」，
+   唔可以用嚟事後更改已經生效嘅架構命名決定
+4. 任何撤銷或更改本文件決定嘅新決定，必須以新文件形式提出，並喺新文件
+   入面明確引用本文件路徑，唔可以直接刪除或修改本文件
+
+References（引用）
+--------------------
+
+- 架構／multi-seed 來源 commit：
+  d32bfd797060373e5d789000b7e156b85b51d37f
+- PPO retention 來源 commit：
+  556896f3a366a088878a6446111430aa026fb8a8
+- 完整報告 commit（report-only verified）：
+  4ee16a56e783b563adcd3b67ad44f9b111924b61
+- 完整報告路徑：
+  docs/suggestions/1789155208_ranked_player_multiseed_and_ppo_retention.txt
+- 架構實作路徑：
+  qrokkun_env/agents/player_ranked_topk.py
+- Spawner 實作路徑：
+  qrokkun_env/agents/spawner_v4.py
