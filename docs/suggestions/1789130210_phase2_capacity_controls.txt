@@ -1,0 +1,97 @@
+Phase 2 PlayerV4 capacity controls — 2026-09-11
+=================================================
+
+Purpose
+-------
+Separate a broken/insufficient PlayerV4 attention representation from an
+objective, optimisation, or data-generalisation problem. This is a supervised,
+frame-level diagnostic only: no PPO, no learned Spawner, no closed-loop
+checkpoint selection, and no NAS writes.
+
+Provenance
+----------
+- Source commit before this diagnostic: 94ffbf3b9b80de33469c8e17441db396cc85302d
+- Canonical PlayerV1 teacher SHA-256:
+  1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1
+- Teacher was copied from NAS previously and read locally on the GPU host:
+  /home/ovm-hms-bot/scratch_phase1/player_gpu.pt
+- GPU host runtime: Python 3.12.3, torch 2.11.0+cu128, numpy 2.5.2,
+  NVIDIA GB10.
+- Seed: 4.
+
+Harness verification
+--------------------
+- RED was observed before implementation: the new test module failed because
+  tools.phase2_capacity_controls did not exist.
+- After implementation: 43 tests passed on the GPU host.
+- These include PlayerV4/BulletSetEncoder all-pad forward and backward checks,
+  in train and eval modes, plus a mixed all-pad/live batch. All values and
+  gradients were finite.
+- Quick six-arm end-to-end smoke completed successfully.
+
+Main controlled run
+-------------------
+- 120 teacher episodes: 106 train and 14 held-out.
+- 73,866 train frames; 9,499 held-out frames.
+- Same episode split and uniformly sampled frame dataset for all non-tiny arms.
+- 60 epochs, batch size 1,024, learning rate 3e-4.
+- Checkpoint selection uses held-out agreement, then teacher-to-student KL;
+  it never uses episode survival.
+- Complete report:
+  /home/ovm-hms-bot/scratch_phase2_controls_full/report.json
+- Local copied report (gitignored scratch):
+  /storage/hermes/home/dev_gpt_1/phase2-capacity-results/full-report.json
+
+Selected-checkpoint held-out results
+------------------------------------
+arm                 epoch  agreement  hard CE  teacher->student KL  student H
+obj_hard               31     0.3990    1.7190       0.4706           1.7099
+obj_soft_t1            48     0.3867    1.9272       0.1836           2.1214
+obj_soft_lowt          39     0.4003    1.7144       0.4105           1.7493
+top8_mask              43     0.3965    1.7098       0.4971           1.6916
+flat_top8_mlp          60     0.4691    1.4970       0.5400           1.5369
+
+Interpretation of these controls
+--------------------------------
+1. Masking slots after the nearest eight did not improve agreement relative to
+   the hard-label PlayerV4 control (0.3965 vs 0.3990). Simple dilution from
+   seeing 64 bullets is therefore not supported as the primary explanation.
+2. A flat top-8 MLP trained with the same hard labels and split reached 0.4691,
+   about 7 percentage points above hard-label PlayerV4. This is evidence that
+   the attention pooling/optimisation path is a bottleneck, but it is not proof
+   that the architecture lacks capacity: label objective and inductive bias
+   differ in their distributional behaviour, and neither model generalised
+   especially well.
+3. Hard and low-temperature labels modestly improved argmax agreement over the
+   original soft-T=1 objective (about 0.400 vs 0.387), while soft-T=1 had by far
+   the best distribution match (KL 0.184 vs 0.411-0.471). This confirms an
+   objective trade-off: minimising soft KL is not the same as reproducing the
+   teacher's selected action.
+4. The 0-bullet all-pad path is finite and highly learnable. The remaining
+   weakness appears when bullet geometry matters, consistent with the earlier
+   bullet-count diagnostics.
+
+Tiny-set overfit control
+------------------------
+A dedicated PlayerV4 run used 2,000 fixed hard-labelled frames, 400 epochs,
+batch size 64, and learning rate 1e-3. Final train results:
+- agreement: 0.9925
+- hard CE: 0.0243
+- target: 0.95; result: PASSED
+- report: /home/ovm-hms-bot/scratch_phase2_tiny400/report.json
+- local copy:
+  /storage/hermes/home/dev_gpt_1/phase2-capacity-results/tiny400-report.json
+
+Decision
+--------
+PlayerV4 can represent and fit the teacher mapping on a fixed small dataset, so
+Round 1 does not establish a fundamental model-capacity defect. However, the
+flat top-8 MLP generalises materially better than the current single-query
+attention encoder on the same held-out split, so that encoder remains a real
+bottleneck candidate.
+
+The immediate next experiment should not be DAgger or PPO. It should compare
+attention and flat/ranked-top-8 models under matched parameter/update budgets,
+with a hybrid hard+soft objective and more episode-level training diversity.
+Closed-loop evaluation should happen only after held-out teacher agreement is
+materially improved.
