@@ -1,0 +1,148 @@
+PlayerV5 round-1 BC-retention auxiliary PPO (α-only)
+====================================================
+
+Status
+------
+
+The round-1 experiment completed. The pre-registered retention gate FAILED
+on held teacher agreement. Survival floors passed. No checkpoint is promoted.
+
+This is a recorded failure of the first α, not a missing run. Auxiliary
+regularization slowed (did not stop) imitation loss versus unregularized PPO.
+
+Scope and isolation
+-------------------
+
+- PlayerV5 / PlayerRankedTopK only, against the scripted Spawner.
+- Single new knob: TARGET_RETENTION_GRAD_RATIO = 0.15
+  (alpha calibrated once at the start, then frozen).
+- Locked: lr 3e-4, gamma 0.99, lambda 0.95, clip 0.2, entropy 0.02,
+  4 PPO epochs, minibatch 512, 8 episodes/update, 200 updates,
+  rollout seeds from 50000, eval seeds 3000-3029, 70s / 4200-frame cap,
+  snapshots 0/10/25/50/100/200.
+- PPO batch = on-policy scripted rollouts (advantage / PPO only).
+- Retention batch = fixed PlayerV1 teacher TRAIN split, hybrid hard CE +
+  soft KL from phase2_ranked_multiseed.hybrid_loss (0.5/0.5, T=1).
+- Held-out teacher split: diagnostics/gates only.
+- No learned Spawner, self-play, random fraction, entropy/gamma A/B,
+  DAgger, or promotion.
+
+Source / run
+------------
+
+- Implement commit: 118465334bf37613d874ce466b76837e2add0bd0
+- Branch: player-recovery/phase-0 (worktree clean during the GPU run)
+- Init checkpoint: seed-6 BC
+  file SHA-256 844e029a74fce418e1d97041e66cf5422a25d8f500628d1ff5526640a7a36ad9
+- Teacher player_gpu.pt SHA-256
+  1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1
+- Dataset identity SHA-256
+  2521bd12ae8b630e65f2645132bde4952fe8f60783ad0e87648ed2af688e558a
+  (same 240-episode canonical set as the unregularized retention control)
+- Host: GB10B, torch 2.11.0+cu128, device cuda
+- Out dir: /home/ovm-hms-bot/scratch_ranked_retention_aux_2026-09-12_0524
+- Wall clock (dir birth 05:24 to report 05:52 HKT): about 28 minutes
+- 200 updates, 1,600 on-policy episodes, 3,351,744 env frames,
+  26,600 optimizer steps
+
+Alpha calibration (frozen)
+--------------------------
+
+- target_ratio: 0.15
+- ||g_ppo|| (policy-loss only): 0.21082
+- ||g_ret|| (hybrid_loss): 0.35483
+- alpha = 0.15 * ||g_ppo|| / ||g_ret|| = 0.08912258648975062
+- calibration cosine similarity: -0.1028 (objectives slightly opposed)
+- jsonl alpha is identical at update 1 and update 200
+
+Pre-registered gates
+--------------------
+
+From seed-6 BC start (update 0):
+
+- agreement floor: 0.699852 - 0.05 = 0.649852
+- mean floor: 34.0906 * 0.80 = 27.2724 s
+- median floor: 36.7917 * 0.80 = 29.4333 s
+
+Harness verdict:
+
+- agreement_pass: false
+- final_mean_pass: true
+- final_median_pass: true
+- first_breaking_snapshot: 10
+- retention_pass: false
+- promotion: false
+- reason: retention failed: agreement below threshold
+
+Snapshot table (aux α=0.089)
+----------------------------
+
+Update | mean s | median s | agreement | KL(t->s) | cosine | vs unreg agr
+0      | 34.0906 | 36.7917 | 0.6999 | 0.1772 | -0.096 | 0.6999
+10     | 39.9478 | 44.2833 | 0.6371 | 0.1890 | +0.207 | 0.5286
+25     | 31.9661 | 30.0250 | 0.6223 | 0.1952 | +0.353 | 0.4272
+50     | 36.9389 | 40.7417 | 0.6237 | 0.1928 | +0.084 | 0.3151
+100    | 33.6539 | 31.0250 | 0.6144 | 0.2024 | +0.335 | 0.2402
+200    | 35.3556 | 38.0250 | 0.6147 | 0.1813 | +0.125 | 0.1731
+
+Unregularized reference (same start, docs/suggestions/1789155208):
+update 10/100/200 agreement 0.5286 / 0.2402 / 0.1731; update 200 mean 24.5350 s.
+
+Interpretation
+--------------
+
+1. Round-1 α is too weak to hold the 0.6499 agreement floor. Update 10 already
+   drops 0.6999 -> 0.6371 (drop 0.063 > 0.05). Gate FAIL as pre-registered.
+
+2. Auxiliary loss is not a no-op versus unregularized PPO. Agreement plateaus
+   near 0.615 instead of collapsing to 0.173. Update-200 survival stays at
+   35.36 s mean / 38.03 s median instead of falling to 24.53 / 22.63.
+
+3. Survival floors would have passed; they are not sufficient. Agreement is
+   the first failure mode, same ordering as the unregularized control.
+
+4. Calibration cosine was slightly negative, so the 15% gradient-ratio target
+   is a lower bound on conflict, not an upper bound on retention strength.
+
+5. Because agreement failed and closed-loop did not collapse, the next ticket
+   is a pre-registered larger α only. Do not mix DAgger, entropy, gamma/lambda,
+   or Spawner changes. Do not promote any snapshot from this run.
+
+PPO jsonl diagnostics (not gates)
+---------------------------------
+
+- alpha frozen 0.08912 for all 200 updates
+- update 1: approx_kl 0.0164, clipfrac 0.197, entropy 1.624, EV -0.248
+- update 200: approx_kl 0.0125, clipfrac 0.170, entropy 1.723, EV 0.614
+- no NaN / numerical abort; stdout status completed, arm_ran true
+
+Artifacts (not committed; *.pt stay on GB10)
+--------------------------------------------
+
+Local copies (gitignored artifacts/):
+
+- report.json SHA-256
+  279df15f52187410fa9a3060ea6e60a74d2278a4b1c92e089c9392e57588081d
+- ppo_aux_updates.jsonl SHA-256
+  14a6520cccfc1697615fdedbf7e9ebff3e94ad3499cb98a3c18a89290f5e5442
+
+GB10 checkpoint file SHA-256:
+
+- update 0:   ef95ea86e293ddc9e7d00bb67c991de3b98d7c94e1b88cb5ba7ba339fddc4b77
+- update 10:  06e3ecc959377242be9eec19b1f6d7c167a0bb20b9202b99f7d118da869ec9d5
+- update 25:  231b513ce6ce8b29d0de1858db4b730bcaf9cdcb2e5978f876c75a7734447266
+- update 50:  bc379840bc3c4261bf05bebfff27c2637b6f79428573916eec5e5fa762a342d4
+- update 100: e1b8bc48d7e13d49c98ba59c45e92efc06d75ae19a0549a37b8dab81ae66fd1a
+- update 200: bc690441b49bdcb43887b232b5b29c2b449355d9f7741eeafab4ab2a1fab6789
+- final:      ca9ced003b1cd023e8eb70fc8e809342e849e40d8c20a001be22df77473600fe
+
+Compact machine-readable summary:
+docs/suggestions/1789163593_player_v5_retention_aux_round1.json
+
+Decision
+--------
+
+1. Record round-1 as completed FAIL on agreement retention.
+2. Promote nothing.
+3. Next controlled experiment (not this report): larger pre-registered α,
+   same seed-6 BC start, same locked PPO contract.
