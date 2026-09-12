@@ -6,6 +6,8 @@ These tests never read a real NAS checkpoint; everything is packed in tmp_path.
 
 from __future__ import annotations
 
+import os
+import pickle
 import sys
 from pathlib import Path
 
@@ -78,6 +80,77 @@ def test_save_load_round_trip_restores_identical_behaviour(tmp_path: Path):
         b, vb = loaded(player, bullets, pad)
     assert torch.allclose(a.logits, b.logits, atol=0)
     assert torch.allclose(va, vb, atol=0)
+
+
+class _SideEffectPayload:
+    """A real malicious-pickle payload.
+
+    Its ``__reduce__`` asks the unpickler to call ``os.makedirs`` -- i.e. an
+    arbitrary side effect executed purely by *loading* the file. Only the
+    ``os.makedirs`` callable is written into the pickle stream, so unpickling
+    never needs this test class to be importable.
+    """
+
+    def __init__(self, marker: Path):
+        self._marker = str(marker)
+
+    def __reduce__(self):
+        return (os.makedirs, (self._marker,))
+
+
+def test_file_load_never_executes_arbitrary_pickle_side_effects(tmp_path: Path):
+    """Loading a checkpoint file must not be able to run code embedded in it."""
+    from qrokkun_env.agents import player_checkpoints as pc
+    from qrokkun_env.agents.player_ranked_topk import PlayerRankedTopK
+
+    marker = tmp_path / "pwned"
+    ckpt = pc.pack_player_checkpoint(PlayerRankedTopK(top_k=8, hidden=16))
+    ckpt["extra"] = {"payload": _SideEffectPayload(marker)}
+    path = tmp_path / "malicious.pt"
+    torch.save(ckpt, path)
+    assert not marker.exists()
+
+    with pytest.raises((pickle.UnpicklingError, pc.CheckpointError)):
+        pc.load_player_checkpoint(path, device=torch.device("cpu"))
+
+    assert not marker.exists(), "loading executed the embedded pickle payload"
+
+
+def test_normal_checkpoint_round_trips_under_restricted_unpickling(tmp_path: Path):
+    """A normal PlayerV5 checkpoint must contain only weights-safe primitives,
+    so the hardened (restricted-unpickler) file load still round-trips it."""
+    from qrokkun_env.agents import player_checkpoints as pc
+    from qrokkun_env.agents.player_ranked_topk import PlayerRankedTopK
+
+    net = PlayerRankedTopK(top_k=8, hidden=16)
+    path = tmp_path / "safe.pt"
+    packed = pc.save_player_checkpoint(net, path, source_tool="unit-test")
+
+    # torch's own version object is a str subclass and is NOT weights-safe:
+    # the packed value must be a plain str.
+    assert type(packed["source"]["torch_version"]) is str
+
+    raw = torch.load(path, map_location="cpu", weights_only=True)
+    assert raw["state_dict_sha256"] == packed["state_dict_sha256"]
+
+    loaded, meta = pc.load_player_checkpoint(path, device=torch.device("cpu"))
+    assert (loaded.top_k, loaded.hidden) == (8, 16)
+    assert meta["source"]["torch_version"] == packed["source"]["torch_version"]
+
+
+def test_legacy_checkpoint_with_torch_version_object_still_loads(tmp_path: Path):
+    """Historical artifacts stored ``torch.__version__`` (a str subclass) in
+    ``source``; hardening the loader must not make them unloadable."""
+    from qrokkun_env.agents import player_checkpoints as pc
+    from qrokkun_env.agents.player_ranked_topk import PlayerRankedTopK
+
+    ckpt = pc.pack_player_checkpoint(PlayerRankedTopK(top_k=8, hidden=16))
+    ckpt["source"]["torch_version"] = torch.__version__  # the old, non-plain-str value
+    path = tmp_path / "legacy_version.pt"
+    torch.save(ckpt, path)
+
+    _loaded, meta = pc.load_player_checkpoint(path, device=torch.device("cpu"))
+    assert str(meta["source"]["torch_version"]) == str(torch.__version__)
 
 
 def test_loader_rejects_legacy_playerv4_checkpoint(tmp_path: Path):

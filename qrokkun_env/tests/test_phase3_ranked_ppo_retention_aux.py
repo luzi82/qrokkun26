@@ -240,7 +240,10 @@ def test_grad_alignment_reports_norms_and_cosine_without_stepping() -> None:
     assert info["g_ret_norm"] > 0.0
     assert -1.0 - 1e-6 <= info["cosine_similarity"] <= 1.0 + 1e-6
     assert info["n_retention_samples"] == 8
-    assert info["n_samples"] == sum(len(r.actions) for r in rollouts)
+    # g_ppo and g_ret must be measured on the SAME (minibatch) scale, never
+    # a full-rollout PPO gradient vs a minibatch-sized retention gradient.
+    assert info["n_samples"] == 8
+    assert info["n_samples"] == info["n_retention_samples"]
     # no optimizer step and no leftover dirty .grad on the live net
     for p, b in zip(net.parameters(), before):
         assert torch.equal(p.detach(), b)
@@ -252,19 +255,31 @@ def test_grad_alignment_ppo_grad_excludes_value_and_entropy_terms() -> None:
     device = torch.device("cpu")
     rollouts = _fake_rollouts(seed=7)
     train = _teacher_tensors(n=20, seed=8)
+    seed = 4242
     info = aux.grad_alignment(
-        net, rollouts, train, device, generator=aux.retention_generator(), minibatch=8
+        net,
+        rollouts,
+        train,
+        device,
+        generator=torch.Generator().manual_seed(seed),
+        minibatch=8,
     )
 
     params = [p for p in net.parameters() if p.requires_grad]
     batch = ret.rollouts_to_batch(rollouts, device)
     adv = batch["advantages"]
     adv = (adv - adv.mean()) / (adv.std(unbiased=False) + 1e-8)
-    dist, _value = net(batch["player"], batch["bullets"], batch["pad"])
-    logp = dist.log_prob(batch["actions"])
-    ratio = torch.exp(logp - batch["old_log_probs"])
+    n_frames = int(batch["player"].shape[0])
+    # grad_alignment draws its PPO subsample as the FIRST op on its
+    # generator: reproduce that with a fresh generator of the same seed.
+    index = torch.randperm(n_frames, generator=torch.Generator().manual_seed(seed))[:8]
+    dist, _value = net(
+        batch["player"][index], batch["bullets"][index], batch["pad"][index]
+    )
+    logp = dist.log_prob(batch["actions"][index])
+    ratio = torch.exp(logp - batch["old_log_probs"][index])
     policy_loss = -torch.min(
-        ratio * adv, torch.clamp(ratio, 1 - ret.PPO_CLIP, 1 + ret.PPO_CLIP) * adv
+        ratio * adv[index], torch.clamp(ratio, 1 - ret.PPO_CLIP, 1 + ret.PPO_CLIP) * adv[index]
     ).mean()
     grads = torch.autograd.grad(policy_loss, params, allow_unused=True)
     expected = torch.cat(
@@ -276,9 +291,173 @@ def test_grad_alignment_ppo_grad_excludes_value_and_entropy_terms() -> None:
     assert info["g_ppo_norm"] == pytest.approx(float(expected.norm().item()), rel=1e-6)
 
 
+def test_grad_alignment_uses_matched_minibatch_scale() -> None:
+    """The probe's g_ppo and g_ret must be measured on equal-sized draws,
+    never a full-rollout PPO gradient against a minibatch-sized retention
+    gradient. Uses an explicit small ``minibatch`` (CPU-light); the default
+    is still asserted to be ``PPO_MINIBATCH``."""
+    net = _tiny_net(seed=9)
+    device = torch.device("cpu")
+    rollouts = _fake_rollouts(n_frames=10, n_rollouts=3, seed=21)  # 30 frames total
+    train = _teacher_tensors(n=40, seed=22)
+    minibatch = 8
+
+    info = aux.grad_alignment(
+        net, rollouts, train, device, generator=torch.Generator().manual_seed(0),
+        minibatch=minibatch,
+    )
+
+    total_frames = sum(len(r.actions) for r in rollouts)
+    assert total_frames > minibatch  # the mismatch this guards against
+    assert info["n_samples"] == minibatch
+    assert info["n_retention_samples"] == minibatch
+    assert info["n_samples"] == info["n_retention_samples"]
+    assert (
+        inspect.signature(aux.grad_alignment).parameters["minibatch"].default
+        == aux.PPO_MINIBATCH
+    )
+
+
+def test_grad_alignment_matches_sizes_when_rollout_is_shorter_than_minibatch() -> None:
+    """Short-rollout edge: when the PPO batch has FEWER frames than the
+    requested minibatch, g_ppo is necessarily measured on all available
+    frames -- the retention draw must shrink to match, never stay at the
+    full requested minibatch size."""
+    net = _tiny_net(seed=11)
+    device = torch.device("cpu")
+    rollouts = _fake_rollouts(n_frames=3, n_rollouts=1, seed=25)  # 3 frames total
+    train = _teacher_tensors(n=40, seed=26)  # plenty of retention rows
+    minibatch = 8
+
+    total_frames = sum(len(r.actions) for r in rollouts)
+    assert total_frames < minibatch  # the edge this guards against
+
+    info = aux.grad_alignment(
+        net, rollouts, train, device,
+        generator=torch.Generator().manual_seed(1), minibatch=minibatch,
+    )
+
+    assert info["n_samples"] == total_frames
+    assert info["n_retention_samples"] == total_frames
+    assert info["n_samples"] == info["n_retention_samples"]
+
+
+def test_snapshot_grad_ratio_is_matched_minibatch_scale() -> None:
+    """Snapshot/ppo_aux_update grad_alignment fields correspond to equal
+    g_ppo/g_ret sample counts, even though the rollout batch is larger."""
+    device = torch.device("cpu")
+    net = _tiny_net(seed=10)
+    opt = torch.optim.Adam(net.parameters(), lr=aux.PPO_LR, eps=1e-8)
+    rollouts = _fake_rollouts(n_frames=10, n_rollouts=3, seed=23)
+    train = _teacher_tensors(n=40, seed=24)
+    minibatch = 8
+
+    total_frames = sum(len(r.actions) for r in rollouts)
+    assert total_frames > minibatch
+
+    # the alignment probe itself (as used for snapshots)
+    alignment = aux.grad_alignment(
+        net, rollouts, train, device,
+        generator=aux.diagnostic_generator(), minibatch=minibatch,
+    )
+    assert alignment["n_samples"] == alignment["n_retention_samples"] == minibatch
+
+    # and the same holds for the diagnostics embedded in ppo_aux_update
+    metrics = aux.ppo_aux_update(
+        net, opt, rollouts, train, 0.1, device,
+        generator=aux.training_generator(),
+        diagnostics_generator=aux.diagnostic_generator(),
+        minibatch=minibatch,
+    )
+    # ppo_aux_update's top-level n_samples/n_retention_samples describe the
+    # full training loop (rollout batch / summed retention minibatches
+    # across epochs), not the alignment probe -- but the g_ppo/g_ret pair
+    # baked into grad_ratio/cosine_similarity must still be equal-count,
+    # which is only true if grad_alignment (above) used matched sizes.
+    assert math.isfinite(metrics["grad_ratio"])
+    assert math.isfinite(metrics["cosine_similarity"])
+
+
+def test_calibration_and_diagnostics_do_not_advance_global_torch_rng() -> None:
+    """calibrate_alpha and grad_alignment must draw exclusively from the
+    generators passed to them, never the default (global) CPU RNG stream.
+
+    We seed the default generator, draw a marker token, then draw a second
+    "expected next" token WITHOUT calling into the aux module -- this is
+    what the default stream produces if nothing touches it. Separately, we
+    reseed, re-draw the (identical) marker, invoke calibrate_alpha/
+    grad_alignment, and draw again: if those calls never advanced the
+    default generator, this second draw must equal the untouched one.
+    """
+    device = torch.device("cpu")
+    # build the net/data first: _tiny_net seeds the default RNG internally,
+    # so do that BEFORE establishing our own control point below.
+    net = _tiny_net(seed=30)
+    rollouts = _fake_rollouts(n_frames=8, n_rollouts=2, seed=31)
+    train = _teacher_tensors(n=24, seed=32)
+
+    torch.manual_seed(0)
+    marker = torch.rand(4)
+    expected_next = torch.rand(4)  # what the default stream yields untouched
+
+    torch.manual_seed(0)
+    assert torch.equal(torch.rand(4), marker)
+
+    aux.calibrate_alpha(net, rollouts, train, device, minibatch=6)
+    aux.grad_alignment(
+        net, rollouts, train, device, generator=aux.diagnostic_generator(), minibatch=6
+    )
+
+    probe_next = torch.rand(4)
+    assert torch.equal(probe_next, expected_next)
+
+
 # --------------------------------------------------------------------------- #
 # 6. alpha calibration: one frozen, positive, finite, repeatable value
 # --------------------------------------------------------------------------- #
+def test_calibrate_alpha_matches_each_draw_when_rollout_is_shorter_than_minibatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every calibration gradient pair uses the available PPO-frame count."""
+    net = _tiny_net(seed=34)
+    device = torch.device("cpu")
+    rollouts = _fake_rollouts(n_frames=3, n_rollouts=1, seed=35)
+    train = _teacher_tensors(n=20, seed=36)
+    minibatch = 8
+    ppo_draw_sizes: list[int] = []
+    retention_draw_sizes: list[int] = []
+
+    real_policy_loss_only = aux.policy_loss_only
+    real_sample_retention_minibatch = aux.sample_retention_minibatch
+
+    def record_ppo_draw(*args, **kwargs):
+        ppo_draw_sizes.append(int(kwargs["index"].shape[0]))
+        return real_policy_loss_only(*args, **kwargs)
+
+    def record_retention_draw(*args, **kwargs):
+        batch = real_sample_retention_minibatch(*args, **kwargs)
+        retention_draw_sizes.append(int(batch["player"].shape[0]))
+        return batch
+
+    monkeypatch.setattr(aux, "policy_loss_only", record_ppo_draw)
+    monkeypatch.setattr(aux, "sample_retention_minibatch", record_retention_draw)
+
+    calibration_draws = 2
+    result = aux.calibrate_alpha(
+        net,
+        rollouts,
+        train,
+        device,
+        minibatch=minibatch,
+        n_minibatches=calibration_draws,
+        generator=torch.Generator().manual_seed(37),
+    )
+
+    assert sum(len(r.actions) for r in rollouts) < minibatch
+    assert ppo_draw_sizes == retention_draw_sizes == [3, 3]
+    assert result["n_samples"] == result["n_retention_samples"] == 6
+
+
 def test_calibrate_alpha_uses_the_preregistered_formula() -> None:
     net = _tiny_net(seed=4)
     device = torch.device("cpu")
@@ -414,8 +593,9 @@ def test_teacher_train_frames_never_enter_the_ppo_batch() -> None:
             ppo_frames += int(player.shape[0])
 
     # PPO sees exactly the rollout frames, once per epoch (plus the
-    # diagnostic policy-gradient pass over the whole batch)
-    assert ppo_frames == n_rollout_frames * (aux.PPO_EPOCHS + 1)
+    # diagnostic policy-gradient pass on a matched-size minibatch subset)
+    diagnostic_ppo_frames = min(4, n_rollout_frames)  # default minibatch used by _run_one_aux_update
+    assert ppo_frames == n_rollout_frames * aux.PPO_EPOCHS + diagnostic_ppo_frames
     assert retention_calls == metrics["optimizer_steps"] + 1  # +1 diagnostic pass
     assert metrics["n_samples"] == n_rollout_frames
 
@@ -749,6 +929,66 @@ def test_aux_snapshots_are_experimental_and_carry_agreement(tmp_path: Path) -> N
     final = torch.load(arm["final_checkpoint"], map_location="cpu", weights_only=False)
     assert final["experimental"] is True
     assert final["production_compatible"] is False
+
+
+def test_update_snapshots_store_the_pre_update_on_policy_alignment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A snapshot taken after update N must report the alignment measured
+    BEFORE update N's optimizer steps, on the rollouts that were on-policy
+    for those weights -- the value ``ppo_aux_update`` already returned. It
+    must not be recomputed afterwards at post-update weights against the now
+    stale/off-policy rollout batch.
+    """
+    ga_calls: list[int] = []
+    real_grad_alignment = aux.grad_alignment
+
+    def counting_grad_alignment(*a, **kw):
+        ga_calls.append(1)
+        return real_grad_alignment(*a, **kw)
+
+    monkeypatch.setattr(aux, "grad_alignment", counting_grad_alignment)
+
+    returned: list[dict] = []
+    real_update = aux.ppo_aux_update
+
+    def spy_update(*a, **kw):
+        metrics = real_update(*a, **kw)
+        returned.append(metrics)
+        return metrics
+
+    monkeypatch.setattr(aux, "ppo_aux_update", spy_update)
+
+    arm, args = _tiny_arm(tmp_path)  # updates=2, snapshots at [0, 2]
+
+    snaps = {s["update"]: s for s in arm["snapshots"]}
+    assert set(snaps) == {0, 2}
+
+    # the update-2 snapshot reuses update 2's own pre-update probe verbatim
+    update2 = returned[1]
+    align2 = snaps[2]["grad_alignment"]
+    for key in ("g_ppo_norm", "g_ret_norm", "cosine_similarity", "grad_ratio",
+                "g_ret_weighted_norm", "alpha"):
+        assert align2[key] == update2[key], key
+
+    # ... and no extra probe is run after the optimizer steps: exactly one
+    # probe for snapshot 0 plus one inside each ppo_aux_update.
+    assert len(ga_calls) == 1 + args.updates
+
+    # measurement semantics are recorded explicitly, not left implicit
+    assert align2["measurement"] == "pre_update_on_policy"
+    assert align2["measured_before_update"] == 2
+    assert align2["recomputed_post_update"] is False
+    assert snaps[0]["grad_alignment"]["measurement"] == "initial_on_policy"
+    assert snaps[0]["grad_alignment"]["recomputed_post_update"] is False
+
+    # the same semantics survive into the written snapshot checkpoints' report
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "ppo_aux_updates.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    assert rows[1]["grad_alignment"]["measurement"] == "pre_update_on_policy"
 
 
 def test_aux_arm_snapshots_feed_reused_retention_gate(tmp_path: Path) -> None:

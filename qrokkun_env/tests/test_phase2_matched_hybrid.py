@@ -352,6 +352,63 @@ def test_gate_report_includes_every_threshold_observed_and_reason() -> None:
     assert isinstance(gate["reason"], str) and gate["reason"]
 
 
+def _gate_args() -> argparse.Namespace:
+    return argparse.Namespace(gate_agreement_min=0.50, gate_improvement_min=0.03, gate_bullet_bucket_min=0.40)
+
+
+def test_gate_fails_closed_when_baseline_arm_is_absent() -> None:
+    """``--arms`` may legally exclude attn64_soft_t1. The improvement
+    threshold is then unmeasurable, so the gate must fail closed instead of
+    raising."""
+    report = _fake_report(chosen_agreement=0.99, baseline_agreement=0.50)
+    del report["arms"][mh.ARM_ATTN64_SOFT_T1]
+
+    gate = mh.evaluate_gate(report, _gate_args())
+
+    assert gate["gate_pass"] is False
+    assert gate["closed_loop_ran"] is False
+    assert gate["chosen_arm"] is None
+    assert mh.ARM_ATTN64_SOFT_T1 in gate["reason"]
+    assert isinstance(gate["reason"], str) and gate["reason"]
+    assert json.loads(json.dumps(gate))["gate_pass"] is False
+
+
+def test_gate_fails_closed_when_only_the_baseline_arm_is_present() -> None:
+    """A baseline-only run has no selection candidate at all: fail closed."""
+    report = _fake_report(chosen_agreement=0.99, baseline_agreement=0.50)
+    report["arms"] = {mh.ARM_ATTN64_SOFT_T1: report["arms"][mh.ARM_ATTN64_SOFT_T1]}
+
+    gate = mh.evaluate_gate(report, _gate_args())
+
+    assert gate["gate_pass"] is False
+    assert gate["closed_loop_ran"] is False
+    assert gate["chosen_arm"] is None
+    assert "candidate" in gate["reason"]
+    assert json.loads(json.dumps(gate))["gate_pass"] is False
+
+
+def test_run_gated_closed_loop_never_runs_env_for_ungateable_arm_sets() -> None:
+    report = _fake_report(chosen_agreement=0.99, baseline_agreement=0.50)
+    report["arms"] = {mh.ARM_ATTN64_SOFT_T1: report["arms"][mh.ARM_ATTN64_SOFT_T1]}
+    gate = mh.run_gated_closed_loop(report, _gate_args(), torch.device("cpu"))
+    assert gate["gate_pass"] is False
+    assert gate["closed_loop_ran"] is False
+    assert "closed_loop" not in gate
+
+
+def test_gateable_arm_set_preflight_rejects_ungateable_subsets() -> None:
+    """The same fail-closed rule is available as a cheap preflight so an
+    ungateable ``--arms`` subset is caught before any training happens."""
+    assert mh.gateable_arm_set_error(list(mh.ALL_ARMS)) is None
+    assert mh.gateable_arm_set_error([mh.ARM_ATTN64_SOFT_T1, mh.ARM_ATTN64_HYBRID]) is None
+
+    missing_baseline = mh.gateable_arm_set_error([mh.ARM_ATTN64_HYBRID, mh.ARM_FLAT8_HARD])
+    assert missing_baseline and mh.ARM_ATTN64_SOFT_T1 in missing_baseline
+
+    baseline_only = mh.gateable_arm_set_error([mh.ARM_ATTN64_SOFT_T1])
+    assert baseline_only and "candidate" in baseline_only
+
+
 def test_gate_zero_bucket_is_ignored_when_empty() -> None:
     report = _fake_report(chosen_agreement=0.60, baseline_agreement=0.50)
     args = argparse.Namespace(gate_agreement_min=0.50, gate_improvement_min=0.03, gate_bullet_bucket_min=0.40)

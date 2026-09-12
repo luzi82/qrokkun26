@@ -37,6 +37,17 @@ What does not hold
 4. Survival 35.36s vs unregularized 24.53s at update 200 is an observed
    outcome of one run each, not a causal α effect.
 
+5. Snapshot grad_alignment was recomputed AFTER the update's optimizer steps,
+   against that update's pre-update rollout batch. Snapshot g_ppo/cosine
+   therefore described post-update weights evaluated on an off-policy batch,
+   not the on-policy alignment of the step that was taken. Logged per-update
+   jsonl grad fields were already pre-update and are unaffected.
+
+6. grad_alignment itself compared a full-rollout PPO policy gradient against a
+   512-frame retention gradient, the same scale mismatch as item 2. Every
+   snapshot/per-update grad_ratio and cosine_similarity in that run is a
+   mismatched-size comparison.
+
 Code fix (not this run)
 -----------------------
 
@@ -44,7 +55,27 @@ Commit 7b1c6ce4ef6663ea7dcfbb6d82a3a4a58e275a65:
 
 - Calibration window is collected once and reused as update 1.
 - Separate calibration / diagnostic / training generators.
-- Alpha averages 8 matched 512-vs-512 minibatches; target ratio still 0.15.
+- Alpha averages 8 matched PPO/retention minibatch pairs (up to 512 frames;
+  both shrink to the available PPO-frame count for shorter rollouts); target
+  ratio still 0.15.
+
+Follow-up fixes (also not this run), addressing items 5 and 6:
+
+- grad_alignment now draws a minibatch-sized PPO subsample, so g_ppo and g_ret
+  are measured on equal sample counts. When a rollout window holds fewer
+  frames than the minibatch, both draws shrink to the available PPO frames.
+- ppo_aux_update returns its pre-update, on-policy alignment probe; snapshots
+  store that value instead of recomputing one after the optimizer steps.
+  Snapshot 0 still computes its own probe (no update has happened yet).
+  Each recorded alignment carries explicit measurement semantics
+  ("pre_update_on_policy" / "initial_on_policy", measured_before_update,
+  recomputed_post_update=false).
+- Matched PPO/retention minibatch behaviour and the three independent RNG
+  streams are unchanged.
+
+These change the meaning of future grad_ratio / cosine_similarity numbers.
+Values recorded in run 1789163593 are kept as-is and are not comparable to
+values produced after these fixes.
 
 Next experiment
 ---------------

@@ -36,6 +36,12 @@ from qrokkun_env.env import ACTIONS
 CKPT_SCHEMA_VERSION = 1
 CKPT_ROLE_PLAYER = "player"
 
+# Checkpoints packed before the loader was hardened stored ``torch.__version__``
+# itself (a ``str`` subclass), which the restricted unpickler rejects by
+# default. Allow-listing exactly that one immutable str subclass keeps historical
+# artifacts loadable without re-opening the loader to arbitrary pickles.
+torch.serialization.add_safe_globals([torch.torch_version.TorchVersion])
+
 # Architectures this loader is allowed to build. PlayerV4 is intentionally NOT
 # here: its checkpoints keep their own legacy loading path untouched.
 SUPPORTED_ARCHITECTURES: dict[str, type[nn.Module]] = {
@@ -154,7 +160,7 @@ def pack_player_checkpoint(
         "source": {
             "commit": source_commit if source_commit is not None else current_git_commit(),
             "tool": source_tool,
-            "torch_version": torch.__version__,
+            "torch_version": str(torch.__version__),
             "python_version": platform.python_version(),
             "numpy_version": np.__version__,
             "device": str(net_device),
@@ -255,7 +261,13 @@ def load_player_checkpoint(
 ) -> tuple[nn.Module, dict[str, Any]]:
     """Strictly load a production Player checkpoint keyed by its architecture."""
     if isinstance(path_or_ckpt, (str, Path, io.IOBase)):
-        ckpt = torch.load(path_or_ckpt, map_location="cpu", weights_only=False)
+        # Restricted unpickling: a checkpoint file is untrusted data, never
+        # code. ``weights_only=True`` refuses any pickle that reconstructs
+        # arbitrary callables/objects, so merely loading a file can never
+        # execute an embedded payload. Checkpoints packed by
+        # ``pack_player_checkpoint`` contain only tensors and plain
+        # primitives, so they round-trip unchanged.
+        ckpt = torch.load(path_or_ckpt, map_location="cpu", weights_only=True)
     else:
         ckpt = path_or_ckpt
     meta = validate_player_checkpoint(ckpt, expected_architecture=expected_architecture)

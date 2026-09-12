@@ -258,15 +258,30 @@ def grad_alignment(
     minibatch: int = PPO_MINIBATCH,
 ) -> dict[str, Any]:
     """Norms of (and cosine between) the PPO policy gradient and the
-    retention gradient at the CURRENT weights. Takes no optimizer step and
-    leaves ``.grad`` buffers untouched."""
+    retention gradient at the CURRENT weights.
+
+    Both gradients are measured on the SAME minibatch size
+    (``PPO_MINIBATCH`` by default) -- exactly the scale ``calibrate_alpha``
+    uses -- never a full-rollout PPO gradient against a differently-sized
+    retention gradient, which would make ``grad_ratio``/``cosine_similarity``
+    compare two mismatched quantities. ``g_ppo`` is drawn from a
+    ``torch.randperm`` subset of the rollout batch and ``g_ret`` from
+    :func:`sample_retention_minibatch`, both fed by the same ``generator``
+    stream (mirroring ``calibrate_alpha``). When the rollout batch holds fewer
+    frames than ``minibatch``, BOTH draws shrink to the number of available
+    PPO frames so the two gradients stay matched-size. Takes no optimizer step
+    and leaves ``.grad`` buffers untouched.
+    """
     params = trainable_parameters(net)
 
     batch = rollouts_to_batch(rollouts, device)
     advantages = normalized_advantages(batch)
-    g_ppo = flat_grad(policy_loss_only(net, batch, advantages), params)
+    n_frames = int(batch["player"].shape[0])
+    ppo_k = min(int(minibatch), n_frames)
+    index = torch.randperm(n_frames, generator=generator)[:ppo_k].to(device)
+    g_ppo = flat_grad(policy_loss_only(net, batch, advantages, index=index), params)
 
-    mb = sample_retention_minibatch(train_tensors, device, generator, size=minibatch)
+    mb = sample_retention_minibatch(train_tensors, device, generator, size=ppo_k)
     dist, _value = net(mb["player"], mb["bullets"], mb["pad"])
     g_ret = flat_grad(retention_loss(dist.logits, mb["teacher_logits"]), params)
 
@@ -279,7 +294,7 @@ def grad_alignment(
         "g_ppo_norm": g_ppo_norm,
         "g_ret_norm": g_ret_norm,
         "cosine_similarity": cosine,
-        "n_samples": int(batch["player"].shape[0]),
+        "n_samples": int(index.shape[0]),
         "n_retention_samples": int(mb["player"].shape[0]),
     }
 
@@ -340,7 +355,7 @@ def calibrate_alpha(
         index = torch.randperm(n_frames, generator=gen)[:ppo_k].to(device)
         g_ppo = flat_grad(policy_loss_only(net, batch, advantages, index=index), params)
 
-        mb = sample_retention_minibatch(train_tensors, device, gen, size=minibatch)
+        mb = sample_retention_minibatch(train_tensors, device, gen, size=ppo_k)
         dist, _value = net(mb["player"], mb["bullets"], mb["pad"])
         g_ret = flat_grad(retention_loss(dist.logits, mb["teacher_logits"]), params)
 
@@ -497,6 +512,16 @@ def ppo_aux_update(
     denom = max(seen, 1)
     ret_denom = max(retention_frames, 1)
     g_ret_weighted_norm = float(alpha) * diagnostics["g_ret_norm"]
+    # The alignment probe is taken BEFORE any optimizer step of this update, on
+    # the rollout batch that is on-policy for those weights. It is returned
+    # verbatim so callers (snapshots/logs) can record it instead of recomputing
+    # it afterwards at post-update weights against a now stale rollout batch.
+    alignment = dict(diagnostics)
+    alignment["alpha"] = float(alpha)
+    alignment["g_ret_weighted_norm"] = g_ret_weighted_norm
+    alignment["grad_ratio"] = g_ret_weighted_norm / (diagnostics["g_ppo_norm"] + _GRAD_EPS)
+    alignment["measurement"] = "pre_update_on_policy"
+    alignment["recomputed_post_update"] = False
     return {
         "approx_kl": kl_sum / denom,
         "clip_fraction": clip_sum / denom,
@@ -515,6 +540,7 @@ def ppo_aux_update(
         "g_ret_weighted_norm": g_ret_weighted_norm,
         "grad_ratio": g_ret_weighted_norm / (diagnostics["g_ppo_norm"] + _GRAD_EPS),
         "cosine_similarity": diagnostics["cosine_similarity"],
+        "grad_alignment": alignment,
         "optimizer_steps": optimizer_steps,
         "n_samples": n_samples,
         "n_retention_samples": retention_frames,
@@ -656,21 +682,34 @@ def run_aux_arm(
             "retention_objective": "phase2_ranked_multiseed.hybrid_loss",
         }
 
-    def _snapshot(update: int, rollouts: list) -> None:
+    def _snapshot(update: int, rollouts: list, alignment: dict[str, Any] | None = None) -> None:
         eval_results = evaluate_deterministic(net, device, args.eval_seeds, args.eval_max_steps)
         eval_summary = summarize_evaluation(eval_results)
         if diagnostic_tensors is not None:
             diag = teacher_diagnostics(net, diagnostic_tensors, device)
         else:
             diag = {"agreement": None}
-        alignment = grad_alignment(
-            net, rollouts, train_tensors, device, generator=diag_gen, minibatch=minibatch
-        )
-        alignment["alpha"] = alpha
-        alignment["g_ret_weighted_norm"] = alpha * alignment["g_ret_norm"]
-        alignment["grad_ratio"] = alignment["g_ret_weighted_norm"] / (
-            alignment["g_ppo_norm"] + _GRAD_EPS
-        )
+        if alignment is None:
+            # Snapshot 0 only: no update has happened yet, so the probe at the
+            # CURRENT (initial) weights is itself pre-update and on-policy for
+            # the calibration/update-1 window.
+            alignment = grad_alignment(
+                net, rollouts, train_tensors, device, generator=diag_gen, minibatch=minibatch
+            )
+            alignment["alpha"] = alpha
+            alignment["g_ret_weighted_norm"] = alpha * alignment["g_ret_norm"]
+            alignment["grad_ratio"] = alignment["g_ret_weighted_norm"] / (
+                alignment["g_ppo_norm"] + _GRAD_EPS
+            )
+            alignment["measurement"] = "initial_on_policy"
+            alignment["measured_before_update"] = 1
+            alignment["recomputed_post_update"] = False
+        else:
+            # Post-update snapshots reuse the probe ``ppo_aux_update`` already
+            # took BEFORE its optimizer steps. Recomputing it here would
+            # measure post-update weights against the pre-update (now
+            # off-policy) rollout batch -- a different quantity.
+            alignment = dict(alignment)
         ckpt_path = out_dir / f"ppo_aux_update_{update}.pt"
         save_player_checkpoint(
             net,
@@ -722,6 +761,7 @@ def run_aux_arm(
                 minibatch=minibatch,
             )
             optimizer_steps += int(metrics["optimizer_steps"])
+            metrics["grad_alignment"]["measured_before_update"] = update
             total_episodes += len(rollouts)
             total_frames += sum(len(r.actions) for r in rollouts)
             row = dict(metrics)
@@ -731,7 +771,7 @@ def run_aux_arm(
             jsonl_f.write(json.dumps(row) + "\n")
             jsonl_f.flush()
             if update in snapshot_updates:
-                _snapshot(update, rollouts)
+                _snapshot(update, rollouts, alignment=metrics["grad_alignment"])
 
     final_eval_summary = summarize_evaluation(
         evaluate_deterministic(net, device, args.eval_seeds, args.eval_max_steps)

@@ -553,6 +553,40 @@ def run_experiment(
     return report
 
 # closed-loop stage begins here
+def gateable_arm_set_error(arms: list[str] | tuple[str, ...]) -> str | None:
+    """Return why ``arms`` cannot be gated, or ``None`` if it can.
+
+    The pre-registered gate needs BOTH the attn64_soft_t1 baseline (for the
+    improvement threshold) and at least one non-baseline selection candidate.
+    Legal ``--arms`` subsets can omit either, so this is checked as a cheap
+    preflight (before any training) and again inside :func:`evaluate_gate`,
+    which fails closed rather than raising.
+    """
+    names = list(arms)
+    if ARM_ATTN64_SOFT_T1 not in names:
+        return (
+            f"arm set {names} is not gateable: the comparison baseline "
+            f"{ARM_ATTN64_SOFT_T1!r} is absent, so the improvement threshold "
+            "cannot be evaluated"
+        )
+    if not [n for n in names if n != ARM_ATTN64_SOFT_T1]:
+        return (
+            f"arm set {names} is not gateable: it contains no non-baseline "
+            "selection candidate arm"
+        )
+    return None
+
+
+def _fail_closed_gate(reason: str) -> dict[str, Any]:
+    return {
+        "chosen_arm": None,
+        "gate_pass": False,
+        "thresholds": {},
+        "reason": f"gate failed: {reason}",
+        "closed_loop_ran": False,
+    }
+
+
 def evaluate_gate(report: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     """Evaluate the pre-registered gate purely from held-out frame metrics.
 
@@ -568,8 +602,16 @@ def evaluate_gate(report: dict[str, Any], args: argparse.Namespace) -> dict[str,
     the chosen arm, overall gate_pass, a human-readable reason, and
     closed_loop_ran=False (this function never runs the closed loop; it only
     decides whether the caller *may*).
+
+    If the report's arm set cannot support the gate at all (no baseline, or no
+    non-baseline candidate -- both legal ``--arms`` subsets) this fails closed
+    with ``gate_pass=False``, ``chosen_arm=None`` and an explicit reason
+    instead of raising.
     """
     arms = report["arms"]
+    not_gateable = gateable_arm_set_error(list(arms))
+    if not_gateable is not None:
+        return _fail_closed_gate(not_gateable)
     # attn64_soft_t1 is the comparison baseline, not a selection candidate --
     # the gate picks the best of the remaining (non-baseline) arms.
     def selected_held(arm: dict[str, Any]) -> dict[str, Any]:
@@ -706,6 +748,9 @@ def run_gated_closed_loop(report: dict[str, Any], args: argparse.Namespace, devi
 
 def main() -> None:
     args = apply_mode_defaults(build_parser().parse_args())
+    not_gateable = gateable_arm_set_error(resolve_arms(args.arms))
+    if not_gateable is not None:
+        raise SystemExit(not_gateable)
     device = torch.device(args.device if args.device == "cpu" or torch.cuda.is_available() else "cpu")
     torch.manual_seed(args.seed)
 
