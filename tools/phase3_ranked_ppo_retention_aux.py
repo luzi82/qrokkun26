@@ -248,6 +248,25 @@ def policy_loss_only(
     return -torch.min(surr1, surr2).mean()
 
 
+def matched_gradient_minibatch_size(
+    n_ppo_frames: int, n_retention_frames: int, minibatch: int
+) -> int:
+    """Return the valid matched gradient-draw size, or fail closed.
+
+    A retention auxiliary experiment has no defined calibration without at
+    least one on-policy PPO frame and one teacher TRAIN frame.  Reject that
+    condition before a zero-sized model forward can yield an opaque error or
+    non-finite alpha.
+    """
+    if n_ppo_frames <= 0:
+        raise ValueError("non-empty PPO rollout batch is required for alpha calibration")
+    if n_retention_frames <= 0:
+        raise ValueError("non-empty retention TRAIN split is required for alpha calibration")
+    if minibatch <= 0:
+        raise ValueError("positive gradient minibatch size is required")
+    return min(int(minibatch), n_ppo_frames, n_retention_frames)
+
+
 def grad_alignment(
     net,
     rollouts: list,
@@ -267,17 +286,19 @@ def grad_alignment(
     compare two mismatched quantities. ``g_ppo`` is drawn from a
     ``torch.randperm`` subset of the rollout batch and ``g_ret`` from
     :func:`sample_retention_minibatch`, both fed by the same ``generator``
-    stream (mirroring ``calibrate_alpha``). When the rollout batch holds fewer
-    frames than ``minibatch``, BOTH draws shrink to the number of available
-    PPO frames so the two gradients stay matched-size. Takes no optimizer step
-    and leaves ``.grad`` buffers untouched.
+    stream (mirroring ``calibrate_alpha``). When the rollout batch or the
+    teacher TRAIN split holds fewer frames than ``minibatch``, BOTH draws
+    shrink to ``min(minibatch, n_ppo_frames, n_retention_frames)`` so the two
+    gradients stay matched-size. Takes no optimizer step and leaves ``.grad``
+    buffers untouched.
     """
-    params = trainable_parameters(net)
+    n_frames = sum(len(rollout.actions) for rollout in rollouts)
+    n_retention_frames = int(train_tensors["player"].shape[0])
+    ppo_k = matched_gradient_minibatch_size(n_frames, n_retention_frames, minibatch)
 
+    params = trainable_parameters(net)
     batch = rollouts_to_batch(rollouts, device)
     advantages = normalized_advantages(batch)
-    n_frames = int(batch["player"].shape[0])
-    ppo_k = min(int(minibatch), n_frames)
     index = torch.randperm(n_frames, generator=generator)[:ppo_k].to(device)
     g_ppo = flat_grad(policy_loss_only(net, batch, advantages, index=index), params)
 
@@ -338,12 +359,13 @@ def calibrate_alpha(
     weights/rollouts/tensors.
     """
     gen = calibration_generator() if generator is None else generator
-    params = trainable_parameters(net)
+    n_frames = sum(len(rollout.actions) for rollout in rollouts)
+    n_retention_frames = int(train_tensors["player"].shape[0])
+    ppo_k = matched_gradient_minibatch_size(n_frames, n_retention_frames, minibatch)
 
+    params = trainable_parameters(net)
     batch = rollouts_to_batch(rollouts, device)
     advantages = normalized_advantages(batch)
-    n_frames = int(batch["player"].shape[0])
-    ppo_k = min(int(minibatch), n_frames)
 
     ppo_norms: list[float] = []
     ret_norms: list[float] = []

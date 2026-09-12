@@ -250,6 +250,18 @@ def test_grad_alignment_reports_norms_and_cosine_without_stepping() -> None:
         assert p.grad is None or torch.count_nonzero(p.grad) == 0
 
 
+def test_grad_alignment_fails_closed_for_empty_ppo_rollouts() -> None:
+    with pytest.raises(ValueError, match="non-empty PPO rollout batch"):
+        aux.grad_alignment(
+            _tiny_net(),
+            [],
+            _teacher_tensors(n=4),
+            torch.device("cpu"),
+            generator=aux.retention_generator(),
+            minibatch=4,
+        )
+
+
 def test_grad_alignment_ppo_grad_excludes_value_and_entropy_terms() -> None:
     net = _tiny_net(seed=2)
     device = torch.device("cpu")
@@ -339,6 +351,32 @@ def test_grad_alignment_matches_sizes_when_rollout_is_shorter_than_minibatch() -
 
     assert info["n_samples"] == total_frames
     assert info["n_retention_samples"] == total_frames
+    assert info["n_samples"] == info["n_retention_samples"]
+
+
+def test_grad_alignment_matches_sizes_when_retention_pool_is_smaller_than_minibatch() -> None:
+    """Small-retention-pool edge: when the teacher TRAIN split has FEWER
+    rows than the requested minibatch, g_ret is necessarily measured on all
+    available retention rows -- the PPO draw must shrink to match, never
+    stay at the full requested minibatch size (even though the rollout
+    batch itself has plenty of frames)."""
+    net = _tiny_net(seed=12)
+    device = torch.device("cpu")
+    rollouts = _fake_rollouts(n_frames=10, n_rollouts=1, seed=27)  # 10 frames total
+    train = _teacher_tensors(n=3, seed=28)  # only 3 retention rows
+    minibatch = 8
+
+    total_frames = sum(len(r.actions) for r in rollouts)
+    assert total_frames > minibatch
+    assert len(train["player"]) < minibatch  # the edge this guards against
+
+    info = aux.grad_alignment(
+        net, rollouts, train, device,
+        generator=torch.Generator().manual_seed(2), minibatch=minibatch,
+    )
+
+    assert info["n_samples"] == len(train["player"])
+    assert info["n_retention_samples"] == len(train["player"])
     assert info["n_samples"] == info["n_retention_samples"]
 
 
@@ -456,6 +494,74 @@ def test_calibrate_alpha_matches_each_draw_when_rollout_is_shorter_than_minibatc
     assert sum(len(r.actions) for r in rollouts) < minibatch
     assert ppo_draw_sizes == retention_draw_sizes == [3, 3]
     assert result["n_samples"] == result["n_retention_samples"] == 6
+
+
+def test_calibrate_alpha_matches_each_draw_when_retention_pool_is_smaller_than_minibatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every calibration gradient pair uses the available retention-frame count."""
+    net = _tiny_net(seed=38)
+    device = torch.device("cpu")
+    rollouts = _fake_rollouts(n_frames=10, n_rollouts=1, seed=39)
+    train = _teacher_tensors(n=3, seed=40)
+    minibatch = 8
+    ppo_draw_sizes: list[int] = []
+    retention_draw_sizes: list[int] = []
+
+    real_policy_loss_only = aux.policy_loss_only
+    real_sample_retention_minibatch = aux.sample_retention_minibatch
+
+    def record_ppo_draw(*args, **kwargs):
+        ppo_draw_sizes.append(int(kwargs["index"].shape[0]))
+        return real_policy_loss_only(*args, **kwargs)
+
+    def record_retention_draw(*args, **kwargs):
+        batch = real_sample_retention_minibatch(*args, **kwargs)
+        retention_draw_sizes.append(int(batch["player"].shape[0]))
+        return batch
+
+    monkeypatch.setattr(aux, "policy_loss_only", record_ppo_draw)
+    monkeypatch.setattr(aux, "sample_retention_minibatch", record_retention_draw)
+
+    calibration_draws = 2
+    result = aux.calibrate_alpha(
+        net,
+        rollouts,
+        train,
+        device,
+        minibatch=minibatch,
+        n_minibatches=calibration_draws,
+        generator=torch.Generator().manual_seed(41),
+    )
+
+    assert sum(len(r.actions) for r in rollouts) > minibatch
+    assert len(train["player"]) < minibatch
+    assert ppo_draw_sizes == retention_draw_sizes == [3, 3]
+    assert result["n_samples"] == result["n_retention_samples"] == 6
+
+
+def test_calibrate_alpha_fails_closed_for_an_empty_retention_pool() -> None:
+    """An auxiliary run without TRAIN teacher frames is invalid, rather than
+    a zero-sized gradient calibration that can produce a NaN alpha."""
+    with pytest.raises(ValueError, match="non-empty retention TRAIN split"):
+        aux.calibrate_alpha(
+            _tiny_net(seed=42),
+            _fake_rollouts(n_frames=8, n_rollouts=1, seed=43),
+            _teacher_tensors(n=0, seed=44),
+            torch.device("cpu"),
+            minibatch=4,
+        )
+
+
+def test_calibrate_alpha_fails_closed_for_empty_ppo_rollouts() -> None:
+    with pytest.raises(ValueError, match="non-empty PPO rollout batch"):
+        aux.calibrate_alpha(
+            _tiny_net(),
+            [],
+            _teacher_tensors(n=4),
+            torch.device("cpu"),
+            minibatch=4,
+        )
 
 
 def test_calibrate_alpha_uses_the_preregistered_formula() -> None:
