@@ -22,8 +22,8 @@ def test_policy_forward_and_one_episode():
     assert len(G) == len(rollout.rewards)
     loss = torch.stack([-lp * g for lp, g in zip(rollout.log_probs, G)]).sum()
     loss.backward()
-    assert policy.net[0].weight.grad is not None
-    assert policy.net[-1].out_features == len(ACTIONS)
+    assert policy.body[0].weight.grad is not None
+    assert policy.policy.out_features == len(ACTIONS)
 
 
 def test_rollout_stores_categorical_entropy():

@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """v4.8 — fraction-only A/B experiment config + manifest layer.
 
 This is a *diagnostic* controlled A/B layer on top of the v4.7 reset-mode

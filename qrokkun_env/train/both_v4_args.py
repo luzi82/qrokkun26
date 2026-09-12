@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """CLI arg parsing for train/both_v4.py, split out so it can be unit-tested
 without importing torch (argparse only; no tensors/nets touched here).
 
