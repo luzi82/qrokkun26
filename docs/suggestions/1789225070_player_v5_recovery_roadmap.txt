@@ -1,0 +1,130 @@
+PlayerV5 recovery roadmap（更正後 round 1 前）
+================================================
+
+狀態與最終目標
+--------------
+
+本路線圖記錄 PlayerV5（code class：PlayerRankedTopK；checkpoint
+architecture key：player_ranked_topk）的下一步。最終目標是：在 scripted
+Spawner 的受控 PPO 下，讓由 PlayerV1 移植而來的 PlayerV5 技能通過預先
+登記的 retention gate；只有在 retention 已被可靠建立後，才評估更大範圍
+的訓練改動。這不是「找到一個看起來較好」的 snapshot，也不是立刻進入
+self-play 的計畫。
+
+架構身份與晉升狀態必須分開：PlayerV5 是已生效且不會因 PPO 成敗改名的
+架構身份；目前 promotion status 是 candidate，並非 main training default。
+BC checkpoint 是 production-compatible 的候選，但仍受 reproducibility
+gate 約束；所有 PPO snapshot 都是 experimental、non-production，且不得作
+production 初始化或獲得 promotion。
+
+已完成的里程碑（證據，不重寫歷史）
+------------------------------------
+
+1. PlayerV1 recovery／provenance 已完成：歷史 PlayerV1 teacher 已以本機
+   副本及 SHA-256 錨定，並在歷史契約（seeds 300--329、90 秒）重現 45.83 s
+   mean，亦在現行契約（seeds 3000--3029、70 秒）得到 43.42 s mean／47.15 s
+   median。舊／新契約已清楚分開；NAS 僅為唯讀來源，實驗不在 NAS 上讀寫或
+   直接訓練。
+
+2. PlayerV5 selection 與 BC multi-seed 已完成。ranked top-k（top_k=8）
+   架構在 seed 4、5、6 的 held agreement 均 >= 0.65；三個 closed-loop
+   means 的平均為 33.8689 s（>= 30 s），reproducibility gate PASS。seed 6
+   （34.0906 s）因三個 mean 的中位位置而預先選為 retention 起點，並非事後
+   選最佳 seed。
+
+3. 未正則化 scripted PPO retention control 已完成且 FAILED：held teacher
+   agreement 由 0.6999 在 update 10 降至 0.5286，早於 survival 下限失守；
+   update 200 為 agreement 0.1731、mean 24.5350 s、median 22.6250 s。這是
+   PPO 未能保留 BC 技能的證據，不是 PlayerV5 架構身份失敗。
+
+4. 原 aux round 1 的因果歸因已被撤銷。該 arm 本身的 retention gate FAIL
+   仍有效（update 10 agreement 0.6371 < 0.6499；update 200 agreement
+   0.6147），但 calibration 曾丟棄 rollout、梯度尺度不匹配、且 diagnostic
+   RNG 會影響訓練 stream。因此其與未正則化 arm 的差異（包括 update-200
+   survival）不可歸因於 alpha，亦不可據此調高 alpha。這不會抹除該 arm 的
+   standalone gate 結果。
+
+5. Harness hardening 已完成並提交：修正會重用 calibration 的 update-1
+   rollout、分離 calibration／diagnostic／training RNG streams、以 matched
+   PPO/retention minibatch 校準 alpha，並保存 pre-update on-policy alignment。
+   teacher TRAIN split 或 PPO rollout 較短時，兩側 draw 同步縮至共同大小；空
+   input 會在 batch conversion／forward 前明確 fail closed。HEAD 的 baseline
+   test-contract 修復亦已完成。測試基建的失敗／contract 修復是已解決或並行的
+   工程事項，並非新的研究結果或效能證據。
+
+精確目前位置（2026-09-12 HKT）
+---------------------------------
+
+- Corrected harness source commit：bd367d9（[verified] Finalize corrected
+  retention gradient contracts）；其 baseline parent 包含 f03f2a6
+  （[verified] Repair baseline unit test contracts）。
+- 以下 source/test contract 已提交，不再是 working-tree-only 修正：
+  - tools/phase3_ranked_ppo_retention_aux.py
+  - qrokkun_env/tests/test_phase3_ranked_ppo_retention_aux.py
+- teacher TRAIN split 或 PPO rollout 少於 minibatch 時，grad_alignment 與
+  calibrate_alpha 都把 PPO／retention draw 同步縮至
+  min(minibatch, PPO frames, retention frames)；空 input 明確 fail closed。
+- 提交前完整 suite 為 351 passed、2 warnings；無 optimizer-step readiness
+  smoke 亦確認設定、teacher／student 載入、forward/loss 及 weights unchanged。
+- 現行 source/test contract 指定 TARGET_RETENTION_GRAD_RATIO = 0.15；這是
+  目標「加權 retention gradient 對 PPO policy gradient」的比例。它不是
+  alpha。alpha 是從起始 checkpoint、8 個 matched gradient pairs 的 norm
+  依公式校準一次後凍結的導出係數，不能以生存率或評估結果事後調整。
+
+有序下一步
+----------
+
+1. Corrected harness 已由 bd367d9 凍結。訓練 agent 必須由包含此 commit 的
+   clean checkout 開始，先重跑完整 suite，並核對小 teacher-pool、短 rollout、
+   empty-input fail-closed、RNG-stream 隔離、pre-update measurement、locked-knob
+   與 no-promotion contracts；不得在 dirty source 上開始正式 run。
+
+2. 在已 commit 的 harness 上執行 corrected round 1：同一 seed-6 BC 起點、
+   同一 PlayerV1 teacher dataset/split、scripted Spawner、相同 rollout/eval
+   seed windows、200 updates 與全部既有鎖定 PPO knobs；唯一新增的設計量仍是
+   TARGET_RETENTION_GRAD_RATIO=0.15。重用 update-1 calibration window，
+   alpha 僅按預先定義的 matched-pair 公式一次校準並凍結。這是「更正 round 1」，
+   不是較大 alpha 的 round 2。
+
+3. 訓練前重新登記並在報告中逐項輸出 retention gates：以 update 0 的
+   30-seed deterministic eval 為 reference，final mean、median 各須 >= 80%；
+   held teacher agreement 的絕對下降不得超過 0.05；缺少 held agreement
+   fail closed，並記錄第一個 breaking snapshot。seed-6 基準若相同，數值
+   floors 為 mean 27.2724 s、median 29.4333 s、agreement 0.6499。所有
+   snapshots 仍只供診斷，沒有 checkpoint promotion。
+
+4. 分支規則：
+   - PASS：記錄完整 provenance、gates、各 snapshot 與無事後選擇的結果；
+     retention 成立後才可另立文件、預先登記後續比較。
+   - FAIL：保留失敗報告與全部實驗 snapshot，promote nothing；不得從曲線
+     或 survival 事後挑 alpha／snapshot。下一項只能是一個新、明確預登記的
+     retention 假說與對照，不能把多個改動混入同一 run。
+
+5. 只有 retention PASS 後，才依序考慮 entropy、gamma/lambda、Spawner
+   改動與 self-play；每一項均須分開預登記、保留 scripted-retention 對照，
+   不可與 corrected round 1 混合。
+
+非目標與不變量
+----------------
+
+- 不做 NAS-direct 實驗：NAS 是唯讀來源；不在其上訓練、評估或寫入。
+- teacher frames 不得進入 PPO batch、advantage、old_log_prob、GAE 或 ratio；
+  teacher TRAIN split 只供 retention auxiliary，held split 只供 diagnostics/gate。
+- 不按評估結果事後選 alpha，也不從中間／最終 PPO snapshots 事後挑選。
+- experimental checkpoints 永不 promotion，且不得標為 production-compatible。
+- 在 retention 被證實前，不引入 learned Spawner、self-play、random-start
+  fraction、DAgger、entropy A/B、gamma/lambda A/B 或 reward rewrite。
+- 報告必須繼續同時標明「PlayerV5（PlayerRankedTopK）」、architecture key、
+  promotion status，以及訓練結果屬於證據而非命名裁決。
+
+主要依據
+--------
+
+- docs/suggestions/1789126118_phase0_player_recovery_provenance.txt
+- docs/suggestions/1789126118_phase1_eval_card.txt
+- docs/suggestions/1789155208_ranked_player_multiseed_and_ppo_retention.txt
+- docs/suggestions/1789159452_player_v5_designation.txt
+- docs/suggestions/1789163593_player_v5_retention_aux_round1.txt
+- docs/suggestions/1789175122_player_v5_retention_aux_round1_erratum.txt
+- tools/phase3_ranked_ppo_retention.py、tools/phase3_ranked_ppo_retention_aux.py
+  及相應 qrokkun_env/tests/ contracts（本文件撰寫時的工作樹）。
