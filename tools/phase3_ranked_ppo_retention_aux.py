@@ -102,18 +102,45 @@ from tools.phase3_ranked_ppo_retention import (
 # --------------------------------------------------------------------------- #
 TARGET_RETENTION_GRAD_RATIO = 0.15
 
-# Fixed seed for the retention-minibatch sampler, so the retention stream is
-# reproducible and independent of the PPO minibatch permutation stream.
+# Fixed seeds for the THREE never-shared retention-sampling streams, so the
+# retention draws are reproducible and independent of the PPO minibatch
+# permutation stream -- and of each other:
+#   * training    -- the retention minibatches consumed by optimizer steps
+#   * calibration -- the alpha calibration draws (once, before any step)
+#   * diagnostic  -- grad_alignment probes at snapshots / per-update logging
+# Keeping them separate means changing the snapshot schedule (or adding any
+# diagnostic probe) can never shift a later training retention minibatch.
 RETENTION_SAMPLER_SEED = 12345
+RETENTION_CALIBRATION_SEED = 22345
+RETENTION_DIAGNOSTIC_SEED = 32345
+
+# Number of matched-size (PPO minibatch, retention minibatch) gradient pairs
+# averaged by the alpha calibration.
+CALIBRATION_GRAD_SAMPLES = 8
 
 _GRAD_EPS = 1e-8
 
 
-def retention_generator() -> torch.Generator:
+def retention_generator(seed: int = RETENTION_SAMPLER_SEED) -> torch.Generator:
     """Fresh, deterministically seeded sampler for retention minibatches."""
     gen = torch.Generator()
-    gen.manual_seed(RETENTION_SAMPLER_SEED)
+    gen.manual_seed(int(seed))
     return gen
+
+
+def training_generator() -> torch.Generator:
+    """Retention sampler for the optimizer steps inside ``ppo_aux_update``."""
+    return retention_generator(RETENTION_SAMPLER_SEED)
+
+
+def calibration_generator() -> torch.Generator:
+    """Retention/PPO minibatch sampler used by ``calibrate_alpha`` only."""
+    return retention_generator(RETENTION_CALIBRATION_SEED)
+
+
+def diagnostic_generator() -> torch.Generator:
+    """Retention sampler used by ``grad_alignment`` probes only."""
+    return retention_generator(RETENTION_DIAGNOSTIC_SEED)
 
 
 def sample_retention_minibatch(
@@ -278,26 +305,69 @@ def calibrate_alpha(
     *,
     target_ratio: float = TARGET_RETENTION_GRAD_RATIO,
     minibatch: int = PPO_MINIBATCH,
+    n_minibatches: int = CALIBRATION_GRAD_SAMPLES,
     generator: torch.Generator | None = None,
 ) -> dict[str, Any]:
     """Calibrate alpha ONCE at the starting checkpoint, before any optimizer
     step::
 
-        alpha = target_ratio * ||g_ppo|| / (||g_ret|| + 1e-8)
+        alpha = target_ratio * mean||g_ppo|| / (mean||g_ret|| + 1e-8)
 
-    where ``g_ppo`` is the gradient of the PPO policy loss only (no value, no
-    entropy) on one on-policy scripted rollout batch, and ``g_ret`` the
-    gradient of the hybrid retention loss on one train-split retention
-    minibatch. Deterministic for fixed weights/rollouts/tensors.
+    ``g_ppo`` is the gradient of the PPO policy loss only (no value, no
+    entropy) and ``g_ret`` the gradient of the hybrid retention loss on a
+    train-split retention minibatch. Both are measured on the SAME minibatch
+    size (``PPO_MINIBATCH``) -- the shapes an optimizer step actually sees --
+    never a full-batch PPO gradient against a 512-frame retention gradient,
+    which would compare two differently-scaled quantities. ``n_minibatches``
+    matched pairs are drawn and their norms averaged. Deterministic for fixed
+    weights/rollouts/tensors.
     """
-    gen = retention_generator() if generator is None else generator
-    info = grad_alignment(net, rollouts, train_tensors, device, generator=gen, minibatch=minibatch)
-    alpha = float(target_ratio * (info["g_ppo_norm"] / (info["g_ret_norm"] + _GRAD_EPS)))
-    result = dict(info)
-    result["alpha"] = alpha
-    result["target_ratio"] = float(target_ratio)
-    result["g_ret_weighted_norm"] = alpha * info["g_ret_norm"]
-    result["grad_ratio"] = result["g_ret_weighted_norm"] / (info["g_ppo_norm"] + _GRAD_EPS)
+    gen = calibration_generator() if generator is None else generator
+    params = trainable_parameters(net)
+
+    batch = rollouts_to_batch(rollouts, device)
+    advantages = normalized_advantages(batch)
+    n_frames = int(batch["player"].shape[0])
+    ppo_k = min(int(minibatch), n_frames)
+
+    ppo_norms: list[float] = []
+    ret_norms: list[float] = []
+    cosines: list[float] = []
+    n_ppo_samples = 0
+    n_ret_samples = 0
+
+    for _ in range(int(n_minibatches)):
+        index = torch.randperm(n_frames, generator=gen)[:ppo_k].to(device)
+        g_ppo = flat_grad(policy_loss_only(net, batch, advantages, index=index), params)
+
+        mb = sample_retention_minibatch(train_tensors, device, gen, size=minibatch)
+        dist, _value = net(mb["player"], mb["bullets"], mb["pad"])
+        g_ret = flat_grad(retention_loss(dist.logits, mb["teacher_logits"]), params)
+
+        ppo_norms.append(float(g_ppo.norm().item()))
+        ret_norms.append(float(g_ret.norm().item()))
+        cosines.append(
+            float((g_ppo @ g_ret / (g_ppo.norm() * g_ret.norm() + _GRAD_EPS)).item())
+        )
+        n_ppo_samples += int(index.shape[0])
+        n_ret_samples += int(mb["player"].shape[0])
+
+    g_ppo_norm = statistics.fmean(ppo_norms)
+    g_ret_norm = statistics.fmean(ret_norms)
+    alpha = float(target_ratio * (g_ppo_norm / (g_ret_norm + _GRAD_EPS)))
+    result: dict[str, Any] = {
+        "g_ppo_norm": g_ppo_norm,
+        "g_ret_norm": g_ret_norm,
+        "cosine_similarity": statistics.fmean(cosines),
+        "n_samples": n_ppo_samples,
+        "n_retention_samples": n_ret_samples,
+        "calibration_minibatches": int(n_minibatches),
+        "minibatch_size": int(minibatch),
+        "alpha": alpha,
+        "target_ratio": float(target_ratio),
+    }
+    result["g_ret_weighted_norm"] = alpha * g_ret_norm
+    result["grad_ratio"] = result["g_ret_weighted_norm"] / (g_ppo_norm + _GRAD_EPS)
     return result
 
 
@@ -313,6 +383,7 @@ def ppo_aux_update(
     device: torch.device,
     *,
     generator: torch.Generator,
+    diagnostics_generator: torch.Generator | None = None,
     minibatch: int = PPO_MINIBATCH,
 ) -> dict[str, Any]:
     """One PPO update with the BC-retention auxiliary term::
@@ -325,9 +396,23 @@ def ppo_aux_update(
     at every optimizer step. Teacher frames never contribute to advantages,
     old log-probs, GAE or the PPO ratio. Optimizer, clipping, epochs and
     minibatch size are identical to phase3's ``ppo_update``.
+
+    ``generator`` feeds the training retention minibatches ONLY; the
+    per-update gradient-alignment probe draws from ``diagnostics_generator``,
+    a separate stream, so logging/diagnostics can never shift the training
+    retention samples.
     """
+    if diagnostics_generator is None:
+        diagnostics_generator = diagnostic_generator()
+    if diagnostics_generator is generator:
+        raise ValueError(
+            "the diagnostic and training retention generators must be distinct "
+            "streams: sharing them lets diagnostics shift training samples"
+        )
+
     diagnostics = grad_alignment(
-        net, rollouts, train_tensors, device, generator=generator, minibatch=minibatch
+        net, rollouts, train_tensors, device,
+        generator=diagnostics_generator, minibatch=minibatch,
     )
 
     batch = rollouts_to_batch(rollouts, device)
@@ -437,6 +522,36 @@ def ppo_aux_update(
 
 
 # --------------------------------------------------------------------------- #
+# rollout collection: the calibration window IS the update-1 window
+# --------------------------------------------------------------------------- #
+def collect_rollout_window(
+    net, device: torch.device, seeds: list[int], *, max_frames: int
+) -> list:
+    """Collect one rollout per seed with the phase3 collector."""
+    return [collect_rollout(net, device, seed, max_frames=max_frames) for seed in seeds]
+
+
+def calibration_and_first_update_rollouts(
+    net,
+    device: torch.device,
+    *,
+    episodes_per_update: int = EPISODES_PER_UPDATE,
+    max_frames: int = PPO_MAX_FRAMES,
+) -> tuple[list, list]:
+    """Collect the update-1 rollout window EXACTLY ONCE and return it twice.
+
+    Alpha calibration and the first PPO update share one and the same batch:
+    collecting the window a second time for update 1 would both burn a second
+    action-sampling stream from the global torch RNG (so update 1 would train
+    on different actions than the ones alpha was calibrated on) and pay for
+    the same env seeds twice. The returned objects are the same list.
+    """
+    seeds = rollout_seed_schedule(0, episodes_per_update=episodes_per_update)
+    rollouts = collect_rollout_window(net, device, seeds, max_frames=max_frames)
+    return rollouts, rollouts
+
+
+# --------------------------------------------------------------------------- #
 # canonical teacher dataset (collected exactly once, via the phase3 helper)
 # --------------------------------------------------------------------------- #
 def collect_aux_dataset(teacher, device: torch.device, **kwargs: Any) -> dict[str, Any]:
@@ -473,12 +588,16 @@ def run_aux_arm(
     initial state (the init checkpoint is never mutated).
 
     ``alpha`` is calibrated once, at the starting checkpoint, BEFORE any
-    optimizer step, from a rollout batch collected with the same collector
-    and the same rollout-seed schedule as the phase3 control; it is then
-    frozen for the whole run. ``diagnostic_tensors`` are the out-of-sample
-    teacher frames used for agreement diagnostics/gates only -- they are
-    never passed to the update. Every checkpoint written here is
-    experimental and non-production; promotion is always false.
+    optimizer step, from the update-1 rollout batch -- collected exactly once
+    with the same collector and rollout-seed schedule as the phase3 control,
+    then reused verbatim as the update-1 PPO batch, so nothing is collected
+    twice and no rollout is discarded. Alpha is frozen for the whole run.
+    Three never-shared retention streams are used (calibration, diagnostics,
+    training), so snapshots/diagnostics can never shift training samples.
+    ``diagnostic_tensors`` are the out-of-sample teacher frames used for
+    agreement diagnostics/gates only -- they are never passed to the update.
+    Every checkpoint written here is experimental and non-production;
+    promotion is always false.
     """
     net = PlayerRankedTopK(top_k=init_net.top_k, hidden=init_net.hidden).to(device)
     net.load_state_dict(init_net.state_dict())
@@ -489,26 +608,34 @@ def run_aux_arm(
     out_dir.mkdir(parents=True, exist_ok=True)
     jsonl_path = out_dir / "ppo_aux_updates.jsonl"
 
-    generator = retention_generator()
+    generator = training_generator()
+    calib_gen = calibration_generator()
+    diag_gen = diagnostic_generator()
 
     # ---- alpha calibration (no optimizer step has happened yet) ---------- #
-    calib_seeds = rollout_seed_schedule(0, episodes_per_update=args.episodes_per_update)
-    calib_rollouts = [
-        collect_rollout(net, device, seed, max_frames=args.max_frames) for seed in calib_seeds
-    ]
+    # The window is collected ONCE and is reused verbatim as the update-1 PPO
+    # batch: alpha is calibrated on exactly the rollouts update 1 trains on.
+    calib_rollouts, first_update_rollouts = calibration_and_first_update_rollouts(
+        net,
+        device,
+        episodes_per_update=args.episodes_per_update,
+        max_frames=args.max_frames,
+    )
+    calib_seeds = [r.seed for r in calib_rollouts]
     calibration = calibrate_alpha(
         net,
         calib_rollouts,
         train_tensors,
         device,
         minibatch=minibatch,
-        generator=generator,
+        generator=calib_gen,
     )
     calibration["rollout_seed_window"] = calib_seeds
     frozen = FrozenAlpha(alpha=float(calibration["alpha"]), calibration=calibration)
     alpha = frozen.alpha
 
     snapshots: list[dict[str, Any]] = []
+    total_episodes = 0
     total_frames = 0
     optimizer_steps = 0
     rollout_seed_window = calib_seeds
@@ -537,7 +664,7 @@ def run_aux_arm(
         else:
             diag = {"agreement": None}
         alignment = grad_alignment(
-            net, rollouts, train_tensors, device, generator=generator, minibatch=minibatch
+            net, rollouts, train_tensors, device, generator=diag_gen, minibatch=minibatch
         )
         alignment["alpha"] = alpha
         alignment["g_ret_weighted_norm"] = alpha * alignment["g_ret_norm"]
@@ -566,15 +693,23 @@ def run_aux_arm(
         )
 
     if 0 in snapshot_updates:
+        # Snapshot 0 only INSPECTS the already-collected window: it never
+        # collects again and never samples an action.
         _snapshot(0, calib_rollouts)
 
     with jsonl_path.open("w") as jsonl_f:
         for update in range(1, args.updates + 1):
-            seeds = rollout_seed_schedule(update - 1, episodes_per_update=args.episodes_per_update)
+            if update == 1:
+                rollouts = first_update_rollouts
+                seeds = calib_seeds
+            else:
+                seeds = rollout_seed_schedule(
+                    update - 1, episodes_per_update=args.episodes_per_update
+                )
+                rollouts = collect_rollout_window(
+                    net, device, seeds, max_frames=args.max_frames
+                )
             rollout_seed_window = seeds
-            rollouts = [
-                collect_rollout(net, device, seed, max_frames=args.max_frames) for seed in seeds
-            ]
             metrics = ppo_aux_update(
                 net,
                 opt,
@@ -583,9 +718,11 @@ def run_aux_arm(
                 alpha,
                 device,
                 generator=generator,
+                diagnostics_generator=diag_gen,
                 minibatch=minibatch,
             )
             optimizer_steps += int(metrics["optimizer_steps"])
+            total_episodes += len(rollouts)
             total_frames += sum(len(r.actions) for r in rollouts)
             row = dict(metrics)
             row["update"] = update
@@ -613,7 +750,7 @@ def run_aux_arm(
         "alpha": alpha,
         "alpha_calibration": calibration,
         "optimizer_steps": optimizer_steps,
-        "total_episodes": args.updates * args.episodes_per_update,
+        "total_episodes": total_episodes,
         "total_frames": total_frames,
         "snapshots": snapshots,
         "final_checkpoint": str(final_path),
@@ -684,6 +821,9 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
     knobs["retention_soft_weight"] = HYBRID_SOFT_WEIGHT
     knobs["retention_temperature"] = HYBRID_TEMPERATURE
     knobs["retention_sampler_seed"] = RETENTION_SAMPLER_SEED
+    knobs["retention_calibration_seed"] = RETENTION_CALIBRATION_SEED
+    knobs["retention_diagnostic_seed"] = RETENTION_DIAGNOSTIC_SEED
+    knobs["calibration_grad_samples"] = CALIBRATION_GRAD_SAMPLES
 
     gate_summary = summarize_evaluation(
         evaluate_deterministic(init_net, device, args.eval_seeds, args.eval_max_steps)
@@ -790,8 +930,16 @@ __all__ = [
     "policy_loss_only",
     "trainable_parameters",
     "RETENTION_SAMPLER_SEED",
+    "RETENTION_CALIBRATION_SEED",
+    "RETENTION_DIAGNOSTIC_SEED",
+    "CALIBRATION_GRAD_SAMPLES",
     "TARGET_RETENTION_GRAD_RATIO",
     "retention_generator",
+    "training_generator",
+    "calibration_generator",
+    "diagnostic_generator",
+    "collect_rollout_window",
+    "calibration_and_first_update_rollouts",
     "sample_retention_minibatch",
     "retention_loss_components",
     "HYBRID_HARD_WEIGHT",

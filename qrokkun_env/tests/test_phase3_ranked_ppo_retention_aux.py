@@ -449,6 +449,211 @@ def test_alpha_zero_reproduces_plain_ppo_direction() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 7b. RNG discipline: one collection per window, three unshared generators,
+#     matched calibration minibatch sizes, alpha=0 bitwise PPO equivalence
+# --------------------------------------------------------------------------- #
+def _fake_rollout(seed: int, n_frames: int = 6, marker: float = 0.0):
+    roll = _fake_rollouts(n_frames=n_frames, n_rollouts=1, seed=seed, marker=marker)[0]
+    roll.seed = seed
+    return roll
+
+
+def test_calibration_window_is_collected_once_and_is_the_update_one_batch() -> None:
+    """A) The calibration rollouts ARE the update-1 rollouts: one collection,
+    one action-sampling stream, no discarded window."""
+    device = torch.device("cpu")
+    net = _tiny_net(seed=6)
+
+    torch.manual_seed(aux.PPO_TORCH_SEED)
+    calib, first_update = aux.calibration_and_first_update_rollouts(
+        net, device, episodes_per_update=1, max_frames=8
+    )
+
+    assert calib is first_update
+    for a, b in zip(calib, first_update):
+        assert a.actions == b.actions
+        assert torch.equal(
+            torch.tensor(a.log_probs), torch.tensor(b.log_probs)
+        )
+    assert [r.seed for r in calib] == aux.rollout_seed_schedule(0, episodes_per_update=1)
+
+
+def test_run_aux_arm_never_collects_the_first_window_twice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A) Snapshot 0 / calibration must not re-collect, and the first
+    ``ppo_aux_update`` must be handed the calibration rollout list itself."""
+    collected: list[int] = []
+
+    def fake_collect(net, device, seed, max_frames):
+        collected.append(int(seed))
+        return _fake_rollout(int(seed))
+
+    monkeypatch.setattr(aux, "collect_rollout", fake_collect)
+
+    seen_batches: list[list] = []
+    real_update = aux.ppo_aux_update
+
+    def spy_update(net, opt, rollouts, *a, **kw):
+        seen_batches.append(rollouts)
+        return real_update(net, opt, rollouts, *a, **kw)
+
+    monkeypatch.setattr(aux, "ppo_aux_update", spy_update)
+
+    arm, args = _tiny_arm(tmp_path)
+
+    expected_seeds = aux.rollout_seed_schedule(
+        0, episodes_per_update=1
+    ) + aux.rollout_seed_schedule(1, episodes_per_update=1)
+    assert collected == expected_seeds  # each window collected exactly once
+    assert len(seen_batches) == args.updates
+    assert [r.seed for r in seen_batches[0]] == aux.rollout_seed_schedule(
+        0, episodes_per_update=1
+    )
+    # D/4) accounting counts the calibration window once, as update 1
+    assert arm["total_episodes"] == args.updates * args.episodes_per_update
+    assert arm["total_frames"] == 6 * args.updates
+
+
+def test_diagnostic_draws_never_advance_the_training_retention_stream() -> None:
+    """B) Snapshot/diagnostic gradient probes use their own generator, so the
+    training retention minibatches are unchanged by the snapshot schedule."""
+    device = torch.device("cpu")
+    rollouts = _fake_rollouts(n_frames=6, n_rollouts=2, seed=13, marker=0.0)
+    train = _teacher_tensors(n=16, seed=14, marker=_TEACHER_MARKER)
+
+    def _training_rows(with_diagnostics_between: bool) -> list[torch.Tensor]:
+        spy = _SpyNet(_tiny_net(seed=6))
+        opt = torch.optim.Adam(spy.parameters(), lr=aux.PPO_LR, eps=1e-8)
+        gen = aux.training_generator()
+        if with_diagnostics_between:
+            aux.grad_alignment(
+                spy.net, rollouts, train, device,
+                generator=aux.diagnostic_generator(), minibatch=4,
+            )
+        torch.manual_seed(0)
+        aux.ppo_aux_update(
+            spy, opt, rollouts, train, 0.3, device,
+            generator=gen, diagnostics_generator=aux.diagnostic_generator(),
+            minibatch=4,
+        )
+        teacher_calls = [c for c in spy.calls if bool((c[:, 0] == _TEACHER_MARKER).all())]
+        return teacher_calls[1:]  # [0] is the in-update diagnostic probe
+
+    plain = _training_rows(False)
+    with_diag = _training_rows(True)
+    assert plain and len(plain) == len(with_diag)
+    for a, b in zip(plain, with_diag):
+        assert torch.equal(a, b)
+
+    # the training stream is exactly the pristine retention sampler stream
+    expected_gen = aux.training_generator()
+    for rows in plain:
+        expected = aux.sample_retention_minibatch(train, device, expected_gen, size=4)
+        assert torch.equal(rows, expected["player"])
+
+
+def test_the_three_retention_generators_are_independent_streams() -> None:
+    """B) Calibration / diagnostic / training generators are distinct."""
+    seeds = {
+        aux.RETENTION_SAMPLER_SEED,
+        aux.RETENTION_CALIBRATION_SEED,
+        aux.RETENTION_DIAGNOSTIC_SEED,
+    }
+    assert len(seeds) == 3
+    gens = [aux.training_generator(), aux.calibration_generator(), aux.diagnostic_generator()]
+    assert len({g.initial_seed() for g in gens}) == 3
+    # sharing one generator between training and diagnostics is refused
+    shared = aux.training_generator()
+    with pytest.raises(ValueError):
+        aux.ppo_aux_update(
+            _tiny_net(seed=6),
+            torch.optim.Adam(_tiny_net(seed=6).parameters()),
+            _fake_rollouts(n_frames=6, n_rollouts=1, seed=13),
+            _teacher_tensors(n=16, seed=14),
+            0.1,
+            torch.device("cpu"),
+            generator=shared,
+            diagnostics_generator=shared,
+            minibatch=4,
+        )
+
+
+def test_calibration_uses_matched_minibatch_sizes_for_both_gradients() -> None:
+    """C) ``g_ppo`` and ``g_ret`` are measured on the SAME minibatch size."""
+    net = _tiny_net(seed=4)
+    device = torch.device("cpu")
+    rollouts = _fake_rollouts(n_frames=8, n_rollouts=2, seed=11)
+    train = _teacher_tensors(n=24, seed=12)
+
+    cal = aux.calibrate_alpha(net, rollouts, train, device, minibatch=4)
+
+    n = aux.CALIBRATION_GRAD_SAMPLES
+    assert n >= 1
+    assert cal["calibration_minibatches"] == n
+    assert cal["minibatch_size"] == 4
+    assert cal["n_samples"] == cal["n_retention_samples"] == n * 4
+    # defaults: both gradients use PPO_MINIBATCH frames per draw
+    assert (
+        inspect.signature(aux.calibrate_alpha).parameters["minibatch"].default
+        == aux.PPO_MINIBATCH
+    )
+    # and the formula still divides the two matched-size mean norms
+    assert cal["alpha"] == pytest.approx(
+        aux.TARGET_RETENTION_GRAD_RATIO * cal["g_ppo_norm"] / (cal["g_ret_norm"] + 1e-8),
+        rel=1e-9,
+    )
+
+
+def test_alpha_zero_is_bitwise_identical_to_a_ppo_only_step() -> None:
+    """D) With alpha=0 the retention term cannot move a single weight."""
+    device = torch.device("cpu")
+    rollouts = _fake_rollouts(n_frames=6, n_rollouts=2, seed=13)
+    train = _teacher_tensors(n=16, seed=14, marker=_TEACHER_MARKER)
+    minibatch = 4
+
+    net = _tiny_net(seed=6)
+    opt = torch.optim.Adam(net.parameters(), lr=aux.PPO_LR, eps=1e-8)
+    torch.manual_seed(0)
+    aux.ppo_aux_update(
+        net, opt, rollouts, train, 0.0, device,
+        generator=aux.training_generator(),
+        diagnostics_generator=aux.diagnostic_generator(),
+        minibatch=minibatch,
+    )
+
+    ref = _tiny_net(seed=6)
+    ref_opt = torch.optim.Adam(ref.parameters(), lr=aux.PPO_LR, eps=1e-8)
+    batch = ret.rollouts_to_batch(rollouts, device)
+    advantages = aux.normalized_advantages(batch)
+    n_samples = int(batch["player"].shape[0])
+    torch.manual_seed(0)
+    for _epoch in range(aux.PPO_EPOCHS):
+        perm = torch.randperm(n_samples, device=device)
+        for start in range(0, n_samples, minibatch):
+            mb = perm[start : start + minibatch]
+            dist, value = ref(batch["player"][mb], batch["bullets"][mb], batch["pad"][mb])
+            log_prob = dist.log_prob(batch["actions"][mb])
+            ratio = torch.exp(log_prob - batch["old_log_probs"][mb])
+            surr1 = ratio * advantages[mb]
+            surr2 = torch.clamp(ratio, 1 - aux.PPO_CLIP, 1 + aux.PPO_CLIP) * advantages[mb]
+            loss = (
+                -torch.min(surr1, surr2).mean()
+                + aux.PPO_VALUE_COEF * torch.nn.functional.mse_loss(value, batch["returns"][mb])
+                - aux.PPO_ENTROPY_COEF * dist.entropy().mean()
+            )
+            ref_opt.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(ref.parameters(), aux.PPO_MAX_GRAD_NORM)
+            ref_opt.step()
+
+    got, want = net.state_dict(), ref.state_dict()
+    assert set(got) == set(want)
+    for key in want:
+        assert torch.equal(got[key], want[key]), key
+
+
+# --------------------------------------------------------------------------- #
 # 8. the arm: frozen alpha, jsonl schema, experimental snapshots
 # --------------------------------------------------------------------------- #
 def _quick_args(out_dir: Path) -> argparse.Namespace:
