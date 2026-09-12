@@ -1,0 +1,53 @@
+Erratum: PlayerV5 round-1 aux PPO (1789163593) is not an α-only contrast
+======================================================================
+
+Status
+------
+
+Standalone aux-arm retention gate FAIL remains valid.
+Cross-arm attribution to α is NOT valid. No promotion. Do not raise α yet.
+
+This file does not rewrite
+docs/suggestions/1789163593_player_v5_retention_aux_round1.txt.
+It marks that report's causal claims.
+
+What still holds
+----------------
+
+- Aux arm held agreement failed at update 10 (0.6371 < 0.6499).
+- Update 200 agreement 0.6147; survival floors passed.
+- Train/held split had no leakage; teacher frames did not enter PPO advantage.
+- Checkpoints experimental / production_compatible false; promotion false.
+
+What does not hold
+------------------
+
+1. Calibration collected seeds 50000-50007 via dist.sample(), discarded them,
+   then update 1 re-collected the same env seeds after consuming global torch
+   RNG. Calibration batch 14,690 frames matched unregularized update 1;
+   aux update 1 had 12,488 frames. Training trajectories differed by more
+   than α.
+
+2. Alpha used full-batch PPO policy grad vs 512-frame retention grad, so the
+   logged 0.15 target was not the optimizer-step scale (jsonl ratio 0.17-0.49).
+
+3. Snapshot grad_alignment shared the retention generator with training, so
+   snapshot schedule could change later aux minibatches.
+
+4. Survival 35.36s vs unregularized 24.53s at update 200 is an observed
+   outcome of one run each, not a causal α effect.
+
+Code fix (not this run)
+-----------------------
+
+Commit 7b1c6ce4ef6663ea7dcfbb6d82a3a4a58e275a65:
+
+- Calibration window is collected once and reused as update 1.
+- Separate calibration / diagnostic / training generators.
+- Alpha averages 8 matched 512-vs-512 minibatches; target ratio still 0.15.
+
+Next experiment
+---------------
+
+Corrected round 1: same seed-6 BC start, same locked PPO knobs, same
+TARGET_RETENTION_GRAD_RATIO = 0.15. Not a larger-α round 2.
