@@ -3,7 +3,7 @@ Phase 1 eval card — historical PlayerV1 (2026-09-11 HKT)
 ckpt：artifacts/nas_tmp_runs/player_gpu.pt
 SHA-256：1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1
 loader：PlayerV1 + obs.vectorize；argmax det；scripted env.step
-完整 JSON：docs/suggestions/1789126118_phase1_eval_player_v1.json
+完整 JSON：docs/journal/1789126118_phase1_eval_player_v1.json
 
 historical（seeds 300–329，90s cap）
   player  mean 45.83  median 46.87  std 10.23  min 14.28  max 61.10  timeout 0

@@ -2,8 +2,8 @@
 """v4.8 — fraction-only A/B experiment config + manifest layer.
 
 This is a *diagnostic* controlled A/B layer on top of the v4.7 reset-mode
-mechanism (see docs/suggestions/1788798436_grokbot.txt, v4.7 section, and
-docs/suggestions/1789085919_v47_landed.txt). It does **not** change the
+mechanism (see docs/journal/1788798436_grokbot.txt, v4.7 section, and
+docs/journal/1789085919_v47_landed.txt). It does **not** change the
 ``--random-fraction`` default (still ``0.0``, see
 ``qrokkun_env/train/both_v4_args.py``) and does **not** modify PPO, rewards,
 gamma/lambda, aim/birth geometry, checkpoint selection, dynamics burn-in, or

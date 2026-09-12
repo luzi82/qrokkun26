@@ -8,7 +8,7 @@ Standalone aux-arm retention gate FAIL remains valid.
 Cross-arm attribution to α is NOT valid. No promotion. Do not raise α yet.
 
 This file does not rewrite
-docs/suggestions/1789163593_player_v5_retention_aux_round1.txt.
+docs/journal/1789163593_player_v5_retention_aux_round1.txt.
 It marks that report's causal claims.
 
 What still holds

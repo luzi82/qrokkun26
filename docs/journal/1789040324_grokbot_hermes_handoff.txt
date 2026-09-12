@@ -24,7 +24,7 @@ Repo：https://github.com/luzi82/qrokkun26  （main）
 - `qrokkun_env/train/checkpoints_v4.py` — v4.6 snapshot/best 輔助
 - `qrokkun_env/eval_modes.py` — 三模式 eval、paired seeds
 - `qrokkun_env/corner_probe.py` — 九點鎖定 P probe
-- `docs/suggestions/` — 歷次 GPT／Grok 建議與規格（見文末索引）
+- `docs/journal/` — 歷次 GPT／Grok 建議與規格（見文末索引）
 
 原則：suggestions 檔用 **新 timestamp 檔** 追加共識；唔好改舊檔內容（用戶要求）。
 
@@ -59,8 +59,8 @@ v4.5 — per-transition `delta_frames`；`gamma_t = gamma_frame ** delta_frames`
 v4.6 — PPO diagnostics + latest/best/snapshot；**P／S 分開** selection
         （best P ← newP×scripted；best S ← flee×newS det_stoch 等；new×new 唔做唯一指標）
 
-Roadmap 原文：`docs/suggestions/1788798436_grokbot.txt`
-v4.3 規格：`docs/suggestions/1788822828_grokbot.txt`
+Roadmap 原文：`docs/journal/1788798436_grokbot.txt`
+v4.3 規格：`docs/journal/1788822828_grokbot.txt`
 
 ────────────────────────────────
 5. 訓練結果現況（重要：唔好誤讀）

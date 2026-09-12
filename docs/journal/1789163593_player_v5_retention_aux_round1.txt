@@ -85,7 +85,7 @@ Update | mean s | median s | agreement | KL(t->s) | cosine | vs unreg agr
 100    | 33.6539 | 31.0250 | 0.6144 | 0.2024 | +0.335 | 0.2402
 200    | 35.3556 | 38.0250 | 0.6147 | 0.1813 | +0.125 | 0.1731
 
-Unregularized reference (same start, docs/suggestions/1789155208):
+Unregularized reference (same start, docs/journal/1789155208):
 update 10/100/200 agreement 0.5286 / 0.2402 / 0.1731; update 200 mean 24.5350 s.
 
 Interpretation
@@ -137,7 +137,7 @@ GB10 checkpoint file SHA-256:
 - final:      ca9ced003b1cd023e8eb70fc8e809342e849e40d8c20a001be22df77473600fe
 
 Compact machine-readable summary:
-docs/suggestions/1789163593_player_v5_retention_aux_round1.json
+docs/journal/1789163593_player_v5_retention_aux_round1.json
 
 Decision
 --------

@@ -120,11 +120,11 @@ production 初始化或獲得 promotion。
 主要依據
 --------
 
-- docs/suggestions/1789126118_phase0_player_recovery_provenance.txt
-- docs/suggestions/1789126118_phase1_eval_card.txt
-- docs/suggestions/1789155208_ranked_player_multiseed_and_ppo_retention.txt
-- docs/suggestions/1789159452_player_v5_designation.txt
-- docs/suggestions/1789163593_player_v5_retention_aux_round1.txt
-- docs/suggestions/1789175122_player_v5_retention_aux_round1_erratum.txt
+- docs/journal/1789126118_phase0_player_recovery_provenance.txt
+- docs/journal/1789126118_phase1_eval_card.txt
+- docs/journal/1789155208_ranked_player_multiseed_and_ppo_retention.txt
+- docs/journal/1789159452_player_v5_designation.txt
+- docs/journal/1789163593_player_v5_retention_aux_round1.txt
+- docs/journal/1789175122_player_v5_retention_aux_round1_erratum.txt
 - tools/phase3_ranked_ppo_retention.py、tools/phase3_ranked_ppo_retention_aux.py
   及相應 qrokkun_env/tests/ contracts（本文件撰寫時的工作樹）。

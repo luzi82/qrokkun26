@@ -1,6 +1,6 @@
 Qrokkun26 v4 → v5 改動計劃
 ==========================
-來源：GPT 5.6 sol（docs/suggestions/1788785426_gpt56sol.txt）＋ room 討論（對稱×4／policy sample／replay）＋ v4 實測（new×new ~1.8s、唔同 seed 片一樣、flee×newS ≈ scripted）
+來源：GPT 5.6 sol（docs/journal/1788785426_gpt56sol.txt）＋ room 討論（對稱×4／policy sample／replay）＋ v4 實測（new×new ~1.8s、唔同 seed 片一樣、flee×newS ≈ scripted）
 日期：2026-09-07（HKT）
 作者：Software Engineer（Grok Bot）＋ Code reviewer 同意優先序
 
@@ -124,7 +124,7 @@ v5 完成準則
 - Agent：qrokkun_env/agents/player_v4.py、spawner_v4.py、encoder_v4.py
 - Obs：qrokkun_env/agents/obs_v4.py（或 obs_rich／encode_obs）
 - Demo：qrokkun_env/render_v4_demo.py
-- 對照建議：docs/suggestions/1788785426_gpt56sol.txt
+- 對照建議：docs/journal/1788785426_gpt56sol.txt
 - 版本對照：docs/AGENT_VERSIONS.md（落地後更新）
 
 下一步（等人確認）
@@ -134,7 +134,7 @@ v5 完成準則
 ────────────────────────────────
 Amend 2026-09-07 (GPT 1788787846)
 ────────────────────────────────
-納入 docs/suggestions/1788787846_gpt56sol.txt 嘅 review 修訂（唔改本檔上文歷史敘述，只追加共識）：
+納入 docs/journal/1788787846_gpt56sol.txt 嘅 review 修訂（唔改本檔上文歷史敘述，只追加共識）：
 
 1. 修訂落地順序：v4.1→v4.5 然後先開 v5
    - v4.1：temp-p/temp-s=1.0 + Player/Spawner ratio regression

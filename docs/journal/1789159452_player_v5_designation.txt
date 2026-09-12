@@ -46,7 +46,7 @@ Current evidence（現有證據，唔改寫）
    - 完整報告 commit（report-only verified）：
      4ee16a56e783b563adcd3b67ad44f9b111924b61
    - 完整報告路徑：
-     docs/suggestions/1789155208_ranked_player_multiseed_and_ppo_retention.txt
+     docs/journal/1789155208_ranked_player_multiseed_and_ppo_retention.txt
 
 Promotion status（晉升狀態）
 -----------------------------
@@ -89,8 +89,8 @@ Spawner（不受影響）
 - V2、V3、V4、V5 各代 Player/Spawner 曾經出現嘅失敗、限制、或未達標
   結果（例如 obs 格式唔一致、distillation 失敗、PPO retention gate
   未過等）必須繼續保留喺原有文件（例如
-  docs/suggestions/1789126118_phase0_player_recovery_provenance.txt、
-  docs/suggestions/1789155208_ranked_player_multiseed_and_ppo_retention.txt）
+  docs/journal/1789126118_phase0_player_recovery_provenance.txt、
+  docs/journal/1789155208_ranked_player_multiseed_and_ppo_retention.txt）
 - 唔可以因為 PlayerV5 命名生效，就刪除、覆寫、或淡化之前對 V2/V3/V4
   失敗嘅紀錄。歷史紀錄係後續判斷嘅重要依據，必須完整保留
 
@@ -133,7 +133,7 @@ References（引用）
 - 完整報告 commit（report-only verified）：
   4ee16a56e783b563adcd3b67ad44f9b111924b61
 - 完整報告路徑：
-  docs/suggestions/1789155208_ranked_player_multiseed_and_ppo_retention.txt
+  docs/journal/1789155208_ranked_player_multiseed_and_ppo_retention.txt
 - 架構實作路徑：
   qrokkun_env/agents/player_ranked_topk.py
 - Spawner 實作路徑：

@@ -1,6 +1,6 @@
 Hermes 交接補充（Code reviewer 2026-09-10）
 ==========================================
-對照：docs/suggestions/1789040324_grokbot_hermes_handoff.txt（99b67de）
+對照：docs/journal/1789040324_grokbot_hermes_handoff.txt（99b67de）
 作者：Software Engineer；來源：Code reviewer LGTM + 四點補遺
 
 交接正文大致 LGTM。以下四點請 Hermes 一併當 canon：

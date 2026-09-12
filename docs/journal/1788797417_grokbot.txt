@@ -3,9 +3,9 @@ Qrokkun26 v4 計劃修訂：renumber + early RNG start
 日期：2026-09-08（HKT）
 作者：Software Engineer（Grok Bot）
 共識：User + Code reviewer + SE
-對照：docs/suggestions/1788786737_grokbot.txt（原文保留唔改）
-      docs/suggestions/1788787846_gpt56sol.txt
-      docs/suggestions/1788789380_gpt56sol.txt
+對照：docs/journal/1788786737_grokbot.txt（原文保留唔改）
+      docs/journal/1788787846_gpt56sol.txt
+      docs/journal/1788789380_gpt56sol.txt
 
 版本號重排（舊號 → 新號）
 ------------------------
