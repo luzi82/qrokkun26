@@ -1,0 +1,172 @@
+PlayerV5 renderer architecture_version strictness: pre-fix RED evidence
+=======================================================================
+
+Purpose
+-------
+
+This durable record closes the missing pre-fix RED evidence for final squashed
+implementation commit 6379f7af670b5b39998c487598117e59fc806a3a
+(6379f7a, "Add fixed-contract PlayerV5 demo renderer").  It preserves the
+traceable TDD causal chain without representing the RED source state as a
+separate commit.
+
+Primary immutable source and integrity check
+-------------------------------------------
+
+Source transcript (read as a whole file):
+
+  /home/hermes/.codex/sessions/2026/09/14/rollout-2026-09-14T13-04-53-01a09e4d-cbba-7e31-b61e-98145268e6fb.jsonl
+
+Whole-file SHA-256 independently verified for this record:
+
+  ee3107129ddb33d076b6ded9a35759ff6a39fe1291b1318a7b0073b4970de85c
+
+The transcript timestamps below are UTC.  Event ordinals refer to that
+immutable JSONL transcript.
+
+TDD causal chain
+----------------
+
+1. Test-first change: event ordinal 31, timestamp 2026-09-14T05:05:11.388Z,
+   records the test-only patch to
+   qrokkun_env/tests/test_render_player_v5_demo.py.  It expands
+   architecture_version parameterization from [None, 999] to
+   [None, 999, True, 1.0] and widens the test annotation to include float.
+   Thus the existing missing and wrong-integer cases were preserved and the
+   True and 1.0 alias cases were added before the fix.
+
+2. Original RED: command-execution event ordinal 39,
+   timestamp 2026-09-14T05:05:16.660Z, ran exactly:
+
+   python3 -m pytest -q qrokkun_env/tests/test_render_player_v5_demo.py::test_public_ranked_renderer_loader_rejects_missing_or_wrong_architecture_version
+
+   It exited with code 1.  Response ordinal 40,
+   timestamp 2026-09-14T05:05:16.666Z, reported that same execution result.
+   Complete original pytest stdout from event ordinal 39 follows verbatim,
+   except that whitespace-only blank source lines are normalized to empty lines:
+
+..FF                                                                     [100%]
+=================================== FAILURES ===================================
+_ test_public_ranked_renderer_loader_rejects_missing_or_wrong_architecture_version[True] _
+
+tmp_path = PosixPath('/tmp/pytest-of-hermes/pytest-333/test_public_ranked_renderer_lo2')
+architecture_version = True
+
+    @pytest.mark.parametrize("architecture_version", [None, 999, True, 1.0])
+    def test_public_ranked_renderer_loader_rejects_missing_or_wrong_architecture_version(
+        tmp_path: Path, architecture_version: int | float | None
+    ):
+        """A hash-valid checkpoint cannot declare an incompatible network version."""
+        from qrokkun_env.agents.player_checkpoints import CheckpointSchemaError, pack_player_checkpoint
+        from qrokkun_env.agents.player_ranked_topk import PlayerRankedTopK
+        from qrokkun_env.render_player_v5_demo import load_demo_player
+
+        checkpoint = pack_player_checkpoint(PlayerRankedTopK(top_k=8, hidden=16), source_tool="test")
+        if architecture_version is None:
+            checkpoint.pop("architecture_version")
+        else:
+            checkpoint["architecture_version"] = architecture_version
+        path = tmp_path / f"bad-version-{architecture_version}.pt"
+        torch.save(checkpoint, path)
+
+>       with pytest.raises(CheckpointSchemaError, match="architecture_version"):
+E       Failed: DID NOT RAISE CheckpointSchemaError
+
+qrokkun_env/tests/test_render_player_v5_demo.py:104: Failed
+_ test_public_ranked_renderer_loader_rejects_missing_or_wrong_architecture_version[1.0] _
+
+tmp_path = PosixPath('/tmp/pytest-of-hermes/pytest-333/test_public_ranked_renderer_lo3')
+architecture_version = 1.0
+
+    @pytest.mark.parametrize("architecture_version", [None, 999, True, 1.0])
+    def test_public_ranked_renderer_loader_rejects_missing_or_wrong_architecture_version(
+        tmp_path: Path, architecture_version: int | float | None
+    ):
+        """A hash-valid checkpoint cannot declare an incompatible network version."""
+        from qrokkun_env.agents.player_checkpoints import CheckpointSchemaError, pack_player_checkpoint
+        from qrokkun_env.agents.player_ranked_topk import PlayerRankedTopK
+        from qrokkun_env.render_player_v5_demo import load_demo_player
+
+        checkpoint = pack_player_checkpoint(PlayerRankedTopK(top_k=8, hidden=16), source_tool="test")
+        if architecture_version is None:
+            checkpoint.pop("architecture_version")
+        else:
+            checkpoint["architecture_version"] = architecture_version
+        path = tmp_path / f"bad-version-{architecture_version}.pt"
+        torch.save(checkpoint, path)
+
+>       with pytest.raises(CheckpointSchemaError, match="architecture_version"):
+E       Failed: DID NOT RAISE CheckpointSchemaError
+
+qrokkun_env/tests/test_render_player_v5_demo.py:104: Failed
+=========================== short test summary info ============================
+FAILED qrokkun_env/tests/test_render_player_v5_demo.py::test_public_ranked_renderer_loader_rejects_missing_or_wrong_architecture_version[True]
+FAILED qrokkun_env/tests/test_render_player_v5_demo.py::test_public_ranked_renderer_loader_rejects_missing_or_wrong_architecture_version[1.0]
+2 failed, 2 passed in 1.45s
+
+3. Minimal production fix: response ordinal 46,
+   timestamp 2026-09-14T05:05:24.602Z, contains the patch; event ordinal 47,
+   timestamp 2026-09-14T05:05:24.618Z, records it applied to
+   qrokkun_env/agents/player_checkpoints.py.  The prior loose equality check
+   was replaced with:
+
+   architecture_version = ckpt.get("architecture_version")
+   if (
+       type(architecture_version) is not int
+       or architecture_version != RANKED_TOP_K_ARCHITECTURE_VERSION
+   ):
+
+   This requires an exact built-in int (therefore rejects bool), then exact
+   runtime equality to PlayerRankedTopK's architecture version, raising the
+   clear CheckpointSchemaError recorded in the patch.
+
+4. Immediate focused GREEN: command-execution event ordinal 55,
+   timestamp 2026-09-14T05:05:30.343Z, reran the focused command after the
+   production patch; response ordinal 56, timestamp 2026-09-14T05:05:30.349Z,
+   reports:
+
+   ....                                                                     [100%]
+   4 passed in 1.43s
+
+Interpretation of source state and ordering
+-------------------------------------------
+
+The RED source state was the pre-fix working-tree state inside the recorded
+Codex turn: the regression test had been added, but the production fix had not
+yet been applied.  It was not a standalone commit.  Ordinals 31 -> 39/40 ->
+46/47 establish that ordering.  Commit 6379f7a is the later final squashed
+implementation commit, not the identity of the RED state.
+
+Final-commit comparison
+-----------------------
+
+Read-only comparison of commit 6379f7af670b5b39998c487598117e59fc806a3a
+confirms that its qrokkun_env/agents/player_checkpoints.py contains the minimal
+exact-built-in-int plus exact-runtime-equality validation above, and its
+qrokkun_env/tests/test_render_player_v5_demo.py contains the retained public
+loader regression parameterization [None, 999, True, 1.0].  Therefore the
+production fix and its regression coverage are both mapped into 6379f7a.
+
+Later independent recovery/commit trail
+---------------------------------------
+
+Hermes session 20260910_225837_cb0727dd, messages 2278-2292, is the enclosing
+recovery/commit trail for the later independently recorded results: renderer
+suite GREEN (13 passed), focused-suite GREEN (203 passed), full-suite GREEN
+(529 passed with 2 pre-existing warnings), py_compile passed, and git diff
+--check clean.  Its final read-only review output is ACCEPTED / No blocking
+findings.  That later record also maps the production fix and regression tests
+into final commit 6379f7af670b5b39998c487598117e59fc806a3a.
+
+Current verification performed for this evidence record
+-------------------------------------------------------
+
+- Whole-file SHA-256 of the immutable Codex transcript: matched the value
+  stated above.
+- Read-only git show comparison of 6379f7a's production validation and
+  regression test: matched the described minimal fix and four-case coverage.
+- git diff --check: clean (no output, exit code 0).
+
+No code, test, or other document was modified; no staging, commit, push,
+training, evaluation, rendering, SSH, or NAS operation was run while creating
+this record.
