@@ -1,0 +1,517 @@
+PlayerV5 frozen learned-Spawner eval-only preregistration
+===========================================================
+
+Status
+------
+
+planned / not started. This document freezes the consensus contract for a
+future eval-only comparison run; it is not a results report. No episode has
+been run, no comparison eval has been launched under this preregistration,
+and no PPO update, model training, self-play, or GB10/SSH session has been
+started from this file. The real loader/episode/CLI wiring
+(`qrokkun_env/frozen_spawner_eval_cli.py`) now exists and is unit-tested
+against synthetic checkpoints only; it has not been invoked against any real
+artifact, including the `learned_spawner` candidate identity recorded below.
+A local, integrity-only check of that one candidate identity *was*
+performed on this host: its on-disk file SHA-256 was recomputed and its
+checkpoint was loaded once (CPU, no gradient, no episode) to recompute its
+`state_dict_sha256`, purely to confirm the identity recorded below is
+accurate. That is file/hash/load integrity verification only — it is not an
+eval: it ran no environment episode, computed no survival/comparison
+metric, performed no PPO update, no training, no self-play, and used no
+GB10 or SSH session. Execution-host paths, hostnames, GPU model,
+wall-clock, Python/PyTorch/CUDA versions, and actual output directories for
+any *future* comparison launch are "at-launch" fields, unknown until that
+launch, and are never fabricated here.
+
+Scope and non-goals
+--------------------
+
+- This is an EVAL-ONLY diagnostic. There is no promotion, no training, no
+  self-play, and no gradient step of any kind performed under this
+  preregistration. `promotion=false` and `training=false` and
+  `self_play=false` are structural properties of the seed package, not
+  optional flags a caller can flip.
+- There is no hard pass/fail gate. Outcomes are classification-only: for each
+  pre-specified comparison pair we report the sign/magnitude of the paired
+  difference together with its pre-specified confidence interval, and we
+  classify the result (e.g. "BC retains/improves/regresses relative to
+  teacher", "aux changes/does not change relative to BC") without declaring
+  a binary PASS/FAIL verdict. Any future decision to act on these numbers
+  (e.g. start a new training round) requires its own, separately
+  preregistered document.
+- Comparisons are restricted to four fixed, pre-selected checkpoints (see
+  below) plus one fixed learned Spawner. No other checkpoint may be
+  substituted in, and no checkpoint may be swapped out after seeing results.
+
+Fixed pre-selection (locked before any result is observed)
+-----------------------------------------------------------
+
+All four artifacts below are pre-selected by path + SHA-256 *before* this
+eval is ever launched. Selection is not conditioned on any result computed
+under this document. The actual paths and hashes are recorded at launch time
+in the seed package/manifest (see "Seed package / manifest contract" below);
+this preregistration fixes their *roles*, not yet their concrete values:
+
+1. `v1_teacher` — the historical PlayerV1 teacher checkpoint (same identity
+   used as BC/retention teacher in prior PlayerV5 rounds).
+2. `v5_bc_seed6` — the seed-6 PlayerV5 (`PlayerRankedTopK`) behavior-cloned
+   initial checkpoint, i.e. the same seed-6 BC state used as the PPO/aux
+   starting point in the corrected aux round 1.
+3. `v5_aux_u200` — the update-200 snapshot of the corrected BC-retention
+   auxiliary PPO round, i.e. specifically the recorded `ppo_aux_update_200.pt`
+   snapshot artifact (see
+   `artifacts/player_recovery_results/retention_aux_corr/report.json`,
+   `aux_arm.snapshots[update=200].checkpoint`), not `ppo_aux_final.pt` and
+   not "whichever" artifact — the update-200 snapshot is the one and only
+   concrete artifact this role names.
+4. `learned_spawner` — exactly one fixed learned Spawner checkpoint
+   (`SpawnerV4`/`SpawnerAC` architecture), selected once by path + SHA-256
+   before launch. No family of spawners, no spawner ensemble, and no
+   scripted-Spawner substitution — the comparison is player-vs-player under
+   one held-fixed learned opponent.
+
+Recommended `learned_spawner` artifact identity (identity integrity-verified; NOT evaluated)
+---------------------------------------------------------------------------
+
+The following is a concrete recommended identity for the `learned_spawner`
+role, recorded here as candidate identity information. Recording it does
+not launch, does not authorize, and does not constitute an eval of this
+artifact under this preregistration: no environment episode has been run
+against it, no comparison/survival metric has been computed for it, and no
+PPO update, training, self-play, or GB10/SSH session has consumed it. What
+*has* been done, and is disclosed here rather than denied, is integrity-only
+verification: this document's author recomputed the on-disk file's
+SHA-256 and loaded the checkpoint once (CPU, `weights_only=False`, no
+gradient) to recompute its `state_dict_sha256` via
+`qrokkun_env.agents.player_checkpoints.state_dict_sha256`, solely to confirm
+the two hashes recorded below. That is a file/load/hash integrity check,
+not an eval — it is clearly distinguished here from the comparison eval
+this preregistration still requires a separate launch to perform:
+
+- local path: `artifacts/nas_tmp_runs/both_v4_spawner.pt`
+- file SHA-256 (recomputed and confirmed against the on-disk file):
+  `b10c718dd3207e7526384459ea2635392dd99ef1640df801a694ebc5955bf3a9`
+- state-dict SHA-256 (recomputed and confirmed, as computed by
+  `qrokkun_env.agents.player_checkpoints.state_dict_sha256` over the loaded
+  `SpawnerV4` state dict): `8e8aad42d9588f1c3bb3c481f83893a0570c6712dae0ae8bbbe7ad490d29466e`
+  (corrected during self-review: an earlier draft of this entry recorded
+  `e1557aab97ef27d4f8ce9b2daa0c542c05b85bb4c3e37abc34dd94e123d639dc`, which
+  did not match; both hashes above have since been independently
+  recomputed against the on-disk file and do match)
+- architecture: `SpawnerV4`, `d_model=128`, `hidden=256`, `AIM_SCALE=40`
+- recorded training update: `1825` (read from the loaded checkpoint dict's
+  own `update` field during the integrity check above)
+- inferred source commit: `03dd71a9817547dad8fcf642442a904e5e63afcc` —
+  **explicitly non-attested**: this commit identity is inferred/recalled,
+  not independently re-derived from the checkpoint's own recorded
+  provenance metadata (if any), and must not be treated as a verified fact
+  until an actual provenance check against source control is performed.
+
+Recording this candidate identity here, and having integrity-verified it,
+does not pre-empt the fail-closed hash check that any future launch of this
+eval must still perform (see
+`qrokkun_env.frozen_spawner_eval_cli.load_checkpoint_for_role`): at launch
+time, the file's SHA-256 (and, for player roles, the state-dict SHA-256)
+must again be recomputed from the actual on-disk bytes and compared against
+whichever value is pinned into the `FrozenSpawnerSeedPackage` for that run,
+and loading fails closed on any mismatch — including for this
+already-integrity-verified `learned_spawner` candidate, whose pinned values
+above are exactly what a future launch's seed package should use as the
+pin. No episode, comparison, or eval-only run of this checkpoint has been
+launched by this document; only its file/hash identity has been verified.
+
+No post-result selection is permitted: none of the four artifacts above may
+be replaced, re-picked, or "best-of-N" selected after any eval numbers exist.
+If a selected file/hash turns out to be wrong or missing at launch, the run
+fails closed and a corrected preregistration must be written; the original
+numbers (if any exist from a botched attempt) are never silently reused.
+
+Common-random-number (CRN) pairing for learned-Spawner stochasticity
+----------------------------------------------------------------------
+
+The learned Spawner is a stochastic policy (`Normal`/`Categorical` heads).
+To keep player-vs-player comparisons statistically paired rather than
+independently noisy, every player arm (`v1_teacher`, `v5_bc_seed6`,
+`v5_aux_u200`) is evaluated against the *same* fixed learned Spawner using
+the *same* per-seed common random numbers:
+
+- the same environment seed list (CRN environment seeds) is reused,
+  unchanged, across all three player arms;
+- when the Spawner's action mode is stochastic (`sample_policy=True`), the
+  same per-episode Spawner sampling seed is reused across arms for that
+  seed slot (via `torch.random.fork_rng()` keyed on the episode seed, as
+  already implemented in `qrokkun_env.eval_modes.run_eval_episode`), so
+  Spawner action draws line up seed-for-seed across arms instead of drifting
+  independently;
+- CRN pairing only compares *within* a seed slot (arm A seed i vs arm B seed
+  i); it never mixes seed slots.
+
+This is what makes the paired differences (below) meaningful: any variance
+from a stochastic learned Spawner is a shared nuisance factor cancelled by
+pairing, not conflated with the player-arm effect being measured.
+
+Locked action modes, seeds, cap, and loader contract
+--------------------------------------------------------
+
+- Action modes are drawn only from the three named modes already defined in
+  `qrokkun_env.eval_modes` (`MODE_DET_DET`, `MODE_DET_STOCH`,
+  `MODE_STOCH_STOCH`); `(sample_policy=True, rng_jitter=False)` remains
+  categorically invalid and is rejected the same way it already is by
+  `validate_eval_mode`. The player action mode and the Spawner action mode
+  are each one of these named modes and are recorded explicitly in the seed
+  package; they are locked before launch and never changed mid-run.
+- CRN environment seeds are drawn from the existing paired-eval seed table
+  (`qrokkun_env.eval_modes.PAIRED_EVAL_SEEDS`, i.e. `range(3000, 3030)`,
+  30 seeds) unless a future preregistration explicitly documents a
+  different, equally-fixed seed list (see "alternate seed changes the
+  calibration window" below).
+- Episode cap is locked at the same contract already used across PlayerV5
+  eval rounds: max 4,200 frames per episode (70 s wall-clock at the existing
+  env `dt`), reported as `min(elapsed, cap)` per seed together with a
+  censor flag (censor = episode reached the cap without the player being
+  hit; non-censor = the player was hit before the cap).
+- The checkpoint loader contract for `v1_teacher` (legacy `PlayerV1`, no
+  architecture metadata) and for `v5_bc_seed6`/`v5_aux_u200`
+  (`PlayerRankedTopK`, loaded strictly via
+  `qrokkun_env.agents.player_checkpoints.load_ranked_top_k_checkpoint`, which
+  enforces schema version, action list, observation dims, and
+  `state_dict_sha256`) is unchanged by this document. The learned Spawner is
+  loaded via the existing `SpawnerV4` checkpoint dict contract (`d_model`,
+  `hidden`, `state_dict`) used by `corner_probe.load_spawner` /
+  `render_v4_demo.py`; this preregistration does not introduce a new
+  Spawner-checkpoint schema.
+
+Metrics
+-------
+
+Primary (computed independently for each of the three player arms, and as
+paired differences for the two pre-specified comparison pairs):
+
+- restricted mean survival: `mean(min(elapsed_i, cap))` over all seeds;
+- median of `min(elapsed_i, cap)`;
+- std and min/max of `min(elapsed_i, cap)`;
+- censor count (episodes that reached the cap without being hit);
+- per-seed values (`min(elapsed_i, cap)`, hit/censor flag) for full
+  transparency and reproducibility of any downstream re-aggregation.
+
+Pre-specified comparison pairs (paired on CRN seed slot, computed against
+the identical fixed learned Spawner):
+
+1. `v1_teacher` vs `v5_bc_seed6` ("V1-vs-BC");
+2. `v5_bc_seed6` vs `v5_aux_u200` ("BC-vs-aux").
+
+For each pair: per-seed difference, paired mean/median difference, and a
+pre-specified confidence interval (paired 95% t-interval on the per-seed
+differences, matching the interval already used in the retention-aux
+report). No other pairing (e.g. `v1_teacher` vs `v5_aux_u200` directly) is a
+primary metric under this document; it may be reported as a purely
+descriptive secondary note but carries no pre-specified CI.
+
+Secondary (descriptive only, no CI required, no gate):
+
+- hit rate (fraction of seeds where the player was hit before the cap);
+- termination-reason breakdown to the extent the env exposes it;
+- early-death rate (fraction of seeds with `elapsed` below a short
+  descriptive threshold, e.g. < 5 s), reported purely as a diagnostic of
+  qualitatively bad episodes, not as a gate input.
+
+No hard pass/fail gate
+------------------------
+
+There is no retention floor, no minimum-ratio threshold, and no
+accept/reject rule attached to any of the metrics above. The output of this
+eval is a classification of each pre-specified comparison ("higher",
+"lower", "indistinguishable given the CI", together with the numbers), not a
+verdict. Any subsequent action (further training, promotion, or rollback)
+requires a new, separate preregistration that consumes these numbers as
+input, exactly as prior PlayerV5 rounds have required for each new decision.
+
+Later BC-start and PPO-trajectory replication boundaries
+-------------------------------------------------------------
+
+This preregistration only covers the frozen-Spawner, eval-only comparison
+described above. It explicitly does **not** cover, and must not be read as
+authorizing, any of the following without a further, separate
+preregistration:
+
+- a later BC-start replication that re-runs behavior cloning from a
+  different teacher dataset draw or a different seed-6-equivalent starting
+  state — any such replication is a new experiment with its own dataset
+  identity hash, split contract, and initial-gate check;
+- a later replication that preserves the corrected BC-retention auxiliary
+  PPO contract in full (the auxiliary term is not dropped) and changes only
+  the pre-registered PPO trajectory inputs — e.g. an alternate rollout seed
+  window or an alternate action-sampling seed — against the learned Spawner
+  (or against scripted Spawner); this is out of scope here regardless of
+  which trajectory inputs change, because this document authorizes no PPO
+  updates at all, of any stream;
+- boundary condition on rollout/action seeds: if a later round uses an
+  alternate rollout seed window or an alternate action-sampling seed
+  (i.e. anything other than the exact seed schedule locked in the round it
+  replicates), that changes the update-1 calibration window, because the
+  existing contract reuses update 1's on-policy rollout, unmodified, as the
+  one-shot alpha calibration sample (`CALIBRATION_GRAD_SAMPLES=8`,
+  frozen once, never recollected). A different seed schedule is a different
+  calibration draw and must be treated as a new calibration, not assumed
+  equivalent to a prior round's frozen alpha;
+- the target retention gradient ratio remains `TARGET_RETENTION_GRAD_RATIO
+  = 0.15` unchanged across any such replication; it is a design ratio, not a
+  quantity that is re-derived from data;
+- alpha itself, however, is *not* frozen across replications: because alpha
+  is `0.15 * mean(||g_ppo||) / (mean(||g_ret||) + 1e-8)` computed from the
+  specific calibration rollout of the specific run, a replication with a
+  different starting checkpoint, different teacher dataset, or different
+  calibration seed window may — and in general will — recalibrate alpha to
+  a different numeric value under the same target ratio. Reusing a
+  previously-frozen alpha across an incompatible calibration window would be
+  a silent contract violation.
+
+Seed package / manifest contract (this repo's new code)
+-------------------------------------------------------------
+
+To make the above machine-checkable rather than only documented in prose,
+this round introduces a small, eval-only, immutable "seed package" /
+manifest object and validator (`qrokkun_env/frozen_spawner_seed_package.py`,
+unit-tested in
+`qrokkun_env/tests/test_frozen_spawner_seed_package.py`). It:
+
+- makes every input above explicit and machine-checked: the four fixed
+  checkpoint roles (path + SHA-256 placeholders/records), architecture per
+  role, player and Spawner action modes (one of the three named
+  `qrokkun_env.eval_modes` modes each), CRN environment seeds, CRN Spawner
+  sampling seeds, episode cap, the restricted metric set, and the two
+  pre-specified comparison pairs with their CI method;
+- is an immutable (frozen) value object once constructed — attempted
+  mutation raises, matching the "no post-result selection" requirement;
+- rejects malformed packages (bad SHA-256 shape, unknown checkpoint role,
+  action mode not one of the three named modes, non-positive/mismatched
+  seed lists, comparison pair referencing an undefined role, metric name
+  outside the restricted allow-list) and rejects conflicting packages
+  (e.g. Spawner action mode stochastic but no Spawner sampling seeds
+  supplied);
+- structurally forbids promotion/training/self-play: the constructor does
+  not expose a way to set `promotion`, `training`, or `self_play` to
+  anything other than `False`, so there is no flag a caller could flip to
+  turn this into a training or promotion artifact;
+- produces a JSON-serializable manifest dict (`to_json_dict()`), suitable
+  for writing alongside any future eval report, with only plain
+  `str`/`int`/`float`/`bool`/`list`/`dict` values.
+
+This module has no dependency on any real checkpoint file existing on disk;
+its unit tests use synthetic SHA-256-shaped placeholder strings and tiny/no
+neural nets, exactly like the existing `qrokkun_env.eval_modes` tests. Any
+eval-runner primitives added alongside it (deterministic restricted-survival
+statistics, paired-difference statistics) are pure functions over
+already-computed elapsed-time lists and are exercised only with synthetic
+data in unit tests — no actual eval against `v1_teacher` / `v5_bc_seed6` /
+`v5_aux_u200` / a real learned Spawner is run or required by this
+preregistration or by its tests.
+
+Real eval wiring (this round's new code)
+-------------------------------------------
+
+The seed package and stats primitives above deliberately stopped short of
+actually loading a checkpoint or running an episode. This round adds that
+missing wiring as a new, separate module,
+`qrokkun_env/frozen_spawner_eval_cli.py`, unit-tested in
+`qrokkun_env/tests/test_frozen_spawner_eval_cli.py` (TDD: tests written and
+observed RED against the not-yet-existing module, then made to pass). It:
+
+- loads each checkpoint role via a fail-closed, architecture-dispatched
+  loader (`load_checkpoint_for_role`): the on-disk file SHA-256 is
+  recomputed and compared against the pinned value *before* `torch.load` is
+  ever called, and, when a `state_dict_sha256` is recorded, it is
+  cross-checked against the loader's own freshly computed state-dict hash
+  before the net is handed back to any caller — any mismatch raises
+  `ChecksumMismatchError` and loads nothing;
+- uses the correct, distinct loader/observation contract per role: legacy
+  `PlayerV1` (dict checkpoint, flat 45-dim `qrokkun_env.obs.vectorize` obs)
+  is never confused with `PlayerRankedTopK` (strict metadata checkpoint via
+  `qrokkun_env.agents.player_checkpoints`, masked player/bullets/pad obs via
+  `qrokkun_env.agents.obs_v4.encode_obs`); the frozen Spawner uses the
+  existing `SpawnerV4` checkpoint-dict contract (`d_model`/`hidden`/
+  `state_dict`), introducing no new Spawner-checkpoint schema;
+- runs one eval-only episode per (player arm, seed) via
+  `run_frozen_spawner_episode`, with *independent* player/Spawner sampling
+  flags — the player is always evaluated deterministically (argmax) while
+  the Spawner may be deterministic or stochastic per the manifest's
+  `spawner_action_mode`. This is deliberately not implemented by reusing
+  `qrokkun_env.train.both_v4.run_episode` directly, because that function
+  ties both player and Spawner sampling to a single shared `sample` flag,
+  which cannot represent "deterministic player, stochastic Spawner" at the
+  same time;
+- reproduces CRN pairing via `run_frozen_spawner_episode_crn`, which forks
+  the Torch RNG keyed on the per-slot seed only when sampling actually
+  consumes it, mirroring `qrokkun_env.eval_modes.run_eval_episode`'s
+  reproducibility contract — re-running the same player arm at the same
+  seed slot against the same stochastic Spawner always reproduces the same
+  elapsed time, independent of any other arm's run or of unrelated global
+  RNG mutation in between;
+- runs exactly the two preregistered comparison pairs (`v1_teacher` vs
+  `v5_bc_seed6`, `v5_bc_seed6` vs `v5_aux_u200`) via
+  `run_frozen_spawner_comparison`, producing a JSON-serializable report with
+  per-seed elapsed times, restricted survival statistics per arm, and the
+  paired-difference statistics for each preregistered pair — no other
+  pairing is computed;
+- is structurally eval-only: the module imports no optimizer
+  (`torch.optim`), calls no PPO update function, launches no self-play, and
+  selects/writes no "promoted" checkpoint; the report's `promotion`/
+  `training`/`self_play` fields are hardcoded `False` literals, and
+  `run_frozen_spawner_comparison` refuses (raises) if the manifest's player
+  action mode is not deterministic;
+- exposes a small CLI (`main`) that takes checkpoint paths + pinned
+  file-SHA-256 values, plus an *optional* pinned state-dict-SHA-256 per
+  role, builds the seed package, runs the comparison, and writes the
+  manifest + report JSON files to disk. When a state-dict SHA-256 pin is
+  supplied for a role, `load_checkpoint_for_role` fails closed (raises
+  `ChecksumMismatchError`, loading nothing usable) if the loaded net's own
+  recomputed state-dict hash does not match it — this is what catches a
+  Spawner/PlayerV5 state-dict swap or corruption that a file-level hash
+  alone would not, since the file hash only covers the on-disk checkpoint
+  dict wrapper, not the exact tensor values a caller intended to pin;
+- the seed package itself (not just the CLI) now structurally enforces the
+  fixed role→architecture mapping (`v1_teacher` -> `player_v1`,
+  `v5_bc_seed6`/`v5_aux_u200` -> `player_ranked_topk`, `learned_spawner` ->
+  `spawner_v4`) and the exact two preregistered comparison pairs in their
+  registered order (`v1_teacher` vs `v5_bc_seed6`, then `v5_bc_seed6` vs
+  `v5_aux_u200`) — both are rejected by
+  `FrozenSpawnerManifestError` at construction time, before any checkpoint
+  load, so a manifest naming the wrong architecture for a role, or an
+  altered/extra/reordered comparison-pair list, can never reach the loader
+  or the runner.
+
+All unit tests for this module use tiny synthetic checkpoints packed to
+`tmp_path` inside the test module itself; none of them touch a real
+NAS/production checkpoint path, and none of them are pointed at the
+`learned_spawner` candidate identity recorded above. No eval has been
+launched under this preregistration using real artifacts — only the CLI/
+module itself has been implemented and unit-tested with synthetic data.
+
+Basis
+-----
+
+This preregistration is written against
+`qrokkun_env/eval_modes.py`,
+`qrokkun_env/agents/player_checkpoints.py`,
+`qrokkun_env/agents/spawner_v4.py`,
+`qrokkun_env/train/both_v4.py` (`run_episode`/`eval_pair`/`eval_pair_stats`),
+`docs/journal/1789229713_player_v5_corrected_aux_round1_preregistration.txt`,
+and `docs/journal/1789225070_player_v5_recovery_roadmap.txt`. It authorizes
+no training, no self-play, and no promotion; it authorizes only the
+construction and unit-testing of an eval-only seed package/manifest module,
+deterministic synthetic-net eval-runner primitives, and the real (but still
+only synthetic-checkpoint-tested) loader/episode/CLI wiring in
+`qrokkun_env/frozen_spawner_eval_cli.py` — and the eventual
+(separately-triggered) launch of the frozen-Spawner comparison eval itself
+using real checkpoints (including, if selected, the `learned_spawner`
+candidate identity recorded above) once they are copied to an execution
+host, hashed, and recorded — none of which has happened yet.
+
+Formal-contract corrections (this round, review-blocker fixes)
+----------------------------------------------------------------
+
+A strict-review pass identified six functional gaps between this document's
+prose and the actual eval-only code (`qrokkun_env/frozen_spawner_eval_cli.py`,
+`qrokkun_env/frozen_spawner_eval_runner.py`,
+`qrokkun_env/frozen_spawner_seed_package.py`); those gaps were closed by
+tests-first (RED observed, then made GREEN) in
+`qrokkun_env/tests/test_frozen_spawner_eval_review_blockers.py`. No episode
+has been run against a real artifact and no PPO/training/self-play/
+promotion path was touched by any of these corrections — they are all
+either pure argparse/manifest-identity locks or pure statistics/data-shape
+changes over the existing synthetic-checkpoint unit tests.
+
+1. **Hard-locked formal CLI identity.** `frozen_spawner_eval_cli.build_parser()`
+   now locks `--player-action-mode` to `det_det` and `--spawner-action-mode`
+   to `stoch_stoch` only (argparse `choices=(<single value>,)`), and locks
+   `--env-seed-start`/`--env-seed-count`/`--episode-cap-frames` to `3000`/
+   `30`/`4200` only — i.e. exactly the CRN seed window
+   `qrokkun_env.eval_modes.PAIRED_EVAL_SEEDS` (`3000..3029`) and the
+   preregistered 4,200-frame cap. Any other value on any of these five
+   flags is rejected by argparse (`SystemExit`) before a seed package is
+   ever built; there is no silent coercion/clamping path. This closes the
+   gap where the formal CLI could previously be invoked with an arbitrary
+   mode/seed-window/cap combination and still emit a report that looked
+   like it belonged to this preregistration. Internal/test-only helpers
+   (`run_frozen_spawner_episode`, `build_frozen_spawner_seed_package`)
+   remain independently configurable for fast synthetic unit tests, because
+   they cannot themselves emit this CLI's formal manifest/report identity.
+2. **Stable manifest/report identity.** `FrozenSpawnerSeedPackage` now
+   carries two additional immutable fields, `contract_id` (locked to
+   `"player_v5_frozen_spawner_eval_v1"`) and `preregistration_path` (locked
+   to this file's repo-relative path,
+   `docs/journal/1789263159_player_v5_frozen_spawner_eval_preregistration.txt`),
+   both included in `to_json_dict()`. Direct construction with a different
+   value for either field raises `FrozenSpawnerManifestError`, so every
+   manifest/report produced by this module carries the same durable
+   preregistration-document identifier regardless of which checkpoint
+   paths/hashes/seeds a particular package instance recorded — exactly like
+   the existing `schema_version` field, `contract_id`/`preregistration_path`
+   identify *which preregistered document/schema* a manifest belongs to,
+   not that its seeds/cap/modes match the CLI's stronger, independently-
+   enforced canonical-parameter lock (correction 1 above). That stronger
+   per-launch guarantee is enforced only by
+   `frozen_spawner_eval_cli.build_parser()`'s argparse `choices`; the
+   generic, intentionally-reusable seed-package module still allows
+   smaller/faster synthetic seed lists and caps for its own and the CLI's
+   unit tests.
+3. **Player physics reuse, not a diverging copy.**
+   `frozen_spawner_eval_cli.apply_player_action` now delegates directly to
+   `qrokkun_env.train.both_v4.apply_player_action` (the single canonical,
+   float32-rounded implementation) instead of keeping an independently
+   maintained duplicate. The duplicate had drifted: it applied player
+   position/velocity updates in plain Python floats, without the float32
+   rounding (`qrokkun_env.godot_rng.f32`) both_v4 applies at every step,
+   which would have silently diverged from the training-time physics over a
+   long episode. `test_eval_apply_player_action_matches_both_v4_float32_
+   physics_long_sequence` exercises 576 frames of mixed actions and asserts
+   bit-for-bit agreement of `(px, py, pvx, pvy)` between the eval fork and
+   `both_v4.apply_player_action` at every frame. Reusing this one pure,
+   gradient-free physics function does not import or invoke any optimizer/
+   PPO/self-play/promotion code from `both_v4`.
+4. **Explicit structured episode outcome.** `run_frozen_spawner_episode`
+   (and its CRN wrapper) now return a mapping with `elapsed`, `frames`,
+   `hit`, `censored`, and `termination_reason` (`"hit"` or `"cap"`) instead
+   of a bare `float`. A hit that lands exactly on the frame cap has
+   `elapsed == cap_seconds` — the same value a same-elapsed censored
+   (timed-out) episode would report — so a bare elapsed float cannot
+   distinguish the two; the explicit `hit`/`censored`/`termination_reason`
+   fields can. `frozen_spawner_eval_runner.restricted_survival_stats` now
+   accepts either the legacy plain-float-list contract (hit is *derived* as
+   `capped_value < cap`) or this explicit outcome-mapping contract (hit is
+   read directly from the outcome, never re-derived from elapsed alone),
+   and `run_frozen_spawner_comparison` consumes the explicit outcomes when
+   computing restricted stats per role (while still handing
+   `paired_difference_stats` plain per-seed elapsed floats, which that
+   function's contract is unchanged for). When `"termination_reason"` is
+   included in the manifest's `metrics` allow-list (it is, by default), the
+   report's per-role restricted stats include a `termination_reasons` list
+   alongside the other restricted metrics.
+5. All previously-existing protections are unchanged and re-verified
+   GREEN by this round's full test run: fail-closed, architecture-
+   dispatched checkpoint loading with file- and state-dict-SHA-256 pinning
+   (`load_checkpoint_for_role`); the exact two preregistered comparison
+   pairs in their locked order; the CRN fork-seeded reproducibility
+   contract; and the structural no-promotion/no-training/no-self-play
+   guarantees (`report["promotion"]`/`["training"]`/`["self_play"]` remain
+   hardcoded `False`, and `run_frozen_spawner_comparison` still refuses a
+   non-deterministic player action mode).
+
+Distinguishing integrity checking from evaluation (unchanged scope)
+----------------------------------------------------------------------
+
+To be explicit, since this round's corrections touch checkpoint-adjacent
+code: none of the six corrections above ran an environment episode against
+a real checkpoint, computed a survival/comparison metric for a real
+checkpoint, or consumed the `learned_spawner` candidate identity recorded
+above in any way. The only real-artifact activity that has ever occurred
+under this preregistration remains exactly what was already disclosed
+above: a one-time, integrity-only recomputation of that one candidate's
+file SHA-256 and state-dict SHA-256 (CPU load, no gradient, no episode).
+This round's test suite (including
+`test_frozen_spawner_eval_review_blockers.py`) exercises every corrected
+code path exclusively against synthetic, tmp-path checkpoints and
+synthetic/tiny environments constructed inside the tests themselves; it
+launches no training, no PPO update, no self-play, no promotion, and no
+GB10/GPU/SSH session, and it does not stage, commit, or push anything.
