@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import signal
 import statistics
 from dataclasses import dataclass
 from pathlib import Path
@@ -93,6 +95,11 @@ from tools.phase3_ranked_ppo_retention import (
     load_teacher,
     ppo_hyperparameters,
 )
+
+# Both arms share the same crash boundary: a durable journal entry can be one
+# update ahead of recovery and must be replayed without a duplicate row.
+append_progress_row = ret_mod.append_progress_row
+reconcile_progress_journal = ret_mod.reconcile_progress_journal
 
 # --------------------------------------------------------------------------- #
 # the ONLY new knob: pre-registered target ratio between the weighted
@@ -650,7 +657,10 @@ def run_aux_arm(
     net = PlayerRankedTopK(top_k=init_net.top_k, hidden=init_net.hidden).to(device)
     net.load_state_dict(init_net.state_dict())
     opt = torch.optim.Adam(net.parameters(), lr=PPO_LR, eps=1e-8)
-    torch.manual_seed(PPO_TORCH_SEED)
+    # Match the control arm's historical default timing.  Explicit --seed is
+    # configured before construction by the shared mode-default helper.
+    if getattr(args, "seed", None) is None:
+        torch.manual_seed(PPO_TORCH_SEED)
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -660,27 +670,45 @@ def run_aux_arm(
     calib_gen = calibration_generator()
     diag_gen = diagnostic_generator()
 
+    recovery_path = out_dir / "recovery.pt"
+    completed = 0
+    last_update_rollouts: list | None = None
+    last_grad_alignment: dict[str, Any] | None = None
     # ---- alpha calibration (no optimizer step has happened yet) ---------- #
     # The window is collected ONCE and is reused verbatim as the update-1 PPO
     # batch: alpha is calibrated on exactly the rollouts update 1 trains on.
-    calib_rollouts, first_update_rollouts = calibration_and_first_update_rollouts(
-        net,
-        device,
-        episodes_per_update=args.episodes_per_update,
-        max_frames=args.max_frames,
-    )
-    calib_seeds = [r.seed for r in calib_rollouts]
-    calibration = calibrate_alpha(
-        net,
-        calib_rollouts,
-        train_tensors,
-        device,
-        minibatch=minibatch,
-        generator=calib_gen,
-    )
-    calibration["rollout_seed_window"] = calib_seeds
-    frozen = FrozenAlpha(alpha=float(calibration["alpha"]), calibration=calibration)
-    alpha = frozen.alpha
+    if getattr(args, "resume", False):
+        recovery = ret_mod.load_recovery(recovery_path, device)
+        try:
+            if recovery.get("arm") != "aux":
+                raise ValueError("wrong arm")
+            net.load_state_dict(recovery["model"], strict=True)
+            opt.load_state_dict(recovery["optimizer"])
+            completed = recovery["completed_update"]
+            calibration = recovery["calibration"]
+            alpha = float(recovery["alpha"])
+            calib_seeds = list(recovery["calib_seeds"])
+            first_update_rollouts = recovery["first_update_rollouts"]
+            calib_rollouts = first_update_rollouts
+            if completed:
+                last_update_rollouts = recovery["last_update_rollouts"]
+                last_grad_alignment = recovery["last_grad_alignment"]
+                if not isinstance(last_update_rollouts, list) or not isinstance(last_grad_alignment, dict):
+                    raise ValueError("missing final update diagnostic state")
+            generator.set_state(recovery["training_generator_state"])
+            calib_gen.set_state(recovery["calibration_generator_state"])
+            diag_gen.set_state(recovery["diagnostic_generator_state"])
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            raise ret_mod.RunStateError("resume auxiliary recovery state is malformed") from exc
+        ret_mod.append_run_status(out_dir, {"event": "resumed", "completed_update": completed})
+    else:
+        calib_rollouts, first_update_rollouts = calibration_and_first_update_rollouts(
+            net, device, episodes_per_update=args.episodes_per_update, max_frames=args.max_frames,
+        )
+        calib_seeds = [r.seed for r in calib_rollouts]
+        calibration = calibrate_alpha(net, calib_rollouts, train_tensors, device, minibatch=minibatch, generator=calib_gen)
+        calibration["rollout_seed_window"] = calib_seeds
+        alpha = FrozenAlpha(alpha=float(calibration["alpha"]), calibration=calibration).alpha
 
     snapshots: list[dict[str, Any]] = []
     total_episodes = 0
@@ -753,47 +781,104 @@ def run_aux_arm(
             }
         )
 
-    if 0 in snapshot_updates:
+    if getattr(args, "resume", False):
+        snapshots = list(recovery.get("snapshots", []))
+        total_episodes = int(recovery.get("total_episodes", 0))
+        total_frames = int(recovery.get("total_frames", 0))
+        optimizer_steps = int(recovery.get("optimizer_steps", 0))
+    if not getattr(args, "resume", False) and 0 in snapshot_updates:
         # Snapshot 0 only INSPECTS the already-collected window: it never
         # collects again and never samples an action.
         _snapshot(0, calib_rollouts)
 
-    with jsonl_path.open("w") as jsonl_f:
-        for update in range(1, args.updates + 1):
-            if update == 1:
-                rollouts = first_update_rollouts
-                seeds = calib_seeds
-            else:
-                seeds = rollout_seed_schedule(
-                    update - 1, episodes_per_update=args.episodes_per_update
+    reconcile_progress_journal(jsonl_path, completed_update=completed)
+
+    def _save_boundary() -> None:
+        ret_mod.atomic_save_recovery(recovery_path, {
+            "format": 1, "arm": "aux", "model": net.state_dict(), "optimizer": opt.state_dict(),
+            "completed_update": completed, "total_episodes": total_episodes, "total_frames": total_frames,
+            "optimizer_steps": optimizer_steps, "snapshots": snapshots, "alpha": alpha,
+            "calibration": calibration, "calib_seeds": calib_seeds,
+            "first_update_rollouts": first_update_rollouts,
+            "last_update_rollouts": last_update_rollouts,
+            "last_grad_alignment": last_grad_alignment,
+            "training_generator_state": generator.get_state(),
+            "calibration_generator_state": calib_gen.get_state(),
+            "diagnostic_generator_state": diag_gen.get_state(), "rng": ret_mod.capture_rng_state(),
+        })
+
+    if not getattr(args, "resume", False):
+        _save_boundary()
+    stop = ret_mod.StopRequest()
+    old_handlers = {s: signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM)}
+    for s in old_handlers:
+        signal.signal(s, stop.handler)
+    max_updates = min(args.updates, args.max_updates) if getattr(args, "max_updates", None) is not None else args.updates
+    stop_reason: str | None = None
+    try:
+        for update in range(completed + 1, max_updates + 1):
+                requested_reason = ret_mod.boundary_stop_reason(
+                    completed=completed, configured_updates=args.updates,
+                    max_updates=getattr(args, "max_updates", None), end_time=getattr(args, "end_time", None),
+                    interrupted=stop.requested,
                 )
-                rollouts = collect_rollout_window(
-                    net, device, seeds, max_frames=args.max_frames
+                if requested_reason is not None:
+                    stop_reason = requested_reason
+                    break
+                if update == 1:
+                    rollouts = first_update_rollouts
+                    seeds = calib_seeds
+                else:
+                    seeds = rollout_seed_schedule(
+                        update - 1, episodes_per_update=args.episodes_per_update
+                    )
+                    rollouts = collect_rollout_window(
+                        net, device, seeds, max_frames=args.max_frames
+                    )
+                rollout_seed_window = seeds
+                metrics = ppo_aux_update(
+                    net, opt, rollouts, train_tensors, alpha, device,
+                    generator=generator, diagnostics_generator=diag_gen, minibatch=minibatch,
                 )
-            rollout_seed_window = seeds
-            metrics = ppo_aux_update(
-                net,
-                opt,
-                rollouts,
-                train_tensors,
-                alpha,
-                device,
-                generator=generator,
-                diagnostics_generator=diag_gen,
-                minibatch=minibatch,
-            )
-            optimizer_steps += int(metrics["optimizer_steps"])
-            metrics["grad_alignment"]["measured_before_update"] = update
-            total_episodes += len(rollouts)
-            total_frames += sum(len(r.actions) for r in rollouts)
-            row = dict(metrics)
-            row["update"] = update
-            row["scripted_survival_mean"] = statistics.mean([r.elapsed for r in rollouts])
-            row["rollout_censoring"] = rollout_censor_stats(rollouts)
-            jsonl_f.write(json.dumps(row) + "\n")
-            jsonl_f.flush()
-            if update in snapshot_updates:
-                _snapshot(update, rollouts, alignment=metrics["grad_alignment"])
+                optimizer_steps += int(metrics["optimizer_steps"])
+                metrics["grad_alignment"]["measured_before_update"] = update
+                total_episodes += len(rollouts)
+                total_frames += sum(len(r.actions) for r in rollouts)
+                row = dict(metrics)
+                row["update"] = update
+                row["scripted_survival_mean"] = statistics.mean([r.elapsed for r in rollouts])
+                row["rollout_censoring"] = rollout_censor_stats(rollouts)
+                append_progress_row(jsonl_path, row)
+                completed = update
+                # The post-update weights must be reported with the probe
+                # taken immediately before this update, never recomputed on
+                # its now off-policy rollouts.  Persist both for a resumed
+                # unscheduled terminal snapshot.
+                last_update_rollouts = rollouts
+                last_grad_alignment = metrics["grad_alignment"]
+                _save_boundary()
+                ret_mod.append_run_status(out_dir, {"event": "update_complete", "update": update, "total_frames": total_frames})
+                if update in snapshot_updates:
+                    _snapshot(update, rollouts, alignment=metrics["grad_alignment"])
+                    _save_boundary()
+                if stop.requested:
+                    stop_reason = "interrupted"
+                    break
+                if completed >= max_updates and max_updates < args.updates:
+                    stop_reason = "max_updates"
+                    break
+    finally:
+        for s, previous in old_handlers.items():
+            signal.signal(s, previous)
+
+    if stop_reason is None:
+        stop_reason = "completed" if completed >= args.updates else "max_updates"
+    ret_mod.append_run_status(out_dir, {"event": stop_reason, "completed_update": completed})
+    if completed and not any(item["update"] == completed for item in snapshots):
+        if last_update_rollouts is None or last_grad_alignment is None:
+            raise ret_mod.RunStateError("missing final update diagnostic state")
+        _snapshot(completed, last_update_rollouts, alignment=last_grad_alignment)
+        _save_boundary()
 
     final_eval_summary = summarize_evaluation(
         evaluate_deterministic(net, device, args.eval_seeds, args.eval_max_steps)
@@ -805,7 +890,7 @@ def run_aux_arm(
         source_tool="phase3_ranked_ppo_retention_aux",
         experimental=True,
         production_compatible=False,
-        extra=_pack_extra(args.updates, final_eval_summary),
+            extra=_pack_extra(completed, final_eval_summary),
     )
 
     return {
@@ -817,6 +902,8 @@ def run_aux_arm(
         "snapshots": snapshots,
         "final_checkpoint": str(final_path),
         "updates_jsonl": str(jsonl_path),
+        "completed_updates": completed,
+        "stop_reason": stop_reason,
     }
 
 
@@ -832,6 +919,11 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--init-checkpoint", type=Path, required=True)
     ap.add_argument("--teacher", type=Path, required=True)
     ap.add_argument("--out-dir", type=Path, default=Path("runs/phase3_ranked_ppo_retention_aux"))
+    ap.add_argument("--run-dir", type=Path, help="resumable run directory (defaults to --out-dir)")
+    ap.add_argument("--end-time", type=ret_mod.parse_end_time, help="HKT deadline: YYYYMMDD-HHMM")
+    ap.add_argument("--max-updates", type=int, help="maximum completed updates for this run")
+    ap.add_argument("--resume", action="store_true", help="resume only from a matching recovery boundary")
+    ap.add_argument("--seed", type=int, help="optional explicit RNG seed")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--quick", action="store_true")
     return ap
@@ -853,7 +945,7 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
     verdict reuses phase3's ``evaluate_retention`` and promotion is always
     false.
     """
-    out_dir = Path(args.out_dir)
+    out_dir = Path(getattr(args, "run_dir", args.out_dir))
     out_dir.mkdir(parents=True, exist_ok=True)
 
     init_net, init_meta = load_initial_checkpoint(args.init_checkpoint, device)
@@ -886,6 +978,23 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
     knobs["retention_calibration_seed"] = RETENTION_CALIBRATION_SEED
     knobs["retention_diagnostic_seed"] = RETENTION_DIAGNOSTIC_SEED
     knobs["calibration_grad_samples"] = CALIBRATION_GRAD_SAMPLES
+
+    contract = {
+        "format": 1,
+        "tool": "phase3_ranked_ppo_retention_aux",
+        "arm": "aux",
+        "inputs": {"init_checkpoint": init_prov, "teacher": provenance["teacher"]},
+        "provenance": provenance,
+        "knobs": knobs,
+        "stop_args": {
+            "end_time_hkt": args.end_time.isoformat() if getattr(args, "end_time", None) else None,
+            "max_updates": getattr(args, "max_updates", None),
+        },
+        "effective_seed": getattr(args, "effective_seed", PPO_TORCH_SEED),
+        "no_promotion": True,
+    }
+    ret_mod.create_or_validate_run_contract(out_dir, contract, resume=getattr(args, "resume", False))
+    ret_mod.append_run_status(out_dir, {"event": "resume_requested" if getattr(args, "resume", False) else "started"})
 
     gate_summary = summarize_evaluation(
         evaluate_deterministic(init_net, device, args.eval_seeds, args.eval_max_steps)
@@ -955,7 +1064,7 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
     report["retention"] = evaluate_retention(reference, aux_arm["snapshots"])
     report["retention_reference"] = reference
 
-    report["status"] = "completed"
+    report["status"] = aux_arm["stop_reason"]
     report["arm_ran"] = True
     _write_report(out_dir, report)
     return report

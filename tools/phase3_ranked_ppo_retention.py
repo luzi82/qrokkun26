@@ -14,14 +14,19 @@ and are never marked production-compatible.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import hashlib
 import json
+import os
+import pickle
 import random
+import signal
 import statistics
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import torch
@@ -46,6 +51,188 @@ from tools.phase2_distill_v1_to_v4 import collect_dataset, frames_to_tensors
 from tools.phase2_ranked_multiseed import dataset_identity
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+_HKT = ZoneInfo("Asia/Hong_Kong")
+
+
+class RunStateError(RuntimeError):
+    """A resumable run is absent, corrupt, or incompatible."""
+
+
+def parse_end_time(value: str) -> dt.datetime:
+    """Parse the documented ``YYYYMMDD-HHMM`` wall-clock deadline as HKT."""
+    try:
+        return dt.datetime.strptime(value, "%Y%m%d-%H%M").replace(tzinfo=_HKT)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("end time must be YYYYMMDD-HHMM (HKT)") from exc
+
+
+def _atomic_replace(path: Path, write: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        write(tmp)
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
+def atomic_write_json(path: Path, value: dict[str, Any]) -> None:
+    _atomic_replace(path, lambda tmp: tmp.write_text(json.dumps(value, indent=2, sort_keys=True)))
+
+
+def append_run_status(run_dir: Path, event: dict[str, Any]) -> None:
+    """Append-only human/machine-readable lifecycle history."""
+    row = {"at_hkt": dt.datetime.now(_HKT).isoformat(), **event}
+    with (run_dir / "status.jsonl").open("a") as f:
+        f.write(json.dumps(row, sort_keys=True) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def reconcile_progress_journal(path: Path, *, completed_update: int) -> set[int]:
+    """Validate durable progress against recovery, allowing one pending retry.
+
+    Progress is intentionally flushed before its recovery boundary.  A crash
+    in that narrow interval leaves one durable row whose model state must be
+    replayed from recovery.  The row is retained and the replay is made
+    idempotent; anything other than that single-row lag fails closed.
+    """
+    if completed_update < 0:
+        raise RunStateError("recovery completed_update is negative")
+    updates: set[int] = set()
+    if path.exists():
+        try:
+            lines = path.read_text().splitlines()
+            for number, line in enumerate(lines, start=1):
+                row = json.loads(line)
+                update = row.get("update")
+                if isinstance(update, bool) or not isinstance(update, int) or update < 1:
+                    raise ValueError(f"invalid update on line {number}")
+                if update in updates:
+                    raise ValueError(f"duplicate update {update}")
+                updates.add(update)
+        except (OSError, json.JSONDecodeError, AttributeError, ValueError) as exc:
+            raise RunStateError("progress journal is malformed") from exc
+    if updates != set(range(1, (max(updates) if updates else 0) + 1)):
+        raise RunStateError("progress journal updates are not contiguous")
+    journal_completed = max(updates, default=0)
+    if journal_completed not in {completed_update, completed_update + 1}:
+        raise RunStateError("progress journal and recovery boundary disagree")
+    return updates
+
+
+def append_progress_row(path: Path, row: dict[str, Any]) -> bool:
+    """Durably append one update row, unless a recovery replay already has it."""
+    update = row.get("update")
+    if isinstance(update, bool) or not isinstance(update, int) or update < 1:
+        raise RunStateError("progress row has invalid update")
+    existing = reconcile_progress_journal(path, completed_update=update - 1)
+    if update in existing:
+        return False
+    if existing != set(range(1, update)):
+        raise RunStateError("progress row is out of order")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as progress:
+        progress.write(json.dumps(row) + "\n")
+        progress.flush()
+        os.fsync(progress.fileno())
+    return True
+
+
+def capture_rng_state() -> dict[str, Any]:
+    state: dict[str, Any] = {
+        "python": random.getstate(), "numpy": np.random.get_state(), "torch_cpu": torch.get_rng_state(),
+    }
+    if torch.cuda.is_available():
+        state["torch_cuda"] = torch.cuda.get_rng_state_all()
+    return state
+
+
+def restore_rng_state(state: dict[str, Any]) -> None:
+    try:
+        random.setstate(state["python"])
+        np.random.set_state(state["numpy"])
+        torch.set_rng_state(state["torch_cpu"])
+        if "torch_cuda" in state and torch.cuda.is_available():
+            torch.cuda.set_rng_state_all(state["torch_cuda"])
+    except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+        raise RunStateError("malformed recovery RNG state") from exc
+
+
+def atomic_save_recovery(path: Path, state: dict[str, Any]) -> None:
+    _atomic_replace(path, lambda tmp: torch.save(state, tmp))
+
+
+def load_recovery(path: Path, device: torch.device) -> dict[str, Any]:
+    if not path.is_file():
+        raise RunStateError("resume requested but recovery.pt is missing")
+    try:
+        state = torch.load(path, map_location=device, weights_only=False)
+        if not isinstance(state, dict) or not isinstance(state.get("completed_update"), int):
+            raise ValueError("missing completed_update")
+        if not isinstance(state.get("model"), dict) or not isinstance(state.get("optimizer"), dict):
+            raise ValueError("missing model or optimizer")
+        restore_rng_state(state["rng"])
+        return state
+    except (OSError, EOFError, RuntimeError, TypeError, ValueError, KeyError, pickle.UnpicklingError) as exc:
+        raise RunStateError("resume recovery state is malformed") from exc
+
+
+def create_or_validate_run_contract(run_dir: Path, contract: dict[str, Any], *, resume: bool) -> None:
+    """Create immutable ``run.json`` once, or fail closed on any difference."""
+    path = run_dir / "run.json"
+    if resume:
+        if not path.is_file():
+            raise RunStateError("resume requested but run.json is missing")
+        try:
+            existing = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RunStateError("resume run.json is malformed") from exc
+        if existing != contract:
+            raise RunStateError("resume immutable run contract mismatch")
+        return
+    if path.exists():
+        raise RunStateError("run directory already has run.json; use --resume")
+    atomic_write_json(path, contract)
+
+
+class StopRequest:
+    """Signal handler that asks the update loop to stop at its next boundary."""
+    def __init__(self) -> None:
+        self.requested = False
+        self.signal_name: str | None = None
+
+    def handler(self, signum: int, _frame: Any) -> None:
+        self.requested = True
+        self.signal_name = signal.Signals(signum).name
+
+
+def configure_seed(seed: int | None) -> int:
+    """Seed only when requested; preserve historical default streams otherwise."""
+    effective = PPO_TORCH_SEED if seed is None else int(seed)
+    if seed is not None:
+        random.seed(effective)
+        np.random.seed(effective)
+    torch.manual_seed(effective)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(effective)
+    return effective
+
+
+def boundary_stop_reason(
+    *, completed: int, configured_updates: int, max_updates: int | None,
+    end_time: dt.datetime | None, now: dt.datetime | None = None, interrupted: bool = False,
+) -> str | None:
+    """Return a boundary-only stop reason; deadline wins before a new update."""
+    if interrupted:
+        return "interrupted"
+    if end_time is not None and (now or dt.datetime.now(_HKT)) >= end_time:
+        return "deadline"
+    limit = min(configured_updates, max_updates) if max_updates is not None else configured_updates
+    if completed >= limit:
+        return "completed" if completed >= configured_updates else "max_updates"
+    return None
 
 # --------------------------------------------------------------------------- #
 # canonical dataset constants (pre-registered, collected exactly once)
@@ -757,7 +944,11 @@ def run_ppo_arm(
     net = PlayerRankedTopK(top_k=init_net.top_k, hidden=init_net.hidden).to(device)
     net.load_state_dict(init_net.state_dict())
     opt = torch.optim.Adam(net.parameters(), lr=PPO_LR, eps=1e-8)
-    torch.manual_seed(PPO_TORCH_SEED)
+    # Preserve the historical default timing: the arm seed comes after its
+    # clone/optimizer construction.  An explicit CLI seed intentionally has
+    # already been applied before construction by ``apply_mode_defaults``.
+    if getattr(args, "seed", None) is None:
+        torch.manual_seed(PPO_TORCH_SEED)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     jsonl_path = out_dir / "ppo_updates.jsonl"
@@ -806,25 +997,89 @@ def run_ppo_arm(
             }
         )
 
-    if 0 in snapshot_updates:
+    recovery_path = out_dir / "recovery.pt"
+    completed = 0
+    if getattr(args, "resume", False):
+        recovery = load_recovery(recovery_path, device)
+        try:
+            net.load_state_dict(recovery["model"], strict=True)
+            opt.load_state_dict(recovery["optimizer"])
+            completed = recovery["completed_update"]
+            total_frames = int(recovery["total_frames"])
+            optimizer_steps = int(recovery["optimizer_steps"])
+            snapshots = list(recovery.get("snapshots", []))
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            raise RunStateError("resume recovery state is malformed") from exc
+        append_run_status(out_dir, {"event": "resumed", "completed_update": completed})
+    elif 0 in snapshot_updates:
         _snapshot(0)
 
-    with jsonl_path.open("w") as jsonl_f:
-        for update in range(1, args.updates + 1):
-            seeds = rollout_seed_schedule(update - 1, episodes_per_update=args.episodes_per_update)
-            rollout_seed_window = seeds
-            rollouts = [collect_rollout(net, device, seed, max_frames=args.max_frames) for seed in seeds]
-            metrics = ppo_update(net, opt, rollouts, device)
-            optimizer_steps += int(metrics["optimizer_steps"])
-            total_frames += sum(len(r.actions) for r in rollouts)
-            row = dict(metrics)
-            row["update"] = update
-            row["scripted_survival_mean"] = statistics.mean([r.elapsed for r in rollouts])
-            row["rollout_censoring"] = rollout_censor_stats(rollouts)
-            jsonl_f.write(json.dumps(row) + "\n")
-            jsonl_f.flush()
-            if update in snapshot_updates:
-                _snapshot(update)
+    # A durable journal may be one update ahead when a crash landed between
+    # its fsync and the atomic recovery replacement.  That update is replayed
+    # from recovery without adding a second history row.
+    reconcile_progress_journal(jsonl_path, completed_update=completed)
+
+    def _save_boundary() -> None:
+        atomic_save_recovery(recovery_path, {
+            "format": 1, "arm": "control", "model": net.state_dict(),
+            "optimizer": opt.state_dict(), "completed_update": completed,
+            "total_frames": total_frames, "optimizer_steps": optimizer_steps,
+            "snapshots": snapshots, "rng": capture_rng_state(),
+        })
+
+    if not getattr(args, "resume", False):
+        _save_boundary()
+    stop = StopRequest()
+    old_handlers = {s: signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM)}
+    for s in old_handlers:
+        signal.signal(s, stop.handler)
+    stop_reason: str | None = None
+    max_updates = min(args.updates, args.max_updates) if getattr(args, "max_updates", None) is not None else args.updates
+    try:
+        for update in range(completed + 1, max_updates + 1):
+                # A signal only requests an orderly boundary; none is claimed
+                # until this whole update has been optimized and checkpointed.
+                requested_reason = boundary_stop_reason(
+                    completed=completed, configured_updates=args.updates,
+                    max_updates=getattr(args, "max_updates", None), end_time=getattr(args, "end_time", None),
+                    interrupted=stop.requested,
+                )
+                if requested_reason is not None:
+                    stop_reason = requested_reason
+                    break
+                seeds = rollout_seed_schedule(update - 1, episodes_per_update=args.episodes_per_update)
+                rollout_seed_window = seeds
+                rollouts = [collect_rollout(net, device, seed, max_frames=args.max_frames) for seed in seeds]
+                metrics = ppo_update(net, opt, rollouts, device)
+                optimizer_steps += int(metrics["optimizer_steps"])
+                total_frames += sum(len(r.actions) for r in rollouts)
+                row = dict(metrics)
+                row["update"] = update
+                row["scripted_survival_mean"] = statistics.mean([r.elapsed for r in rollouts])
+                row["rollout_censoring"] = rollout_censor_stats(rollouts)
+                append_progress_row(jsonl_path, row)
+                completed = update
+                _save_boundary()
+                append_run_status(out_dir, {"event": "update_complete", "update": update, "total_frames": total_frames})
+                if update in snapshot_updates:
+                    _snapshot(update)
+                    _save_boundary()
+                if stop.requested:
+                    stop_reason = "interrupted"
+                    break
+                if completed >= max_updates and max_updates < args.updates:
+                    stop_reason = "max_updates"
+                    break
+    finally:
+        for s, previous in old_handlers.items():
+            signal.signal(s, previous)
+
+    if stop_reason is None:
+        stop_reason = "completed" if completed >= args.updates else "max_updates"
+    append_run_status(out_dir, {"event": stop_reason, "completed_update": completed})
+    if completed and not any(item["update"] == completed for item in snapshots):
+        _snapshot(completed)
+        _save_boundary()
 
     final_eval_summary = summarize_evaluation(evaluate_deterministic(net, device, args.eval_seeds, args.eval_max_steps))
     final_path = out_dir / "ppo_final.pt"
@@ -834,15 +1089,17 @@ def run_ppo_arm(
         source_tool="phase3_ranked_ppo_retention",
         experimental=True,
         production_compatible=False,
-        extra=_pack_extra(args.updates, final_eval_summary),
+        extra=_pack_extra(completed, final_eval_summary),
     )
 
     return {
         "optimizer_steps": optimizer_steps,
-        "total_episodes": args.updates * args.episodes_per_update,
+        "total_episodes": completed * args.episodes_per_update,
         "total_frames": total_frames,
         "snapshots": snapshots,
         "final_checkpoint": str(final_path),
+        "completed_updates": completed,
+        "stop_reason": stop_reason,
     }
 
 
@@ -854,6 +1111,11 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--init-checkpoint", type=Path, required=True)
     ap.add_argument("--teacher", type=Path, required=True)
     ap.add_argument("--out-dir", type=Path, default=Path("runs/phase3_ranked_ppo_retention"))
+    ap.add_argument("--run-dir", type=Path, help="resumable run directory (defaults to --out-dir)")
+    ap.add_argument("--end-time", type=parse_end_time, help="HKT deadline: YYYYMMDD-HHMM")
+    ap.add_argument("--max-updates", type=int, help="maximum completed updates for this run")
+    ap.add_argument("--resume", action="store_true", help="resume only from a matching recovery boundary")
+    ap.add_argument("--seed", type=int, help="optional explicit RNG seed")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--quick", action="store_true")
     return ap
@@ -886,6 +1148,18 @@ def apply_mode_defaults(args: argparse.Namespace) -> argparse.Namespace:
         args.data_frames_cap = FRAMES_PER_EPISODE_CAP
         args.initial_gate_mean_min = INITIAL_GATE_MEAN_MIN
         args.initial_gate_median_min = INITIAL_GATE_MEDIAN_MIN
+    if getattr(args, "max_updates", None) is not None and args.max_updates < 0:
+        raise ValueError("--max-updates must be non-negative")
+    if getattr(args, "run_dir", None) is not None:
+        args.run_dir = Path(args.run_dir)
+    elif hasattr(args, "out_dir"):
+        args.run_dir = Path(args.out_dir)
+    else:
+        args.run_dir = None
+    seed = getattr(args, "seed", None)
+    # With no --seed, retain the historical arm-local torch seeding timing.
+    # Explicit seeds intentionally apply before any network construction.
+    args.effective_seed = PPO_TORCH_SEED if seed is None else configure_seed(seed)
     return args
 
 
@@ -913,12 +1187,15 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
     """Strict, fail-closed orchestration of the paired frozen/ppo control.
     No env rollouts and no PPO ever run before the pre-registered initial
     gate passes; no checkpoint promotion happens anywhere."""
-    out_dir = Path(args.out_dir)
+    out_dir = Path(getattr(args, "run_dir", args.out_dir))
     out_dir.mkdir(parents=True, exist_ok=True)
 
     init_net, init_meta = load_initial_checkpoint(args.init_checkpoint, device)
     init_prov = checkpoint_provenance(args.init_checkpoint, init_meta)
-    teacher_prov = {"file_sha256": file_sha256(args.teacher)}
+    try:
+        teacher_prov = {"file_sha256": file_sha256(args.teacher)}
+    except OSError:
+        teacher_prov = {"file_sha256": None}
     provenance = {
         "init_checkpoint": init_prov,
         "teacher": teacher_prov,
@@ -938,6 +1215,20 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
     knobs["data_episodes"] = args.data_episodes
     knobs["data_max_steps"] = args.data_max_steps
     knobs["data_frames_cap"] = args.data_frames_cap
+
+    contract = {
+        "format": 1, "tool": "phase3_ranked_ppo_retention", "arm": "control",
+        "inputs": {"init_checkpoint": init_prov, "teacher": teacher_prov}, "provenance": provenance,
+        "knobs": knobs,
+        "stop_args": {"end_time_hkt": args.end_time.isoformat() if getattr(args, "end_time", None) else None,
+                      "max_updates": getattr(args, "max_updates", None)},
+        "effective_seed": getattr(args, "effective_seed", PPO_TORCH_SEED), "no_promotion": True,
+    }
+    # A resume is tied to an immutable contract.  Validate it before the
+    # initial gate, which evaluates the environment, while retaining the
+    # historical new-run gate-before-run-creation behaviour.
+    if getattr(args, "resume", False):
+        create_or_validate_run_contract(out_dir, contract, resume=True)
 
     gate_results = evaluate_deterministic(init_net, device, args.eval_seeds, args.eval_max_steps)
     gate_summary = summarize_evaluation(gate_results)
@@ -961,6 +1252,15 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
         report["status"] = "failed_closed"
         _write_report(out_dir, report)
         return report
+
+    if teacher_prov["file_sha256"] is None:
+        report["status"] = "failed_closed"
+        _write_report(out_dir, report)
+        return report
+
+    if not getattr(args, "resume", False):
+        create_or_validate_run_contract(out_dir, contract, resume=False)
+    append_run_status(out_dir, {"event": "resume_requested" if getattr(args, "resume", False) else "started"})
 
     teacher = load_teacher(args.teacher, device)
     dataset = collect_canonical_dataset(
@@ -1007,7 +1307,7 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
     retention = evaluate_retention(reference, ppo_arm["snapshots"])
     report["retention"] = retention
 
-    report["status"] = "completed"
+    report["status"] = ppo_arm["stop_reason"]
     report["control_ran"] = True
     _write_report(out_dir, report)
     return report

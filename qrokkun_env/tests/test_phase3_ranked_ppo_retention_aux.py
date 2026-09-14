@@ -1097,6 +1097,59 @@ def test_update_snapshots_store_the_pre_update_on_policy_alignment(
     assert rows[1]["grad_alignment"]["measurement"] == "pre_update_on_policy"
 
 
+def test_unscheduled_terminal_snapshot_reuses_final_update_alignment_after_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A max-updates boundary must not diagnose final weights on update-1 data."""
+    device = torch.device("cpu")
+    init_net = _tiny_net(seed=31)
+    train = _teacher_tensors(n=16, seed=32)
+    held = _teacher_tensors(n=8, seed=33)
+    args = _quick_args(tmp_path)
+    args.updates = 10
+    args.max_updates = 7
+
+    returned: list[dict] = []
+    real_update = aux.ppo_aux_update
+
+    def spy_update(*a, **kw):
+        metrics = real_update(*a, **kw)
+        returned.append(metrics)
+        return metrics
+
+    monkeypatch.setattr(aux, "ppo_aux_update", spy_update)
+    arm = aux.run_aux_arm(
+        init_net, device, args, [0], train, held, tmp_path,
+        parent_state_dict_sha256="parent-sd", parent_file_sha256="parent-file",
+        dataset_hash="dataset-hash", ppo_knobs={"updates": 10}, minibatch=4,
+    )
+
+    terminal = {snap["update"]: snap for snap in arm["snapshots"]}[7]
+    final_alignment = returned[-1]["grad_alignment"]
+    assert terminal["grad_alignment"] == final_alignment
+    assert terminal["grad_alignment"]["measurement"] == "pre_update_on_policy"
+    assert terminal["grad_alignment"]["measured_before_update"] == 7
+    assert terminal["grad_alignment"]["measurement"] != "initial_on_policy"
+
+    recovery = ret.load_recovery(tmp_path / "recovery.pt", device)
+    assert recovery["last_update_rollouts"]
+    assert recovery["last_grad_alignment"] == final_alignment
+
+    # Simulate resuming from the completed boundary before the unscheduled
+    # terminal snapshot was persisted.  It must retain the same semantics.
+    recovery["snapshots"] = [snap for snap in recovery["snapshots"] if snap["update"] != 7]
+    ret.atomic_save_recovery(tmp_path / "recovery.pt", recovery)
+    args.resume = True
+    resumed = aux.run_aux_arm(
+        init_net, device, args, [0], train, held, tmp_path,
+        parent_state_dict_sha256="parent-sd", parent_file_sha256="parent-file",
+        dataset_hash="dataset-hash", ppo_knobs={"updates": 10}, minibatch=4,
+    )
+    resumed_terminal = {snap["update"]: snap for snap in resumed["snapshots"]}[7]
+    assert resumed_terminal["grad_alignment"] == final_alignment
+    assert resumed_terminal["grad_alignment"]["measurement"] == "pre_update_on_policy"
+
+
 def test_aux_arm_snapshots_feed_reused_retention_gate(tmp_path: Path) -> None:
     arm, _args = _tiny_arm(tmp_path)
     reference = ret.build_retention_reference(arm["snapshots"][0])
@@ -1141,6 +1194,11 @@ def test_parser_exposes_only_the_allowed_flags() -> None:
         "--init-checkpoint",
         "--teacher",
         "--out-dir",
+        "--run-dir",
+        "--end-time",
+        "--max-updates",
+        "--resume",
+        "--seed",
         "--device",
         "--quick",
     }
@@ -1164,6 +1222,22 @@ def test_apply_mode_defaults_locks_full_run_and_shrinks_quick_run() -> None:
     # quick mode never changes the alpha formula or the retention math
     assert aux.TARGET_RETENTION_GRAD_RATIO == 0.15
     assert aux.RETENTION_FRACTION == ret.RETENTION_FRACTION
+
+
+def test_omitted_seed_preserves_aux_arm_local_historical_seeding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The shared defaults helper must not seed before aux construction."""
+    calls: list[object] = []
+
+    def unexpected_default_seed(seed: object) -> None:
+        calls.append(seed)
+        raise AssertionError("configure_seed must not run when --seed is omitted")
+
+    monkeypatch.setattr(ret, "configure_seed", unexpected_default_seed)
+    args = aux.apply_mode_defaults(argparse.Namespace(quick=True))
+    assert calls == []
+    assert args.effective_seed == ret.PPO_TORCH_SEED
 
 
 def test_module_imports_without_training_side_effects() -> None:

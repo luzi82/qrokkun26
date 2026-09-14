@@ -43,6 +43,7 @@ Contract under specification
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import statistics
@@ -556,6 +557,56 @@ def test_evaluate_retention_edge_is_inclusive() -> None:
     out = ret.evaluate_retention(reference, snapshots)
     assert out["retention_pass"] is True
     assert out["first_breaking_snapshot"] is None
+
+
+def test_omitted_seed_preserves_arm_local_historical_seeding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No default seed may be applied before the PPO arm is constructed."""
+    calls: list[object] = []
+
+    def unexpected_default_seed(seed: object) -> None:
+        calls.append(seed)
+        raise AssertionError("configure_seed must not run when --seed is omitted")
+
+    monkeypatch.setattr(ret, "configure_seed", unexpected_default_seed)
+    args = ret.apply_mode_defaults(argparse.Namespace(quick=True))
+    assert calls == []
+    assert args.effective_seed == ret.PPO_TORCH_SEED
+
+
+def test_default_torch_seed_remains_after_control_arm_construction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The historical default torch seed is set inside, not before, the arm."""
+    init_net = _tiny_net(seed=29)
+    events: list[tuple[str, int | None]] = []
+    real_net = ret.PlayerRankedTopK
+    real_seed = ret.torch.manual_seed
+
+    def recording_net(*args: Any, **kwargs: Any) -> PlayerRankedTopK:
+        events.append(("construct", None))
+        return real_net(*args, **kwargs)
+
+    def recording_seed(seed: int):
+        events.append(("seed", seed))
+        return real_seed(seed)
+
+    monkeypatch.setattr(ret, "PlayerRankedTopK", recording_net)
+    monkeypatch.setattr(ret.torch, "manual_seed", recording_seed)
+    monkeypatch.setattr(
+        ret, "evaluate_deterministic", lambda *_args, **_kwargs: [{"seed": 0, "elapsed": 1.0, "censored": False}],
+    )
+    args = argparse.Namespace(
+        updates=0, episodes_per_update=1, max_frames=1, eval_seeds=[0],
+        eval_max_steps=1, out_dir=tmp_path,
+    )
+    ret.run_ppo_arm(
+        init_net, torch.device("cpu"), args, [], None, tmp_path,
+        parent_state_dict_sha256="parent-sd", parent_file_sha256="parent-file",
+        dataset_hash="dataset-hash", ppo_knobs={},
+    )
+    assert events.index(("construct", None)) < events.index(("seed", ret.PPO_TORCH_SEED))
 
 
 # --------------------------------------------------------------------------- #
