@@ -30,6 +30,7 @@ import torch.nn as nn
 
 from qrokkun_env.agents.obs_v4 import BULLET_FEAT_V4, MAX_BULLETS_V4, PLAYER_FEAT_V4
 from qrokkun_env.agents.player_ranked_topk import ARCHITECTURE as RANKED_TOP_K_ARCHITECTURE
+from qrokkun_env.agents.player_ranked_topk import ARCHITECTURE_VERSION as RANKED_TOP_K_ARCHITECTURE_VERSION
 from qrokkun_env.agents.player_ranked_topk import PlayerRankedTopK
 from qrokkun_env.env import ACTIONS
 
@@ -212,6 +213,16 @@ def validate_player_checkpoint(ckpt: Any, *, expected_architecture: str | None =
     if expected_architecture is not None and arch != expected_architecture:
         raise CheckpointArchitectureError(
             f"architecture mismatch: checkpoint is {arch!r}, caller expected {expected_architecture!r}"
+        )
+    architecture_version = ckpt.get("architecture_version")
+    if (
+        type(architecture_version) is not int
+        or architecture_version != RANKED_TOP_K_ARCHITECTURE_VERSION
+    ):
+        raise CheckpointSchemaError(
+            "architecture_version "
+            f"must be exact built-in int {RANKED_TOP_K_ARCHITECTURE_VERSION!r}; "
+            f"got {architecture_version!r} ({type(architecture_version).__name__})"
         )
     if ckpt.get("schema_version") != CKPT_SCHEMA_VERSION:
         raise CheckpointSchemaError(
