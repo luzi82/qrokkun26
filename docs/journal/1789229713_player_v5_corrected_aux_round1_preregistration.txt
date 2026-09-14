@@ -1,0 +1,210 @@
+PlayerV5 corrected BC-retention auxiliary PPO round 1：預先登記
+================================================================
+
+狀態
+----
+
+planned／not started。本文件是下一次執行前的鎖定契約，不是結果報告；未曾
+以本 preregistration 啟動訓練、收集資料或產生 checkpoint。所有執行主機路徑、
+主機名稱、GPU 型號、runtime／wall-clock、Python／PyTorch／CUDA 版本及實際輸出
+目錄均為「啟動時記錄」欄位，在啟動前未知，絕不在此虛構。
+
+身份、範圍與來源
+------------------
+
+- 架構身份固定為 PlayerV5：code class `PlayerRankedTopK`，checkpoint
+  architecture key `player_ranked_topk`（top_k=8、hidden=472）。PPO 成敗不是
+  架構命名裁決。
+- promotion status：candidate，並非 main training default。此實驗所有
+  snapshot 及 final checkpoint 一律 `experimental=true`、
+  `production_compatible=false`、`promotion=false`；不可作 production 初始化，
+  不可晉升。
+- 執行 checkout 必須是 clean HEAD
+  `7cb6d9d33cac0e8a462670cc9c1e35de8efffe05`；更正 harness 的來源提交為
+  `bd367d9190c57bd26e654f0f2232059f3a066dce`。兩者都須在啟動前以完整 SHA
+  核對並寫入報告。此輪是 corrected round 1，不是提高 alpha 的 round 2。
+- 對手固定為 scripted Spawner；範圍只含 PlayerV5 auxiliary PPO。
+
+目標與可否證假說
+--------------------
+
+目標是在不改變未正則化 PPO 對照的起點、資料、seed window、budget 與 PPO knobs
+下，測試唯一新加入的 BC-retention auxiliary objective 是否令最後 snapshot 通過
+預先登記的 retention gate。
+
+假說：從指定 seed-6 BC state 開始，於 200 次更新後，輔助項可同時使 final
+deterministic mean 與 median survival 各不少於 update 0 的 80%，且 held teacher
+agreement 的絕對下降不多於 0.05。若任何 final 條件不成立、held agreement 缺失，
+或 initial gate 不通過，假說即 FAIL（initial gate 情況為 fail closed、arm 不跑）。
+這是可否證的 retention 假說；不以中途 survival、單一 seed、calibration cosine
+或任何漂亮 snapshot 改寫判定。
+
+啟動前必備本機檔案與雜湊
+--------------------------
+
+只可使用已複製到執行主機本機磁碟的檔案，先計算 SHA-256、strict-load 驗證後才可
+使用；NAS 僅是唯讀來源，禁止 NAS-direct 讀寫、評估或訓練。
+
+- PlayerV1 teacher 本機檔案：SHA-256
+  `1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1`。
+- seed-6 PlayerV5 BC 本機初始 checkpoint：檔案 SHA-256
+  `844e029a74fce418e1d97041e66cf5422a25d8f500628d1ff5526640a7a36ad9`；
+  state-dict SHA-256
+  `a6f95c4621015c15f0e857d1ca0b5a9f561c3e50462472c553d5db7f960064e7`。
+- 重新本機收集的 canonical teacher dataset identity 必須為
+  `2521bd12ae8b630e65f2645132bde4952fe8f60783ad0e87648ed2af688e558a`；不符即
+  fail closed，不得以新 identity 繼續。
+
+精確資料集與 split 契約
+------------------------
+
+由上述 PlayerV1 teacher 依 Phase2 `collect_dataset`／`collect_episode` 原樣本機收集
+一次：`DATA_SEED=4` 的 `random.Random`，240 episodes，環境 seed 20000--20239，
+每 episode 最多 4,200 frames（70 s），在完整 episode 上以 even-stride subsampling
+取最多 700 frames（不是只取開頭），再按 episode（非 frame）分為 held-out fraction
+0.12。canonical 內容應為 211 train episodes／146,688 train frames 與 29 held
+episodes／20,300 held frames，且以上 identity hash 為唯一接受值。
+
+teacher TRAIN split 只可供 retention auxiliary 的 teacher logits；held split 只可供
+update 0 與每個 snapshot 的 teacher agreement、teacher-to-student KL 及 buckets
+診斷／gate。teacher frames 絕不可進入 PPO batches、on-policy rollout、actions、
+advantages、old_log_probs、GAE、ratio、returns 或 value loss。
+
+固定起點、seeds、budget 與 PPO knobs
+-------------------------------------
+
+aux arm 與未正則化 control 使用完全相同的 seed-6 state-dict 起點、scripted
+Spawner、rollout/eval windows 及下列不可改動的 PPO 契約：
+
+- optimizer Adam，lr=0.0003，Adam eps=1e-8；gamma=0.99，lambda=0.95，clip=0.2，
+  entropy coefficient=0.02，value coefficient=0.5，max grad norm=1.0。
+- PPO epochs=4，minibatch=512，normalized advantages=true；value bootstrap=false，
+  truncation 視為 terminal=true。
+- updates=200；每 update=8 on-policy sampled（非 argmax）scripted episodes；
+  每 episode max frames=4,200；最大名義 budget=1,600 episodes、6,720,000 frames
+  （實際 frames、censoring 與 optimizer steps 必須記錄，不能事先宣稱）。
+- global PPO torch seed=0。rollout seeds：update u（1-based）使用
+  `50000 + 8*(u-1)` 至 `50000 + 8*u-1`，即 update 1 為 50000--50007，update
+  200 為 51592--51599。
+- deterministic argmax eval seeds=3000--3029（30 個），max=4,200 frames／70 s；
+  snapshots 固定在 updates 0、10、25、50、100、200。不得增刪 snapshot 後再把
+  結果當作同一 preregistration 的預選。
+
+唯一新目標與校準
+----------------
+
+唯一新增訓練目標是每個 PPO minibatch 的
+`total = policy_loss + 0.5*value_loss - 0.02*entropy + alpha*hybrid_loss`。
+其中 `hybrid_loss` 必須直接使用
+`phase2_ranked_multiseed.hybrid_loss`：hard CE weight=0.5、soft teacher CE
+weight=0.5、temperature=1。沒有其他新增或可調 knob。
+
+`TARGET_RETENTION_GRAD_RATIO=0.15` 是起始 checkpoint 的「加權 retention
+gradient norm／PPO policy-gradient norm」目標，不是 alpha。alpha 是衍生係數：在
+任何 optimizer step 前，使用 update-1 的 on-policy rollout、8 個 matched
+PPO/retention gradient pairs（`CALIBRATION_GRAD_SAMPLES=8`），每 pair 的共同樣本數
+為 `min(512, PPO rollout frames, TRAIN frames)`；任一側為空即 fail closed。對八個
+pair 分別求 policy-loss-only（無 value、無 entropy）`||g_ppo||` 與 hybrid
+`||g_ret||`，取平均後一次計算並凍結：
+
+`alpha = 0.15 * mean(||g_ppo||) / (mean(||g_ret||) + 1e-8)`。
+
+不得按 evaluation、survival、agreement、KL、cosine 或中途結果重調 alpha。校準
+window 正是 update-1 使用的同一批 rollout：只收集一次、原樣重用，沒有丟棄或重收集。
+retention sampling streams 必須彼此獨立：training seed=12345、calibration seed=22345、
+diagnostic seed=32345；PPO minibatch permutation stream 亦不可與它們共用。這保證
+snapshot／diagnostic 的增減不會移動後續訓練 retention draws。snapshot 0 的 alignment
+記為 `initial_on_policy`；其後 snapshot 必須重用各 update 已在 optimizer step 前取得的
+`pre_update_on_policy` alignment，禁止事後以 post-update weights 重算。
+
+Gates、配對解讀與決策
+----------------------
+
+首先只對初始 checkpoint 做 30-seed deterministic eval。initial gate 為 mean >=25.0 s
+且 median >=25.0 s；任一失敗即寫出 `failed_closed` report，`arm_ran=false`，不收集
+teacher dataset、不校準、不訓練。若起點與已登記基準一致，initial eval 應重新量得
+34.0906 s mean、36.7917 s median；dataset 收集後的 update-0 held agreement 應為
+0.6999。這些是待核對基準而非本輪結果。
+
+成功 initial gate 後，update 0 是 retention reference。final PASS 必須同時滿足：
+
+- mean >= 0.80 × update-0 mean（相同基準的 floor=27.2724 s）；
+- median >= 0.80 × update-0 median（floor=29.4333 s）；
+- 每個 snapshot 都有 held agreement，且 final held agreement >= update-0 agreement
+  -0.05（相同基準的 floor=0.6499）。
+
+對每個 snapshot，同一 eval seeds 與 update 0 配對，記錄每-seed elapsed 差、paired
+mean／median 差、improve/worsen/unchanged counts 與 approximate paired 95% t interval；
+此為解讀 survival 變化的配對證據，不取代 gate。必須報告 first breaking snapshot；
+任何 snapshot 的 mean、median、agreement（或 agreement 缺失）越界均是第一個
+breaking 候選。總 verdict 仍由 final 三條件決定，agreement 缺失 fail closed。
+
+PASS：完整保留 provenance、全部 snapshot、gates 與 accounting，並仍 promote nothing；
+只有另立預先登記文件後才可考慮下一個比較。FAIL：完整保留失敗報告與全部實驗
+snapshots，promote nothing；禁止從曲線事後選 alpha 或 checkpoint。任何新假說必須是
+另一份 preregistration，且只含一項明確改動。
+
+預期執行命令
+------------
+
+在 repository root、已核對的 clean checkout、且上述三個值皆指向本機副本時執行：
+
+```bash
+PYTHONPATH=. python -m tools.phase3_ranked_ppo_retention_aux \
+  --init-checkpoint "${INIT_CHECKPOINT}" \
+  --teacher "${TEACHER}" \
+  --out-dir "${OUT_DIR}" \
+  --device cuda
+```
+
+`${INIT_CHECKPOINT}`、`${TEACHER}`、`${OUT_DIR}` 是啟動時才填入並記錄的
+execution-host paths；不得填 NAS path，且不可加入 `--quick`。
+
+啟動前 checklist
+-----------------
+
+- `git status --porcelain` 必須為空；HEAD 必須精確為
+  `7cb6d9d33cac0e8a462670cc9c1e35de8efffe05`，並核對 corrected harness source
+  `bd367d9190c57bd26e654f0f2232059f3a066dce`。
+- 重跑完整 351-test suite 並記錄結果（預期歷史基準為 351 passed、2 warnings）；
+  不可只跑 targeted tests 或 smoke test。
+- 從本機副本重算 teacher、init file、init state-dict SHA-256，並於收集後驗證
+  canonical dataset identity；任一不符立即停止。
+- 確認 strict checkpoint schema、actions／observation metadata、architecture、
+  `experimental`／`production_compatible` 合約；確認本機檔案而非 NAS-direct 使用。
+- 確認 full mode：沒有 `--quick`，200 updates、8 episodes/update、4,200 caps、
+  30 eval seeds 與六個固定 snapshots；確認 calibration rollout reuse、8 matched
+  pairs、三條獨立 retention RNG streams、held-only diagnostics 與 no-promotion。
+
+完成後必記錄的 accounting／provenance
+--------------------------------------
+
+report.json、ppo_aux_updates.jsonl、各 `ppo_aux_update_{0,10,25,50,100,200}.pt` 與
+`ppo_aux_final.pt` 的本機路徑、各檔 SHA-256、各 checkpoint state-dict SHA-256；每個
+snapshot 的完整 evaluation（per-seed elapsed、censoring）、held diagnostics、alignment
+語義與值；initial gate、retention reference、三個 floors、first breaking snapshot、
+PASS/FAIL reason、promotion=false；alpha calibration 的八 pair/共同 sample size、平均
+norms、cosine、alpha、target ratio，及每 update 的 losses、KL、clip fraction、entropy、
+explained variance、optimizer steps、rollout survival、frame／episode totals、rollout
+censoring、seed windows。亦必記錄 clean/dirty 結果、完整 git commit、branch、命令、
+本機輸入／輸出 paths、host、device、runtime、開始／結束時間、Python／PyTorch／CUDA
+版本和所有實際 knobs。未知值只可在 launch 時填入，不能回填為臆測。
+
+明確禁止的變更
+--------------
+
+禁止 entropy、gamma/lambda、reward、rollout/eval horizons、Spawner、self-play、
+random-start fraction、DAgger 的任何變更；禁止 alpha retuning、混入其他 auxiliary
+objective、改 dataset/split/seed/budget、quick mode，及按中途或最終指標事後選擇
+snapshot。這些均不屬本 round；如要測試，必須在 retention PASS 後另立文件並保留
+scripted-retention 對照。
+
+依據
+----
+
+本 preregistration 對照 `tools/phase3_ranked_ppo_retention_aux.py`、
+`tools/phase3_ranked_ppo_retention.py`、
+`docs/journal/1789225070_player_v5_recovery_roadmap.txt`、
+`docs/journal/1789175122_player_v5_retention_aux_round1_erratum.txt`、
+`docs/journal/1789155208_ranked_player_multiseed_and_ppo_retention.txt` 與先前 aux
+report；先前 report 的結果僅用作歷史背景及起點核對，絕非本輪結果。

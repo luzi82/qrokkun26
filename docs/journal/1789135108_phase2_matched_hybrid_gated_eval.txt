@@ -1,0 +1,179 @@
+Phase 2 matched architecture/objective experiment + gated closed-loop eval
+===========================================================================
+Date: 2026-09-11 HKT
+
+Decision summary
+----------------
+The pre-registered gate PASSED. The selected arm was flat8_hybrid.
+Its deterministic 30-seed Player-vs-scripted closed-loop result was:
+
+- mean: 33.1189 s
+- median: 35.3750 s
+- population std: 14.9266 s
+- min: 7.8833 s
+- max: 58.6833 s
+- n: 30
+
+This is a substantial recovery from Phase 2 Round 1 (9.04 s mean) and is well
+above flee (19.16 s), but remains below the PlayerV1 teacher (43.42 s) under
+the same current 70-second seeds-3000..3029 contract. No checkpoint was
+promoted.
+
+Provenance and safety boundaries
+--------------------------------
+- Source branch: player-recovery/phase-0
+- Source commit before this experiment code: 3d2cc00070ca9c6c9ad6dfc96b5ea6ce4f845c2b
+- PlayerV1 teacher SHA-256:
+  1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1
+- Teacher input on GPU host was a previously copied local artifact:
+  /home/ovm-hms-bot/scratch_phase1/player_gpu.pt
+- No NAS write occurred.
+- No PPO or learned Spawner was used.
+- Checkpoints are marked experimental=true and production_compatible=false.
+- Checkpoint selection used held-out frame agreement, then lower held KL, then
+  latest as an exact tie-break. Episode survival never selected checkpoints.
+- Complete report SHA-256:
+  1143fab7945d530d144819fa0e3178595fa33565cdc54a803346ab19d8a19a6d
+- GPU report:
+  /home/ovm-hms-bot/scratch_phase2_matched_full/report.json
+- Local gitignored review copy:
+  artifacts/phase2_matched_review/report.json
+
+Data and matched budget
+-----------------------
+- Collection seed start: 20000
+- Teacher episodes: 240
+- Episode-level split: 211 train / 29 held-out
+- Train frames: 146,688
+- Held-out frames: 20,300
+- Per-episode frame cap: 700
+- Training seed: 4
+- Epochs per arm: 80
+- Batch size: 1,024
+- Optimizer steps per arm: 11,520
+- Learning rate: 3e-4
+- Attention model: d_model=128, hidden=256, 268,554 trainable parameters
+- Flat8 model: hidden=472, 269,050 trainable parameters
+- Flat/attention parameter mismatch: 0.1847%, inside the pre-registered 2%
+  limit.
+
+Exactly six arms were trained on the same split, uniformly sampled frames,
+number of epochs, batch size, optimizer-step budget and seed:
+
+- attn64_hard
+- attn64_soft_t1
+- attn64_hybrid
+- attn8_hybrid
+- flat8_hard
+- flat8_hybrid
+
+Hybrid objective: 0.5 * teacher-argmax hard CE + 0.5 * teacher soft-target CE
+at temperature 1.0.
+
+Selected-checkpoint held-out metrics
+------------------------------------
+arm                 epoch  agreement  hard CE  soft CE  teacher->student KL
+attn64_hard            64    0.40744    1.68297  2.55810       0.60166
+attn64_soft_t1         45    0.39847    1.91940  2.12741       0.17097
+attn64_hybrid          61    0.41020    1.73892  2.19223       0.23579
+attn8_hybrid           45    0.40823    1.73304  2.18796       0.23152
+flat8_hard             79    0.64897    0.94553  3.13277       1.17633
+flat8_hybrid           80    0.69517    1.07731  2.13783       0.18139
+
+The four attention arms remained tightly clustered around 0.40 agreement.
+Changing hard/soft/hybrid objective or masking slots after the nearest eight
+did not resolve that plateau. Both matched-parameter flat ranked-top-8 arms
+were much higher. Hybrid also improved flat8 agreement and distribution match
+relative to flat8 hard.
+
+Pre-registered gate
+-------------------
+Chosen non-baseline arm: flat8_hybrid
+
+1. Held agreement >= 0.50
+   - observed: 0.69517
+   - PASS
+2. Absolute improvement over attn64_soft_t1 >= 0.03
+   - observed: 0.29670
+   - PASS
+3. Every nonzero-bullet held bucket agreement >= 0.40
+   - 1-7 bullets: n=1,686, agreement=0.61625, PASS
+   - 8-19 bullets: n=7,034, agreement=0.67344, PASS
+   - 20+ bullets: n=10,908, agreement=0.70581, PASS
+
+Overall gate: PASS. Only after this decision was recorded did the script reload
+the selected experimental checkpoint and construct/step evaluation envs.
+
+Gated closed-loop evaluation
+----------------------------
+Contract:
+- deterministic argmax Player policy
+- built-in scripted Spawner only
+- seeds 3000..3029 inclusive
+- maximum 4,200 frames / 70 seconds per seed
+
+Per-seed survival seconds:
+3000 54.0333; 3001 18.0833; 3002 13.2167; 3003 11.2000;
+3004 10.4667; 3005 32.4000; 3006 16.4333; 3007 42.8667;
+3008 33.5333; 3009 39.2667; 3010 7.8833; 3011 46.2833;
+3012 58.6833; 3013 12.2833; 3014 45.7667; 3015 37.4000;
+3016 46.2167; 3017 17.3333; 3018 34.5000; 3019 42.8500;
+3020 36.4500; 3021 54.2833; 3022 26.0833; 3023 17.6167;
+3024 36.2500; 3025 56.5500; 3026 49.5167; 3027 27.1167;
+3028 36.6500; 3029 32.3500.
+
+Reference comparison under the same current contract
+----------------------------------------------------
+- PlayerV1 teacher: mean 43.42 s, median 47.15 s
+- flee: mean 19.16 s
+- idle: mean 8.47 s
+- random: mean 7.84 s
+- Phase 2 Round 1 attention student: mean 9.04 s, median 9.23 s
+- matched flat8_hybrid: mean 33.12 s, median 35.37 s
+
+Interpretation
+--------------
+1. PlayerV4's total capacity is not the blocker: the earlier tiny-set control
+   overfit 2,000 teacher frames to 99.25% agreement.
+2. The present single-query bullet-attention path is the dominant
+   generalisation bottleneck in this controlled comparison. All attention arms
+   plateaued near 0.40 while matched-parameter ranked flat8 arms reached
+   0.65-0.70 on the same held set and update budget.
+3. Merely reducing attention input from 64 to the nearest 8 bullets did not
+   help. The likely issue is therefore not simple far-bullet dilution; it is
+   more consistent with the aggregation/inductive-bias/optimisation path losing
+   or struggling to learn ranked per-bullet geometry.
+4. Hybrid hard+soft supervision matters after changing the representation:
+   flat8_hybrid reached 0.695 agreement with KL 0.181, versus flat8_hard at
+   0.649 agreement with KL 1.176.
+5. Skill transfer is real but incomplete. The selected student recovered much
+   of the teacher advantage and clearly beat flee, but the high 14.93-second
+   closed-loop standard deviation and 7.88-second minimum show remaining
+   fragile seeds.
+
+Caveats
+-------
+- This is one training seed. The closed-loop result has 30 evaluation seeds,
+  but training-seed variance has not yet been measured.
+- Flat8_hybrid agreement is still 0.695, not near-perfect imitation.
+- This isolates the current attention path versus ranked flat top-8 input; it
+  does not prove that every possible attention architecture is unsuitable.
+- The flat checkpoint is deliberately not load-compatible with production
+  PlayerV4. It is evidence for the next architecture, not a promotion artifact.
+
+Verification
+------------
+- TDD RED was observed for missing gate behavior, selected-vs-final metric use,
+  and complete closed-loop summaries before implementation.
+- Targeted GPU-host suites: 78 passed, 1 pre-existing warning.
+- Copilot final code/result review: ACCEPTED.
+- Copilot independently recomputed optimizer-step arithmetic and every
+  closed-loop statistic from per-seed values; all matched the report.
+
+Recommended next step
+---------------------
+Build a production-compatible ranked top-k Player encoder (or multi-query
+encoder preserving several bullet slots) and distill from the same teacher
+under the hybrid objective. First reproduce held agreement and 30-seed
+closed-loop performance across multiple training seeds; only then begin the
+BC-retention PPO control. Do not move directly to live self-play.

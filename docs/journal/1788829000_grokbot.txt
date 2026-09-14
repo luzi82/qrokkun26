@@ -1,7 +1,7 @@
 Qrokkun26 v4.4 + v4.5 落地註記（2026-09-08）
 ==========================================
 作者：Software Engineer（Grok Bot）
-對照：docs/suggestions/1788798436_grokbot.txt、GPT 1788787846
+對照：docs/journal/1788798436_grokbot.txt、GPT 1788787846
 
 已實作（both_v4.py）
 --------------------

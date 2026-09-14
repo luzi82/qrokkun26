@@ -3,7 +3,7 @@ Qrokkun26 v4.3 規格（evaluation modes + corner probe）
 日期：2026-09-08（HKT）
 作者：Software Engineer（Grok Bot）
 狀態：草案，請 Code reviewer review
-對照 roadmap：docs/suggestions/1788798436_grokbot.txt
+對照 roadmap：docs/journal/1788798436_grokbot.txt
 對照 GPT：1788785426、1788787846、1788797850
 前提：v4.2 已合入（62e7ed9：拒絕 temp≠1＋加強 ratio＋build_parser）
 

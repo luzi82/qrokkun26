@@ -1,0 +1,72 @@
+Frozen-Spawner formal identity / serialization erratum
+======================================================
+
+This erratum supersedes only the stale identity/serialization interpretation
+in `docs/journal/1789263159_player_v5_frozen_spawner_eval_preregistration.txt`.
+The original journal's historical prose remains unchanged.
+
+Formal identity is `player_v5_frozen_spawner_eval_v1`, with the fixed
+preregistration path
+`docs/journal/1789263159_player_v5_frozen_spawner_eval_preregistration.txt`
+and formal report schema `frozen_spawner_eval_report.v1`. Diagnostic identity
+is `frozen_spawner_diagnostic_v1`, with a null preregistration path and
+diagnostic report schema `frozen_spawner_diagnostic_report.v1`.
+
+The exact formal invariant is: contract identity and preregistration path as
+above; schema_version exactly integer 1; player mode `det_det`; Spawner mode
+`stoch_stoch`; environment and Spawner seed lists exactly 3000 through 3029;
+episode cap exactly 4200 frames; and the preregistered comparison pairs in
+their fixed order: `v1_teacher` vs `v5_bc_seed6`, then `v5_bc_seed6` vs
+`v5_aux_u200`. Every invariant is required before formal serialization or a
+formal report.
+
+This is a provenance/serialization correction only. It does not alter the
+preregistered metrics, pairs, or interpretation of results. No real episodes,
+evaluation, training, PPO, self-play, promotion, GB10, or SSH ran for this
+erratum. No artifact was evaluated.
+
+Two-stage locked-manifest correction (2026-09-14)
+-------------------------------------------------
+
+Formal execution now accepts only an already-existing `--manifest` and an
+output report path. It has no role path, file-hash, or state-dict-hash selector
+flags and therefore cannot create and execute a formal manifest in one command.
+`prepare_main` / the preparation parser is the separate, non-executing path
+that writes a concrete manifest from supplied identities; it opens no model and
+runs no episode. Execution re-parses the locked JSON through the strict formal
+package constructor, revalidates canonical identity, verifies every file hash
+again, and recomputes every loaded `net.state_dict()` hash before an episode.
+
+Local journals and read-only candidate inspection did not establish all four
+exact canonical role identities unambiguously. Accordingly no candidate is
+blessed here and no locked production manifest is added. Formal execution
+fails closed unless a separately prepared, valid manifest is supplied.
+
+The paired result fields are descriptive diagnostics only, never a promotion
+or pass/fail rule. For each locked pair `delta=b-a`, the paired mean-difference
+95% CI gives `higher` only when `lower > 0`, `lower` only when `upper < 0`,
+and `indistinguishable` otherwise (including either endpoint exactly zero).
+Each pair emits machine-readable `direction`, `classification`,
+`classification_basis`, and `classification_rule`.
+
+RED evidence before implementation:
+
+`python3 -m pytest -q qrokkun_env/tests/test_frozen_spawner_eval_review_blockers.py -k 'formal_parser_accepts_only or prepare_writes or formal_execution_reads or formal_command_cannot'`
+returned `4 failed, 40 deselected`; failures showed the old parser required
+role selectors and `prepare_main` was absent. `python3 -m pytest -q
+qrokkun_env/tests/test_frozen_spawner_eval_runner.py -k 'classification or
+boundary'` returned `4 failed, 9 deselected`; each failed with missing
+`direction` or `classification` fields. These were synthetic tests only.
+
+GREEN evidence after implementation:
+
+`python3 -m pytest -q qrokkun_env/tests/test_frozen_spawner_eval_cli.py
+qrokkun_env/tests/test_frozen_spawner_eval_review_blockers.py
+qrokkun_env/tests/test_frozen_spawner_eval_review_round2.py
+qrokkun_env/tests/test_frozen_spawner_eval_runner.py
+qrokkun_env/tests/test_frozen_spawner_seed_package.py` returned `165 passed
+in 2.39s`. `python3 -m pytest -q qrokkun_env/tests` returned `516 passed, 2
+warnings in 39.96s`. `python3 -m py_compile qrokkun_env/frozen_spawner_eval_cli.py
+qrokkun_env/frozen_spawner_eval_runner.py qrokkun_env/frozen_spawner_seed_package.py`
+and `git diff --check` both completed successfully. No real checkpoint episode
+or evaluation ran; all lifecycle tests use synthetic manifests/checkpoints.

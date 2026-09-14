@@ -1,0 +1,43 @@
+{
+  "experiment": "player_v5_round1_bc_retention_aux_ppo",
+  "status": "completed",
+  "retention_pass": false,
+  "promotion": false,
+  "first_breaking_snapshot": 10,
+  "reason": "retention failed: agreement below threshold",
+  "alpha": 0.08912258648975062,
+  "target_retention_grad_ratio": 0.15,
+  "implement_commit": "118465334bf37613d874ce466b76837e2add0bd0",
+  "init_checkpoint_sha256": "844e029a74fce418e1d97041e66cf5422a25d8f500628d1ff5526640a7a36ad9",
+  "teacher_sha256": "1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1",
+  "dataset_sha256": "2521bd12ae8b630e65f2645132bde4952fe8f60783ad0e87648ed2af688e558a",
+  "report_json_sha256": "279df15f52187410fa9a3060ea6e60a74d2278a4b1c92e089c9392e57588081d",
+  "jsonl_sha256": "14a6520cccfc1697615fdedbf7e9ebff3e94ad3499cb98a3c18a89290f5e5442",
+  "out_dir": "/home/ovm-hms-bot/scratch_ranked_retention_aux_2026-09-12_0524",
+  "gates": {
+    "agreement_floor": 0.6498522281646728,
+    "mean_floor_s": 27.272444444443853,
+    "median_floor_s": 29.43333333333269,
+    "agreement_pass": false,
+    "final_mean_pass": true,
+    "final_median_pass": true
+  },
+  "snapshots": [
+    {"update": 0, "mean_s": 34.090555555554815, "median_s": 36.79166666666586, "agreement": 0.6998522281646729, "unreg_agreement": 0.6999},
+    {"update": 10, "mean_s": 39.94777777777674, "median_s": 44.2833333333321, "agreement": 0.6370936036109924, "unreg_agreement": 0.5286},
+    {"update": 25, "mean_s": 31.96611111111048, "median_s": 30.024999999999576, "agreement": 0.6223152875900269, "unreg_agreement": 0.4272},
+    {"update": 50, "mean_s": 36.938888888887995, "median_s": 40.74166666666564, "agreement": 0.6236945986747742, "unreg_agreement": 0.3151},
+    {"update": 100, "mean_s": 33.653888888888154, "median_s": 31.02499999999952, "agreement": 0.6144335269927979, "unreg_agreement": 0.2402},
+    {"update": 200, "mean_s": 35.35555555555471, "median_s": 38.024999999999125, "agreement": 0.614729106426239, "unreg_agreement": 0.1731}
+  ],
+  "locked_knobs": {
+    "lr": 0.0003,
+    "gamma": 0.99,
+    "lam": 0.95,
+    "clip": 0.2,
+    "entropy_coef": 0.02,
+    "updates": 200,
+    "episodes_per_update": 8,
+    "retention_objective": "phase2_ranked_multiseed.hybrid_loss"
+  }
+}

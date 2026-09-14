@@ -1,0 +1,72 @@
+Qrokkun26 Phase 0 — historical Player provenance (2026-09-11 HKT)
+================================================================
+狀態：Phase 0 資料凍結。未授權訓練／distill／改 PPO。NAS RO 只當來源，實驗用本機副本。
+
+本機 scratch clone
+------------------
+路徑：/storage/hermes/qrokkun26-player-recovery
+branch：player-recovery/phase-0
+GitHub：https://github.com/luzi82/qrokkun26 （code／history 以 GitHub 為準，不複製舊 .git）
+
+Artifacts 副本（gitignored，勿 commit *.pt）
+------------------------------------------
+來源：/mnt/minion/88_minion_ro/tmp/qrokkun26/runs/  （~16MB，33 項）
+副本：/storage/hermes/qrokkun26-player-recovery/artifacts/nas_tmp_runs/
+規則：唔好喺 NAS RO 上 load／eval／寫；先 rsync 再做。
+
+Anchor：player_gpu.pt（PlayerV1 BC+PPO vs scripted）
+--------------------------------------------------
+SHA-256：1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1
+  同檔：artifacts/nas_tmp_runs/player_gpu.pt
+        artifacts/nas_tmp_runs/baseline_v1/player_gpu.pt
+
+ckpt keys：state_dict, hidden=256, obs_dim=45, actions, eval_mean_s, update, algo
+params：80138（matches player_gpu_status.json）
+algo：bc+ppo
+hidden：256
+obs_dim：45  （qrokkun_env.obs：player4 + elapsed1 + 8 bullets × 5）
+actions（順序必須一致）：idle, n, ne, e, se, s, sw, w, nw
+eval_mean_s in ckpt：45.82833333333201  （best；update=1905）
+status（player_gpu_status.json）：
+  update=2131, best_eval_s=45.828s, last_eval_s=35.955s
+  flee_ref_s=17.95s, idle_ref_s=7.31s, bc_eval_s=18.041s
+  wall_hours=7.011, device=cuda, done=true
+
+Trainer contract（現行 GitHub qrokkun_env/train/player_v1.py 預設；stdout 未列 CLI override）
+  --hours 7, --rollouts 8, --max-steps 60*90 = **90s cap**（現行 both_v4 係 70s）
+  --gamma 0.99 --lam 0.95 --entropy 0.02 --lr 3e-4 --clip 0.2
+  --bc-steps 400 --bc-batch 64
+  train eval seeds：range(300, 330) 每 5 update；final eval range(300, 360)
+  opponent：scripted spawner（env.step）
+  obs：vectorize() 8-bullet MLP，**唔係** v4 64-bullet attention
+  載入：必須 PlayerV1 + qrokkun_env.obs.vectorize；**唔好** PlayerV4 loader
+
+Teacher-domain gaps（Phase 1 必須分開報）
+  - 歷史 cap **90s** vs 現行 **70s**
+  - 歷史 eval seeds 300–329／300–359 vs 現行 PAIRED_EVAL_SEEDS 3000–3029
+  - obs 8 bullets vs V4 64-bullet set
+  - 唔可把 distillation 失敗直接判成 V4 architecture 不行
+
+其他 checkpoint SHA-256（副本內）
+--------------------------------
+player_gpu.pt / baseline_v1/player_gpu.pt
+  1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1
+spawner_gpu.pt / baseline_v1/spawner_gpu.pt
+  551a8e22fdb68dfd6ebafe9e0d889e60a4d4807bb4bcec7c67667c0196abe969
+both_player.pt  ccc35cf8211304518a6d3f812f4e13d8867f7710a9cffa4a0ec1879baf0167eb
+both_spawner.pt be894ae182c3935925fee51c23cdb4fead396e7c088b3430e326750cef1aa0da
+both_v2_player.pt  42d2bf85dd87aefb5171c59882ecbfcd7e1fe456485e99e45dcae7e2d9fe2c21
+both_v2_spawner.pt 33b0eccd976c80629229ce310a9ddad367c82a1a9260c35d51697f99e46f382c
+both_v3_player.pt  345bda8fef1008fd849eb97f1865fb1b5c93cf8c2e4d99d43d7d70c40a866328
+both_v3_spawner.pt 75c4358f118d0ee756b2b1592dc88b163cfa78c1d79dca39091b4bc23b500fcd
+both_v4_player.pt  2a7b765ac81014aabe87442d38384bbbcc9bb15a86095989ae154c12bfc256cc
+both_v4_spawner.pt b10c718dd3207e7526384459ea2635392dd99ef1640df801a694ebc5955bf3a9
+
+Git 模組（現行 main 已有 versioned agents；舊 NAS 無 .git）
+  player_v1 抽出：41984a9 Extract versioned player/spawner agent modules before v4.
+  train split：889715b Split training loops into versioned qrokkun_env/train/ modules.
+
+下一步（未做）：Phase 1 用 **PlayerV1 loader** 喺本機副本重跑
+  (a) 舊 seeds 300–329、90s cap
+  (b) 現行 3000–3029、70s cap
+  兩邊都報 mean／median／std／idle／random／flee。唔 load 入 V4。

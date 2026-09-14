@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "checkpoints": {
+    "v1_teacher": {
+      "role": "v1_teacher",
+      "path": "/home/ovm-hms-bot/scratch_phase1/player_gpu.pt",
+      "sha256": "1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1",
+      "architecture": "player_v1",
+      "state_dict_sha256": "39a6bdfc83f827c2c59a6bb0a46b730506b8aff7966e0072b7441cd6cc5a0a2f"
+    },
+    "v5_bc_seed6": {
+      "role": "v5_bc_seed6",
+      "path": "/home/ovm-hms-bot/scratch_ranked_multiseed_full/seed6/seed6.pt",
+      "sha256": "844e029a74fce418e1d97041e66cf5422a25d8f500628d1ff5526640a7a36ad9",
+      "architecture": "player_ranked_topk",
+      "state_dict_sha256": "a6f95c4621015c15f0e857d1ca0b5a9f561c3e50462472c553d5db7f960064e7"
+    },
+    "v5_aux_u200": {
+      "role": "v5_aux_u200",
+      "path": "/home/ovm-hms-bot/scratch_ranked_retention_aux_corr_2026-09-13_0049/ppo_aux_update_200.pt",
+      "sha256": "7c8bc2a932a4f6bf4269fcfd92a4f4234305ec92b59b9c104ca8522d88c40080",
+      "architecture": "player_ranked_topk",
+      "state_dict_sha256": "5a0816851dfb810589ee79ead8198ca91e7dd5f36182ad23045b6ddb81321e45"
+    },
+    "learned_spawner": {
+      "role": "learned_spawner",
+      "path": "/home/ovm-hms-bot/scratch_frozen_spawner/both_v4_spawner.pt",
+      "sha256": "b10c718dd3207e7526384459ea2635392dd99ef1640df801a694ebc5955bf3a9",
+      "architecture": "spawner_v4",
+      "state_dict_sha256": "8e8aad42d9588f1c3bb3c481f83893a0570c6712dae0ae8bbbe7ad490d29466e"
+    }
+  },
+  "player_action_mode": [
+    false,
+    false
+  ],
+  "spawner_action_mode": [
+    true,
+    true
+  ],
+  "env_seeds": [
+    3000,
+    3001,
+    3002,
+    3003,
+    3004,
+    3005,
+    3006,
+    3007,
+    3008,
+    3009,
+    3010,
+    3011,
+    3012,
+    3013,
+    3014,
+    3015,
+    3016,
+    3017,
+    3018,
+    3019,
+    3020,
+    3021,
+    3022,
+    3023,
+    3024,
+    3025,
+    3026,
+    3027,
+    3028,
+    3029
+  ],
+  "spawner_seeds": [
+    3000,
+    3001,
+    3002,
+    3003,
+    3004,
+    3005,
+    3006,
+    3007,
+    3008,
+    3009,
+    3010,
+    3011,
+    3012,
+    3013,
+    3014,
+    3015,
+    3016,
+    3017,
+    3018,
+    3019,
+    3020,
+    3021,
+    3022,
+    3023,
+    3024,
+    3025,
+    3026,
+    3027,
+    3028,
+    3029
+  ],
+  "episode_cap_frames": 4200,
+  "comparison_pairs": [
+    [
+      "v1_teacher",
+      "v5_bc_seed6"
+    ],
+    [
+      "v5_bc_seed6",
+      "v5_aux_u200"
+    ]
+  ],
+  "metrics": [
+    "restricted_mean",
+    "median",
+    "std",
+    "min",
+    "max",
+    "censor_count",
+    "per_seed_values",
+    "paired_diff_mean",
+    "paired_diff_median",
+    "paired_diff_ci95",
+    "hit_rate",
+    "termination_reason",
+    "early_death_rate"
+  ],
+  "ci_method": "paired_t95",
+  "promotion": false,
+  "training": false,
+  "self_play": false,
+  "contract_id": "player_v5_frozen_spawner_eval_v1",
+  "preregistration_path": "docs/journal/1789263159_player_v5_frozen_spawner_eval_preregistration.txt"
+}

@@ -12,4 +12,6 @@ __all__ = [
     "spawner_v3",
     "player_v4",
     "spawner_v4",
+    "player_ranked_topk",
+    "player_checkpoints",
 ]

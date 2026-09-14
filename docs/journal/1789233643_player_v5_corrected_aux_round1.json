@@ -1,0 +1,34 @@
+{
+  "experiment": "player_v5_corrected_aux_round1",
+  "preregistration": "docs/journal/1789229713_player_v5_corrected_aux_round1_preregistration.txt",
+  "status": "completed",
+  "retention_pass": true,
+  "promotion": false,
+  "first_breaking_snapshot": null,
+  "git_commit": "7cb6d9d33cac0e8a462670cc9c1e35de8efffe05",
+  "dirty": false,
+  "alpha": 0.37622835110230535,
+  "target_retention_grad_ratio": 0.15,
+  "dataset_sha256": "2521bd12ae8b630e65f2645132bde4952fe8f60783ad0e87648ed2af688e558a",
+  "init_checkpoint_sha256": "844e029a74fce418e1d97041e66cf5422a25d8f500628d1ff5526640a7a36ad9",
+  "teacher_sha256": "1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1",
+  "report_json_sha256": "ebee72691dfdb1a5df37eeca809c91711fb9c757c71e8a31525c47d2901b6b2b",
+  "jsonl_sha256": "98d69d9917ca43896dbb1c7d298ad3f4db903c110ef30aa90f4331fe09b63683",
+  "out_dir": "/home/ovm-hms-bot/scratch_ranked_retention_aux_corr_2026-09-13_0049",
+  "gates": {
+    "agreement_floor": 0.6498522281646728,
+    "mean_floor_s": 27.272444444443853,
+    "median_floor_s": 29.43333333333269,
+    "agreement_pass": true,
+    "final_mean_pass": true,
+    "final_median_pass": true
+  },
+  "snapshots": [
+    {"update": 0, "mean_s": 34.090555555554815, "median_s": 36.79166666666586, "agreement": 0.6998522281646729},
+    {"update": 10, "mean_s": 32.62888888888816, "median_s": 32.97499999999941, "agreement": 0.6778817772865295},
+    {"update": 25, "mean_s": 37.205555555554625, "median_s": 39.82499999999902, "agreement": 0.6705911755561829},
+    {"update": 50, "mean_s": 33.546111111110406, "median_s": 35.04166666666596, "agreement": 0.6793103814125061},
+    {"update": 100, "mean_s": 34.55111111111037, "median_s": 33.69999999999937, "agreement": 0.686108410358429},
+    {"update": 200, "mean_s": 38.8966666666657, "median_s": 41.3916666666656, "agreement": 0.6941379308700562}
+  ]
+}

@@ -1,0 +1,148 @@
+PlayerV5 corrected BC-retention auxiliary PPO round 1 — results
+================================================================
+
+Status
+------
+
+completed. Pre-registered retention gate: PASS. promotion: false.
+No checkpoint is promoted. This is not round 2 (alpha was not increased as a
+free knob; it was derived once from TARGET_RETENTION_GRAD_RATIO=0.15).
+
+Preregistration: docs/journal/1789229713_player_v5_corrected_aux_round1_preregistration.txt
+
+Hypothesis (preregistered, falsifiable)
+---------------------------------------
+
+From seed-6 BC, after 200 updates with the locked PPO contract plus frozen
+alpha from 0.15 matched-minibatch calibration: final mean and median each
+>= 80% of update 0, and final held agreement drop <= 0.05. FAIL if any
+final condition fails, agreement is missing, or initial gate fails.
+
+Verdict: PASS. first_breaking_snapshot: null.
+
+Execution
+---------
+
+- Host: GB10B (NVIDIA GB10), device cuda, Python 3.12.3, PyTorch 2.11.0+cu128, CUDA 12.8
+- Checkout: clean HEAD 7cb6d9d33cac0e8a462670cc9c1e35de8efffe05 (dirty=false)
+- Harness source ancestor: bd367d9d9dea76472473fce2fadb6fcd381baf9c
+  (prereg full SHA bd367d9190c57… is not this object; recorded actual finalize commit)
+- Pre-launch suite on this checkout after copying teacher fixture locally:
+  351 passed, 2 warnings (historical expected)
+- Command (no --quick; local paths only):
+
+  PYTHONPATH=. python -m tools.phase3_ranked_ppo_retention_aux \
+    --init-checkpoint /home/ovm-hms-bot/scratch_ranked_multiseed_full/seed6/seed6.pt \
+    --teacher /home/ovm-hms-bot/scratch_phase1/player_gpu.pt \
+    --out-dir /home/ovm-hms-bot/scratch_ranked_retention_aux_corr_2026-09-13_0049 \
+    --device cuda
+
+- Wall clock HKT: dir 00:49 / report 01:19 (~30 min)
+- PID 938119
+
+Provenance (hashes match prereg)
+--------------------------------
+
+- Teacher file SHA-256 1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1
+- Init seed-6 file SHA-256 844e029a74fce418e1d97041e66cf5422a25d8f500628d1ff5526640a7a36ad9
+- Init state-dict SHA-256 a6f95c4621015c15f0e857d1ca0b5a9f561c3e50462472c553d5db7f960064e7
+- Dataset identity 2521bd12ae8b630e65f2645132bde4952fe8f60783ad0e87648ed2af688e558a
+  240 ep / 211 train 146688 frames / 29 held 20300 frames
+- Architecture player_ranked_topk; actions idle n ne e se s sw w nw
+- Initial checkpoint experimental=false production_compatible=true (BC start)
+
+Alpha (frozen)
+--------------
+
+- target_ratio 0.15
+- 8 matched pairs, minibatch 512, n_samples = n_retention_samples = 4096
+- mean ||g_ppo|| 0.86913; mean ||g_ret|| 0.34652
+- alpha = 0.37622835110230535 (frozen; jsonl update 1 and 200 identical)
+- calibration cosine -0.0129
+- rollout seed window 50000-50007 reused as update 1 (jsonl update 1 n_samples=14690)
+
+Gates
+-----
+
+Initial gate: PASS (mean/median floors 25 s). Update 0 eval:
+mean 34.0906 s, median 36.7917 s (matches registered baseline).
+Held agreement 0.6999.
+
+Retention floors from update 0: mean 27.2724 s, median 29.4333 s,
+agreement 0.6499.
+
+Harness retention object:
+agreement_pass true, final_mean_pass true, final_median_pass true,
+retention_pass true, promotion false, reason empty.
+
+Snapshots (P×scripted, seeds 3000-3029, 70 s cap, 0 censored)
+-------------------------------------------------------------
+
+Update | mean s | median s | agreement | KL(t->s) | grad_ratio | cosine | measurement
+0      | 34.0906 | 36.7917 | 0.6999 | 0.1772 | 0.1439 | +0.144 | initial_on_policy
+10     | 32.6289 | 32.9750 | 0.6779 | 0.1719 | 0.2038 | -0.004 | pre_update_on_policy
+25     | 37.2056 | 39.8250 | 0.6706 | 0.1780 | 0.4402 | +0.041 | pre_update_on_policy
+50     | 33.5461 | 35.0417 | 0.6793 | 0.1800 | 0.1519 | -0.127 | pre_update_on_policy
+100    | 34.5511 | 33.7000 | 0.6861 | 0.1842 | 0.1850 | +0.093 | pre_update_on_policy
+200    | 38.8967 | 41.3917 | 0.6941 | 0.1843 | 0.1808 | +0.073 | pre_update_on_policy
+
+Alignment n_samples/n_retention_samples = 512/512 at every snapshot.
+recomputed_post_update = false.
+
+Final agreement drop 0.00571 (floor 0.05). Final mean 38.90 s / median 41.39 s.
+
+Paired vs update 0 (same 30 seeds, approx 95% t, df=29)
+------------------------------------------------------
+
+- u10:  -1.46 s, CI [-8.68, 5.76], 11 improve / 19 worsen
+- u25:  +3.12 s, CI [-5.13, 11.36]
+- u50:  -0.54 s, CI [-8.64, 7.55]
+- u100: +0.46 s, CI [-8.01, 8.93]
+- u200: +4.81 s, CI [-3.34, 12.96], 17 / 12 / 1
+
+Survival point estimates at update 200 are higher than BC start, but the
+paired CI includes 0. Gate success is retention of agreement and 80%
+survival floors, not a claim of significant survival gain.
+
+Historical unregularized scripted PPO (1789155208, different harness vintage):
+update 10/100/200 agreement 0.5286 / 0.2402 / 0.1731; update 200 mean 24.54 s.
+That curve is background only, not a same-commit paired control.
+
+Accounting
+----------
+
+- 200 updates, 1600 on-policy episodes, 3,461,784 env frames, 27,452 optimizer steps
+- jsonl update 1: approx_kl 0.0143, clipfrac 0.168, entropy 1.599, EV -0.367
+- jsonl update 200: approx_kl 0.0118, clipfrac 0.142, entropy 1.607, EV 0.718,
+  scripted_survival_mean 33.69 s
+- Locked knobs: lr 3e-4, gamma 0.99, lam 0.95, clip 0.2, entropy 0.02,
+  value 0.5, 4 epochs, minibatch 512, hybrid_loss phase2 0.5/0.5 T=1
+
+Artifact SHA-256 (GB10 out-dir)
+-------------------------------
+
+- report.json ebee72691dfdb1a5df37eeca809c91711fb9c757c71e8a31525c47d2901b6b2b
+- ppo_aux_updates.jsonl 98d69d9917ca43896dbb1c7d298ad3f4db903c110ef30aa90f4331fe09b63683
+- update 0   7e6f391c7ecd2139c52e65002a1a56286ceae2ad731bd4053398a3253f66f57a
+  state-dict a6f95c4621015c15f0e857d1ca0b5a9f561c3e50462472c553d5db7f960064e7
+- update 10  02837963cde041824fb06cc9256900e81924493d8a2a2357eab3861443ad3d99
+  state-dict b669dcc61b109d41dd3ae0694187c3e7d3f2beee9ab1cf192fd7f722c397c348
+- update 25  ddb895e75630bb413ca127cff053b96c258fe9a0d993b3df44a999484c5759d9
+  state-dict d22ec4906b25ca9ad520a1dc00ab324dc4b84f76616e162893fdc2d7e69cc856
+- update 50  da2f3d4f96cd101c9a4b33a18b6a9751b61c23574f1c20fb592446becd907aff
+  state-dict cfdd63d4bd50a4910c4b81d6c205c89691ad32e628dc3d7221130ca4e4932b65
+- update 100 b13fca714e4fcdb42e640190e9c0c93c8a90eb24005ac8483f291472217d7834
+  state-dict 36ae318052b4ac113a1ecf93265f956c90774d35a6b2ef6108798358cedc333d
+- update 200 7c8bc2a932a4f6bf4269fcfd92a4f4234305ec92b59b9c104ca8522d88c40080
+  state-dict 5a0816851dfb810589ee79ead8198ca91e7dd5f36182ad23045b6ddb81321e45
+- final      46b5c83110e3b16205127460acac467a36ce27aca7fc3d8d1c22f82d73c42e00
+
+Checkpoints remain experimental / non-production. Do not load as production BC.
+
+Decision
+--------
+
+1. Record corrected round 1 as PASS on the pre-registered retention gate.
+2. Promote nothing.
+3. Next comparison (entropy, gamma/lambda, seeds, larger alpha, Spawner) requires
+   a new preregistration with one explicit change.

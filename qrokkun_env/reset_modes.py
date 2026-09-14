@@ -1,5 +1,5 @@
 """v4.7 reset-mode plumbing: thin near-center random-Player reset + explicit
-training-mode split (mechanism only — see docs/suggestions/1788798436_grokbot.txt
+training-mode split (mechanism only — see docs/journal/1788798436_grokbot.txt
 v4.7 section). Enabling ``random_fraction > 0`` as a new training baseline is
 v4.8 and out of scope here; this module only provides the mechanism, default off.
 
