@@ -1,0 +1,339 @@
+PlayerV5 GB10 seed-4/5 queue — preregistration
+=================================================
+
+Status
+------
+
+planned/not started.  This is queue preparation only: no training, evaluation,
+rendering, checkpoint selection, promotion, or resume has run.  The only
+actions that did occur are the read-only integrity verification and the single
+learned-Spawner staging copy recorded under "Pre-execution artifact
+verification" below.  This document records no review acceptance.
+
+Scope, code identity, and execution order
+------------------------------------------
+
+Experiment code is frozen at parent commit
+`6379f7af670b5b39998c487598117e59fc806a3a`.  A later preregistration commit
+may be the execution HEAD solely to carry this documentation; it must not
+change experiment code.  Before any run, record both complete SHAs, verify the
+checkout is clean, and fail closed unless the parent/code identity is exact.
+
+The fixed queue order is:
+
+1. Frozen-S formal eval.
+2. seed4 auxiliary, update 200.
+3. seed4 unregularized, update 200.
+4. seed5 auxiliary, update 200.
+5. seed5 unregularized, update 200.
+
+The owner-updated absolute cutoff is 2026-09-14 23:00 HKT.  It applies only to
+starting a new queued run: no queued run may be started at or after that
+instant.  It never truncates, interrupts, or shortens an already active run,
+which runs to its natural completion or failure.  This absolute 2026-09-14
+23:00 HKT cutoff supersedes the earlier 19:30 HKT cutoff, which is stale and
+no longer in force.  A failed, missing, mismatched, or incomplete run stops the
+queue; do not skip ahead, resume, alter settings, or substitute an artifact.
+
+Inputs and local-write policy
+-----------------------------
+
+All active work writes only under
+`/home/ovm-hms-bot/scratch_player_v5_seed45_queue_2026-09-14`, with fixed
+subdirectories `frozen_s`, `seed4_aux`, `seed4_unreg`, `seed5_aux`,
+`seed5_unreg`, and `videos`.  Completed artifacts may be copied only (after
+hash verification) to
+`/mnt/minion/88_minion_rw/tmp/qrokkun26/player_v5_seed45_queue_2026-09-14`.
+No active training/eval/render writes to that destination, NAS, or another
+shared location.
+
+Preflight must compute and record both file and strict-loader state-dict
+SHA-256 values before each consuming run, and fail closed on any mismatch:
+
+- PlayerV1 teacher:
+  `/home/ovm-hms-bot/scratch_phase1/player_gpu.pt`; file
+  `1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1`;
+  state-dict
+  `39a6bdfc83f827c2c59a6bb0a46b730506b8aff7966e0072b7441cd6cc5a0a2f`.
+- seed4 PlayerV5 BC start:
+  `/home/ovm-hms-bot/scratch_ranked_multiseed_full/seed4/seed4.pt`; file
+  `441ffa12c3bbb417d284e6e837f47a6d5366ba6cf688914dfc26b457c7516fb5`;
+  state-dict
+  `de642fbab1849ef802fe707a456c97171b625e6e146089f6031b75f1e5bdb6ef`.
+- seed5 PlayerV5 BC start:
+  `/home/ovm-hms-bot/scratch_ranked_multiseed_full/seed5/seed5.pt`; file
+  `decc50ba2f781f243814bb0c984499bc6bf3ce66f5bcc9cbf22ae1acd3fd545a`;
+  state-dict
+  `d88c96213f9064658760d598a563d43df5a847a228a313837f00982bc3151b0f`.
+- canonical teacher dataset identity:
+  `2521bd12ae8b630e65f2645132bde4952fe8f60783ad0e87648ed2af688e558a`.
+  This value is NOT a preflight check.  The canonical teacher dataset is not a
+  stored file; it is deterministically recollected inside each run from the
+  pinned teacher checkpoint and the locked sampling settings, and the existing
+  trainers only record `report["dataset"]["hash"]` — they do not compare it
+  against any expected value before optimizer steps.  What is pinned before a
+  run is the teacher file/state identity above; the dataset identity is
+  validated after the run, per "Dataset identity validation (post-run)".
+
+Preflight identity commands
+---------------------------
+
+The commands below are the required way to produce the two identities for each
+input.  They must be re-run at the execution HEAD, on the execution host,
+immediately before each consuming run — the values recorded in this document
+are evidence from the verification described below, not a substitute for
+re-verification.
+
+File SHA-256 for every input:
+
+```bash
+sha256sum /home/ovm-hms-bot/scratch_phase1/player_gpu.pt \
+  /home/ovm-hms-bot/scratch_ranked_multiseed_full/seed4/seed4.pt \
+  /home/ovm-hms-bot/scratch_ranked_multiseed_full/seed5/seed5.pt \
+  /home/ovm-hms-bot/scratch_ranked_multiseed_full/seed6/seed6.pt \
+  /home/ovm-hms-bot/scratch_ranked_retention_aux_corr_2026-09-13_0049/ppo_aux_update_200.pt \
+  /home/ovm-hms-bot/scratch_frozen_spawner/both_v4_spawner.pt
+```
+
+State-dict SHA-256 via the existing strict loaders only, each over the
+loader-returned module `state_dict()` serialized deterministically:
+
+- PlayerV1 teacher:
+  `qrokkun_env.frozen_spawner_eval_cli.load_player_v1_checkpoint`.
+- ranked PlayerV5 checkpoints (seed4, seed5, seed6, aux u200):
+  `qrokkun_env.agents.player_checkpoints.load_ranked_top_k_checkpoint`, which
+  is strict on the `player_ranked_topk` architecture; also record the returned
+  metadata (`seed`, `architecture_version`, and, for the aux checkpoint, its
+  experimental flags).
+- learned Spawner:
+  `qrokkun_env.frozen_spawner_eval_cli.load_frozen_spawner_v4_checkpoint`.
+
+Any mismatch against the pinned values, or any loader/metadata rejection, is
+fail closed: do not start or continue the queue.
+
+Pre-execution artifact verification (evidence)
+-----------------------------------------------
+
+This section records what was actually observed, not an inference from git
+history.  On 2026-09-14 HKT, a trusted operator performed a read-only SSH
+session to host GB10B and inspected the exact local files listed below,
+computing file SHA-256 values and strict-loader state-dict SHA-256 values.
+That session ran no episode, no evaluation, no training, and no demo/render;
+it performed integrity checking plus the single staging copy noted for the
+learned Spawner.  This is why the execution-host pins in this document and in
+the locked manifest are reviewable rather than assumed.
+
+Observed identities on GB10B:
+
+- PlayerV1 teacher `/home/ovm-hms-bot/scratch_phase1/player_gpu.pt`; file
+  `1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1`;
+  state-dict
+  `39a6bdfc83f827c2c59a6bb0a46b730506b8aff7966e0072b7441cd6cc5a0a2f`.
+- seed4 `/home/ovm-hms-bot/scratch_ranked_multiseed_full/seed4/seed4.pt`; file
+  `441ffa12c3bbb417d284e6e837f47a6d5366ba6cf688914dfc26b457c7516fb5`;
+  state-dict
+  `de642fbab1849ef802fe707a456c97171b625e6e146089f6031b75f1e5bdb6ef`;
+  metadata `seed=4`, `architecture_version=1`.
+- seed5 `/home/ovm-hms-bot/scratch_ranked_multiseed_full/seed5/seed5.pt`; file
+  `decc50ba2f781f243814bb0c984499bc6bf3ce66f5bcc9cbf22ae1acd3fd545a`;
+  state-dict
+  `d88c96213f9064658760d598a563d43df5a847a228a313837f00982bc3151b0f`;
+  metadata `seed=5`, `architecture_version=1`.
+- seed6 `/home/ovm-hms-bot/scratch_ranked_multiseed_full/seed6/seed6.pt`; file
+  `844e029a74fce418e1d97041e66cf5422a25d8f500628d1ff5526640a7a36ad9`;
+  state-dict
+  `a6f95c4621015c15f0e857d1ca0b5a9f561c3e50462472c553d5db7f960064e7`;
+  metadata `seed=6`.
+- auxiliary update-200 checkpoint, at the exact manifest path
+  `/home/ovm-hms-bot/scratch_ranked_retention_aux_corr_2026-09-13_0049/ppo_aux_update_200.pt`;
+  file `7c8bc2a932a4f6bf4269fcfd92a4f4234305ec92b59b9c104ca8522d88c40080`;
+  state-dict
+  `5a0816851dfb810589ee79ead8198ca91e7dd5f36182ad23045b6ddb81321e45`;
+  metadata `experimental=true`, `production_compatible=false`, `update=200`,
+  `parent=seed6` state
+  `a6f95c4621015c15f0e857d1ca0b5a9f561c3e50462472c553d5db7f960064e7`.
+- learned Spawner: copied from the read-only NAS source
+  `/mnt/minion/88_minion_ro/tmp/qrokkun26/runs/both_v4_spawner.pt` to the GB10
+  local path `/home/ovm-hms-bot/scratch_frozen_spawner/both_v4_spawner.pt`.
+  Source and destination both hash to file
+  `b10c718dd3207e7526384459ea2635392dd99ef1640df801a694ebc5955bf3a9`;
+  state-dict
+  `8e8aad42d9588f1c3bb3c481f83893a0570c6712dae0ae8bbbe7ad490d29466e`.
+  The copy read only from `88_minion_ro` and wrote only to GB10 local scratch,
+  consistent with the NAS copy policy in this document.
+
+This verification is integrity-only.  It selected, promoted, resumed, trained,
+or evaluated nothing, and it does not discharge the per-run preflight, which
+must be repeated at execution HEAD before each consumer.
+
+Frozen-S formal evaluation
+--------------------------
+
+The locked manifest is
+`docs/journal/1789362887_frozen_spawner_locked_manifest.json`.  It is the
+formal `player_v5_frozen_spawner_eval_v1` contract: Player deterministic
+(`det_det`), learned Spawner stochastic (`stoch_stoch`), CRN environment and
+Spawner seeds 3000--3029, 4,200-frame cap, and ordered pairs
+`v1_teacher -> v5_bc_seed6`, then `v5_bc_seed6 -> v5_aux_u200`.  Metrics and
+the preregistration-path identity are exactly those locked by the manifest
+builder; no quick or alternate formal mode exists.
+
+Before execution, JSON-load and validate this exact local manifest only via
+`qrokkun_env.frozen_spawner_eval_cli.load_locked_manifest`; then execute the
+existing execution CLI, which rechecks all file/state identities before an
+episode.  Its required inputs are the manifest's execution-host paths and
+pins: teacher file/state `1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1` /
+`39a6bdfc83f827c2c59a6bb0a46b730506b8aff7966e0072b7441cd6cc5a0a2f`;
+seed6 BC file/state `844e029a74fce418e1d97041e66cf5422a25d8f500628d1ff5526640a7a36ad9` /
+`a6f95c4621015c15f0e857d1ca0b5a9f561c3e50462472c553d5db7f960064e7`;
+aux-u200 file/state `7c8bc2a932a4f6bf4269fcfd92a4f4234305ec92b59b9c104ca8522d88c40080` /
+`5a0816851dfb810589ee79ead8198ca91e7dd5f36182ad23045b6ddb81321e45`;
+and learned-Spawner file/state `b10c718dd3207e7526384459ea2635392dd99ef1640df801a694ebc5955bf3a9` /
+`8e8aad42d9588f1c3bb3c481f83893a0570c6712dae0ae8bbbe7ad490d29466e`.
+
+Seed-4/5 matched training arms
+------------------------------
+
+For each seed, auxiliary and control use the same named BC start, teacher,
+canonical dataset identity, scripted Spawner, and existing locked full-mode
+defaults from `tools.phase3_ranked_ppo_retention[_aux]`: 200 updates, 8
+episodes/update, 4,200 maximum episode steps for rollout/eval/data; canonical
+teacher dataset sampling is capped at `data_frames_cap=700` sampled frames per
+episode; deterministic eval seeds 3000--3029, snapshots 0/10/25/50/100/200,
+PPO seed 0 and rollout window 50000--51599.  No changed hyperparameters, quick
+mode, promotion, checkpoint selection, or resume is permitted.
+
+The auxiliary arm alone retains the existing single target
+`TARGET_RETENTION_GRAD_RATIO=0.15`; alpha is recalibrated once per run before
+optimizer steps using the tool's fixed calibration procedure, then frozen for
+that run.  It is not copied from seed6 and never retuned from results.
+
+Dataset identity validation (post-run)
+----------------------------------------
+
+After an arm finishes, read `report["dataset"]["hash"]` from that arm's report
+and require it to equal
+`2521bd12ae8b630e65f2645132bde4952fe8f60783ad0e87648ed2af688e558a`.  If it
+differs, that arm is invalid — it must not be accepted, copied, rendered, or
+reported as a result — and the queue stops; the next queue item must not be
+launched.  This is disclosed honestly as a post-run/report validation: it
+detects a wrong dataset only after the run has already performed its optimizer
+steps.  It is not pre-update prevention, and no stronger enforcement is claimed
+or implied.  Changing the trainer to compare the hash before optimizer steps is
+out of scope here and must not be done as part of this queue.
+
+Commands (execution only; not run for this preparation)
+---------------------------------------------------------
+
+Run from the verified repository checkout.  The commands below are complete and
+literal: there are no placeholders and no runtime substitution.  Do not append,
+remove, or reorder options.
+
+Frozen-S formal eval:
+
+```bash
+PYTHONPATH=. python -m qrokkun_env.frozen_spawner_eval_cli \
+  --manifest docs/journal/1789362887_frozen_spawner_locked_manifest.json \
+  --out-report /home/ovm-hms-bot/scratch_player_v5_seed45_queue_2026-09-14/frozen_s/report.json \
+  --device cuda
+```
+
+seed4 auxiliary:
+
+```bash
+PYTHONPATH=. python -m tools.phase3_ranked_ppo_retention_aux \
+  --init-checkpoint /home/ovm-hms-bot/scratch_ranked_multiseed_full/seed4/seed4.pt \
+  --teacher /home/ovm-hms-bot/scratch_phase1/player_gpu.pt \
+  --out-dir /home/ovm-hms-bot/scratch_player_v5_seed45_queue_2026-09-14/seed4_aux \
+  --device cuda
+```
+
+seed4 unregularized:
+
+```bash
+PYTHONPATH=. python -m tools.phase3_ranked_ppo_retention \
+  --init-checkpoint /home/ovm-hms-bot/scratch_ranked_multiseed_full/seed4/seed4.pt \
+  --teacher /home/ovm-hms-bot/scratch_phase1/player_gpu.pt \
+  --out-dir /home/ovm-hms-bot/scratch_player_v5_seed45_queue_2026-09-14/seed4_unreg \
+  --device cuda
+```
+
+seed5 auxiliary:
+
+```bash
+PYTHONPATH=. python -m tools.phase3_ranked_ppo_retention_aux \
+  --init-checkpoint /home/ovm-hms-bot/scratch_ranked_multiseed_full/seed5/seed5.pt \
+  --teacher /home/ovm-hms-bot/scratch_phase1/player_gpu.pt \
+  --out-dir /home/ovm-hms-bot/scratch_player_v5_seed45_queue_2026-09-14/seed5_aux \
+  --device cuda
+```
+
+seed5 unregularized:
+
+```bash
+PYTHONPATH=. python -m tools.phase3_ranked_ppo_retention \
+  --init-checkpoint /home/ovm-hms-bot/scratch_ranked_multiseed_full/seed5/seed5.pt \
+  --teacher /home/ovm-hms-bot/scratch_phase1/player_gpu.pt \
+  --out-dir /home/ovm-hms-bot/scratch_player_v5_seed45_queue_2026-09-14/seed5_unreg \
+  --device cuda
+```
+
+The seeds 4 and 5 are fixed by queue position; they are not search parameters,
+and no other seed, path, or option may be used.
+
+Post-run diagnostic media and required accounting
+-------------------------------------------------
+
+Only after each arm completes and its preselected update-200 checkpoint passes
+identity checks (`ppo_aux_update_200.pt` for an auxiliary arm and
+`ppo_update_200.pt` for an unregularized arm), create one diagnostic-only
+video using the fixed renderer:
+scripted Spawner, deterministic Player, seed 3000, cap 4200, and its fixed
+renderer settings.  Never render a selected/best/resumed checkpoint or use a
+video for promotion.
+
+```bash
+PYTHONPATH=. python -m qrokkun_env.render_player_v5_demo \
+  --ckpt /home/ovm-hms-bot/scratch_player_v5_seed45_queue_2026-09-14/seed4_aux/ppo_aux_update_200.pt \
+  --out /home/ovm-hms-bot/scratch_player_v5_seed45_queue_2026-09-14/videos/seed4_aux_u200.mp4 \
+  --device cuda
+
+PYTHONPATH=. python -m qrokkun_env.render_player_v5_demo \
+  --ckpt /home/ovm-hms-bot/scratch_player_v5_seed45_queue_2026-09-14/seed4_unreg/ppo_update_200.pt \
+  --out /home/ovm-hms-bot/scratch_player_v5_seed45_queue_2026-09-14/videos/seed4_unreg_u200.mp4 \
+  --device cuda
+
+PYTHONPATH=. python -m qrokkun_env.render_player_v5_demo \
+  --ckpt /home/ovm-hms-bot/scratch_player_v5_seed45_queue_2026-09-14/seed5_aux/ppo_aux_update_200.pt \
+  --out /home/ovm-hms-bot/scratch_player_v5_seed45_queue_2026-09-14/videos/seed5_aux_u200.mp4 \
+  --device cuda
+
+PYTHONPATH=. python -m qrokkun_env.render_player_v5_demo \
+  --ckpt /home/ovm-hms-bot/scratch_player_v5_seed45_queue_2026-09-14/seed5_unreg/ppo_update_200.pt \
+  --out /home/ovm-hms-bot/scratch_player_v5_seed45_queue_2026-09-14/videos/seed5_unreg_u200.mp4 \
+  --device cuda
+```
+
+Required per-run reports/accounting: command, clean status, execution HEAD and
+code-parent SHA, host/device/runtime, start/end times, all input/output paths,
+file and state-dict hashes, dataset identity, full effective knobs, alpha
+calibration (aux), seeds, episode/frame/optimizer-step totals, censoring,
+per-snapshot evaluations and gates, failure reason or completion status, and
+promotion=false.  Include formal eval manifest/report and per-seed restricted
+metrics/paired statistics.  Before any copy, hash every completed report,
+JSONL, checkpoint, video, and video sidecar locally; copy only the verified
+set and rehash the destination.  Any absent report, hash mismatch, nonfinite
+value, schema/architecture mismatch, missing snapshot, failed initial gate,
+or unauthorized write is fail closed.
+
+Prohibitions
+------------
+
+No episodes, evaluation, training, demo/render, git staging, commit, or push
+occurred for this document.  The only SSH and NAS activity that occurred is the
+read-only integrity verification and the single read-only-NAS-to-GB10-local
+learned-Spawner copy recorded under "Pre-execution artifact verification"; no
+other SSH session and no NAS write occurred.  Future execution must not use
+quick mode, modify code or tests, alter PPO/data/Spawner settings,
+select/promote a checkpoint, resume a partial run, or use later results to
+revise this queue.
