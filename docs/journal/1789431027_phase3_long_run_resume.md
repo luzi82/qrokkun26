@@ -44,17 +44,23 @@ resumable-run schema.
 Resume retains every experiment-defining identity: tool/arm, checkpoint and
 teacher identities/hashes, effective seed, locked PPO/retention knobs and
 objective, no-promotion guarantee, and all recovery/model/optimizer state.
-The sole resume-time exception is an effective stop-budget extension. Both
-values must be at least the currently authorized values and at least one must
-increase. Lower targets or earlier deadlines fail closed. Resuming with the
-already authorized pair is allowed and creates no duplicate audit record.
+The sole resume-time exception is an effective stop-budget revision. A
+requested completed-update target is accepted when it is an integer at least
+the actual completed update, including when it is below the previously
+authorized target. A requested HKT deadline is accepted when it is strictly
+after the current HKT time, including when it is earlier than the previously
+authorized deadline. Targets below completed, deadlines at or before now, and
+malformed values fail closed. Resuming with the already authorized pair is
+allowed and creates no duplicate audit record. Control and auxiliary resume
+loops consume the revised authorized budget; a target equal to completed
+performs no further update.
 
-`run.json` is never rewritten. Each approved extension appends and fsyncs one
+`run.json` is never rewritten. Each approved revision appends and fsyncs one
 `stop_budget_amendments.jsonl` record with the explicit
-`stop_budget_extended` event, prior and new effective values, HKT timestamp,
-and current runtime provenance. Resume resolves authority from the original
-run contract plus this strictly contiguous, monotonic chain; malformed,
-reordered, or tampered records fail closed.
+`stop_budget_extended` event, prior and new effective values, completed
+update, HKT timestamp, and current runtime provenance. Resume resolves
+authority from the original run contract plus this strictly contiguous chain;
+malformed, reordered, or non-contiguous records fail closed.
 
 Resume accepts only an explicit exact integer `schema_version: 1`. Missing,
 old, unsupported, boolean, and floating-point versions fail closed before

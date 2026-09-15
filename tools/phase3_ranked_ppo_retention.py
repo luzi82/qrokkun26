@@ -57,6 +57,10 @@ FAR_FUTURE_END_TIME = dt.datetime(2099, 12, 31, 23, 59, tzinfo=_HKT)
 CURRENT_RUN_SCHEMA_VERSION = 1
 
 
+def _now_hkt() -> dt.datetime:
+    return dt.datetime.now(_HKT)
+
+
 class RunStateError(RuntimeError):
     """A resumable run is absent, corrupt, or incompatible."""
 
@@ -249,6 +253,12 @@ def _require_current_schema_version(contract: dict[str, Any]) -> None:
         raise RunStateError("run.json schema_version is unsupported")
 
 
+def _recovery_completed_update(run_dir: Path) -> int:
+    """Read the recorded completed update needed for stop-budget comparison."""
+    state = torch.load(run_dir / "recovery.pt", map_location=torch.device("cpu"), weights_only=False)
+    return state["completed_update"]
+
+
 def _read_authorized_stop_budget(run_dir: Path, original: dict[str, Any]) -> dict[str, Any]:
     """Resolve original budget plus a strictly contiguous amendment chain."""
     authorized = _stop_budget(original.get("stop_args"))
@@ -261,9 +271,12 @@ def _read_authorized_stop_budget(run_dir: Path, original: dict[str, Any]) -> dic
         for number, line in enumerate(lines, start=1):
             row = json.loads(line)
             if not isinstance(row, dict) or set(row) != {
-                "event", "prior", "new", "at_hkt", "runtime_provenance"
+                "event", "prior", "new", "at_hkt", "runtime_provenance", "completed_update",
             } or row["event"] != "stop_budget_extended" or not isinstance(row["runtime_provenance"], dict):
                 raise ValueError(f"bad row {number}")
+            completed = row["completed_update"]
+            if isinstance(completed, bool) or not isinstance(completed, int) or completed < 0:
+                raise ValueError(f"bad completed_update {number}")
             at_hkt = row["at_hkt"]
             if not isinstance(at_hkt, str):
                 raise ValueError(f"bad timestamp {number}")
@@ -273,10 +286,8 @@ def _read_authorized_stop_budget(run_dir: Path, original: dict[str, Any]) -> dic
                 raise ValueError(f"out-of-order timestamp {number}")
             prior = _stop_budget(row["prior"])
             new = _stop_budget(row["new"])
-            if prior != authorized or new["effective_max_updates"] < prior["effective_max_updates"] \
-                    or new["effective_end_time_hkt"] < prior["effective_end_time_hkt"] \
-                    or new == prior:
-                raise ValueError(f"non-monotonic row {number}")
+            if prior != authorized or new == prior:
+                raise ValueError(f"non-contiguous row {number}")
             authorized = new
             previous_at = recorded_at
     except (OSError, json.JSONDecodeError, TypeError, ValueError, RunStateError) as exc:
@@ -285,13 +296,15 @@ def _read_authorized_stop_budget(run_dir: Path, original: dict[str, Any]) -> dic
 
 
 def _append_stop_budget_amendment(
-    run_dir: Path, *, prior: dict[str, Any], new: dict[str, Any], runtime_provenance: Any,
+    run_dir: Path, *, prior: dict[str, Any], new: dict[str, Any],
+    completed_update: int, runtime_provenance: Any,
 ) -> None:
     if not isinstance(runtime_provenance, dict):
         raise RunStateError("resume runtime provenance is malformed")
     row = {
         "event": "stop_budget_extended", "prior": prior, "new": new,
-        "at_hkt": dt.datetime.now(_HKT).isoformat(), "runtime_provenance": runtime_provenance,
+        "completed_update": completed_update,
+        "at_hkt": _now_hkt().isoformat(), "runtime_provenance": runtime_provenance,
     }
     path = run_dir / _STOP_AMENDMENTS
     with path.open("a") as audit:
@@ -300,8 +313,8 @@ def _append_stop_budget_amendment(
         os.fsync(audit.fileno())
 
 
-def create_or_validate_run_contract(run_dir: Path, contract: dict[str, Any], *, resume: bool) -> None:
-    """Lock all experiment state; append audited monotonic stop extensions."""
+def create_or_validate_run_contract(run_dir: Path, contract: dict[str, Any], *, resume: bool) -> dict[str, Any] | None:
+    """Lock experiment identity; append audited stop-budget revisions."""
     path = run_dir / "run.json"
     if resume:
         if not path.is_file():
@@ -317,15 +330,19 @@ def create_or_validate_run_contract(run_dir: Path, contract: dict[str, Any], *, 
             raise RunStateError("resume immutable run contract mismatch")
         authorized = _read_authorized_stop_budget(run_dir, existing)
         requested = _stop_budget(contract.get("stop_args"))
-        if requested["effective_max_updates"] < authorized["effective_max_updates"] \
-                or requested["effective_end_time_hkt"] < authorized["effective_end_time_hkt"]:
-            raise RunStateError("resume stop budget decreases are forbidden")
+        requested_end = dt.datetime.fromisoformat(requested["effective_end_time_hkt"])
+        if requested_end <= _now_hkt():
+            raise RunStateError("resume stop budget deadline is not in the future")
         if requested != authorized:
+            completed = _recovery_completed_update(run_dir)
+            if requested["effective_max_updates"] < completed:
+                raise RunStateError("resume stop budget target is below completed update")
             _append_stop_budget_amendment(
-                run_dir, prior=authorized, new=requested,
+                run_dir, prior=authorized, new=requested, completed_update=completed,
                 runtime_provenance=contract.get("provenance", {}),
             )
-        return
+            authorized = requested
+        return authorized
     if path.exists():
         raise RunStateError("run directory already has run.json; use --resume")
     if not isinstance(contract, dict):
@@ -1391,7 +1408,10 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
     # initial gate, which evaluates the environment, while retaining the
     # historical new-run gate-before-run-creation behaviour.
     if getattr(args, "resume", False):
-        create_or_validate_run_contract(out_dir, contract, resume=True)
+        authorized = create_or_validate_run_contract(out_dir, contract, resume=True)
+        args.effective_max_updates = authorized["effective_max_updates"]
+        args.effective_end_time = dt.datetime.fromisoformat(authorized["effective_end_time_hkt"])
+        effective_max_updates, effective_end_time = args.effective_max_updates, args.effective_end_time
 
     gate_results = evaluate_deterministic(init_net, device, args.eval_seeds, args.eval_max_steps)
     gate_summary = summarize_evaluation(gate_results)

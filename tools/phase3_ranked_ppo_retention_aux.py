@@ -1012,7 +1012,17 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
         "effective_seed": getattr(args, "effective_seed", PPO_TORCH_SEED),
         "no_promotion": True,
     }
-    ret_mod.create_or_validate_run_contract(out_dir, contract, resume=getattr(args, "resume", False))
+    authorized = ret_mod.create_or_validate_run_contract(
+        out_dir, contract, resume=getattr(args, "resume", False),
+    )
+    if authorized is not None:
+        args.effective_max_updates = authorized["effective_max_updates"]
+        args.effective_end_time = ret_mod.dt.datetime.fromisoformat(
+            authorized["effective_end_time_hkt"]
+        )
+        effective_max_updates, effective_end_time = (
+            args.effective_max_updates, args.effective_end_time,
+        )
     ret_mod.append_run_status(out_dir, {
         "event": "resume_requested" if getattr(args, "resume", False) else "started",
         "effective_max_updates": effective_max_updates,

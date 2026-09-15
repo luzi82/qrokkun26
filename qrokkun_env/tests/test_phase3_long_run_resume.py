@@ -15,6 +15,9 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from qrokkun_env.agents.player_ranked_topk import PlayerRankedTopK
+from qrokkun_env.agents.obs_v4 import BULLET_FEAT_V4, MAX_BULLETS_V4, PLAYER_FEAT_V4
+
 from tools import phase3_ranked_ppo_retention as control
 from tools import phase3_ranked_ppo_retention_aux as aux
 
@@ -154,45 +157,147 @@ def test_effective_stop_budget_controls_boundary_order_and_allows_past_200() -> 
     ) == 'max_updates'
 
 
-def test_resume_contract_allows_monotonic_deadline_extension_and_audits_it(tmp_path: Path) -> None:
-    """Only a larger effective deadline can amend an otherwise locked run."""
-    contract = _current_contract(**{
-        'stop_args': {
-            'effective_max_updates': 2_147_483_647,
-            'effective_end_time_hkt': '2026-09-15T23:59:00+08:00',
-        },
+def test_resume_may_reduce_max_updates_to_above_completed_and_audits_it(tmp_path: Path) -> None:
+    """A lower target is allowed when it is still at or above completed updates."""
+    contract = _current_contract(stop_args={
+        "effective_max_updates": 200,
+        "effective_end_time_hkt": "2099-12-31T23:59:00+08:00",
     })
     control.create_or_validate_run_contract(tmp_path, contract, resume=False)
-    changed = _current_contract(**{
-        'stop_args': {
-            'effective_max_updates': 2_147_483_647,
-            'effective_end_time_hkt': '2026-09-16T12:00:00+08:00',
-        },
+    control.atomic_save_recovery(tmp_path / "recovery.pt", {
+        "model": {}, "optimizer": {}, "completed_update": 40,
+        "rng": control.capture_rng_state(),
     })
-    control.create_or_validate_run_contract(tmp_path, changed, resume=True)
-    rows = [json.loads(row) for row in (tmp_path / 'stop_budget_amendments.jsonl').read_text().splitlines()]
-    assert rows[0]['event'] == 'stop_budget_extended'
-    assert rows[0]['prior']['effective_end_time_hkt'] == '2026-09-15T23:59:00+08:00'
-    assert rows[0]['new']['effective_end_time_hkt'] == '2026-09-16T12:00:00+08:00'
+    reduced = {**contract, "stop_args": {**contract["stop_args"], "effective_max_updates": 50}}
+    control.create_or_validate_run_contract(tmp_path, reduced, resume=True)
+    rows = [json.loads(row) for row in (tmp_path / "stop_budget_amendments.jsonl").read_text().splitlines()]
+    assert rows[0]["event"] == "stop_budget_extended"
+    assert rows[0]["prior"]["effective_max_updates"] == 200
+    assert rows[0]["new"]["effective_max_updates"] == 50
+    assert rows[0]["completed_update"] == 40
 
 
-def test_stop_budget_max_extension_is_idempotent_and_lower_values_fail_closed(tmp_path: Path) -> None:
-    contract = _current_contract(tool='control', stop_args={
-        'effective_max_updates': 200, 'effective_end_time_hkt': '2026-09-15T06:45:00+08:00'},
-    )
+def test_resume_may_set_max_updates_equal_to_completed_and_audits_it(tmp_path: Path) -> None:
+    """A target equal to completed is allowed and recorded."""
+    contract = _current_contract(stop_args={
+        "effective_max_updates": 200,
+        "effective_end_time_hkt": "2099-12-31T23:59:00+08:00",
+    })
     control.create_or_validate_run_contract(tmp_path, contract, resume=False)
-    raised = {**contract, 'stop_args': {**contract['stop_args'], 'effective_max_updates': 275}}
+    control.atomic_save_recovery(tmp_path / "recovery.pt", {
+        "model": {}, "optimizer": {}, "completed_update": 40,
+        "rng": control.capture_rng_state(),
+    })
+    equal = {**contract, "stop_args": {**contract["stop_args"], "effective_max_updates": 40}}
+    control.create_or_validate_run_contract(tmp_path, equal, resume=True)
+    rows = [json.loads(row) for row in (tmp_path / "stop_budget_amendments.jsonl").read_text().splitlines()]
+    assert rows[0]["new"]["effective_max_updates"] == 40
+    assert rows[0]["completed_update"] == 40
+
+
+def test_resume_rejects_max_updates_below_completed(tmp_path: Path) -> None:
+    contract = _current_contract(stop_args={
+        "effective_max_updates": 200,
+        "effective_end_time_hkt": "2099-12-31T23:59:00+08:00",
+    })
+    control.create_or_validate_run_contract(tmp_path, contract, resume=False)
+    control.atomic_save_recovery(tmp_path / "recovery.pt", {
+        "model": {}, "optimizer": {}, "completed_update": 40,
+        "rng": control.capture_rng_state(),
+    })
+    below = {**contract, "stop_args": {**contract["stop_args"], "effective_max_updates": 39}}
+    with pytest.raises(control.RunStateError, match="below completed"):
+        control.create_or_validate_run_contract(tmp_path, below, resume=True)
+    assert not (tmp_path / "stop_budget_amendments.jsonl").exists()
+
+
+def test_resume_may_move_deadline_earlier_when_still_strictly_future(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An earlier deadline is allowed when it remains strictly after now."""
+    now = dt.datetime(2026, 9, 15, 12, 0, tzinfo=control._HKT)
+    monkeypatch.setattr(control, "_now_hkt", lambda: now)
+    contract = _current_contract(stop_args={
+        "effective_max_updates": 200,
+        "effective_end_time_hkt": "2099-12-31T23:59:00+08:00",
+    })
+    control.create_or_validate_run_contract(tmp_path, contract, resume=False)
+    control.atomic_save_recovery(tmp_path / "recovery.pt", {
+        "model": {}, "optimizer": {}, "completed_update": 0,
+        "rng": control.capture_rng_state(),
+    })
+    earlier = {**contract, "stop_args": {
+        **contract["stop_args"], "effective_end_time_hkt": "2026-09-16T08:00:00+08:00",
+    }}
+    control.create_or_validate_run_contract(tmp_path, earlier, resume=True)
+    rows = [json.loads(row) for row in (tmp_path / "stop_budget_amendments.jsonl").read_text().splitlines()]
+    assert rows[0]["prior"]["effective_end_time_hkt"] == "2099-12-31T23:59:00+08:00"
+    assert rows[0]["new"]["effective_end_time_hkt"] == "2026-09-16T08:00:00+08:00"
+
+
+@pytest.mark.parametrize("end_hkt", [
+    "2026-09-15T12:00:00+08:00",
+    "2026-09-15T11:59:00+08:00",
+])
+def test_resume_rejects_deadline_at_or_before_now(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, end_hkt: str,
+) -> None:
+    now = dt.datetime(2026, 9, 15, 12, 0, tzinfo=control._HKT)
+    monkeypatch.setattr(control, "_now_hkt", lambda: now)
+    contract = _current_contract(stop_args={
+        "effective_max_updates": 200,
+        "effective_end_time_hkt": "2099-12-31T23:59:00+08:00",
+    })
+    control.create_or_validate_run_contract(tmp_path, contract, resume=False)
+    control.atomic_save_recovery(tmp_path / "recovery.pt", {
+        "model": {}, "optimizer": {}, "completed_update": 0,
+        "rng": control.capture_rng_state(),
+    })
+    requested = {**contract, "stop_args": {**contract["stop_args"], "effective_end_time_hkt": end_hkt}}
+    with pytest.raises(control.RunStateError, match="not in the future"):
+        control.create_or_validate_run_contract(tmp_path, requested, resume=True)
+    assert not (tmp_path / "stop_budget_amendments.jsonl").exists()
+
+
+@pytest.mark.parametrize("end_hkt", [
+    "2026-09-15T12:00:00+08:00",
+    "2026-09-15T11:59:00+08:00",
+])
+def test_identical_expired_authorized_deadline_resume_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, end_hkt: str,
+) -> None:
+    """Idempotency applies only to a still-future authorized pair."""
+    now = dt.datetime(2026, 9, 15, 12, 0, tzinfo=control._HKT)
+    monkeypatch.setattr(control, "_now_hkt", lambda: now)
+    contract = _current_contract(stop_args={
+        "effective_max_updates": 200,
+        "effective_end_time_hkt": end_hkt,
+    })
+    control.create_or_validate_run_contract(tmp_path, contract, resume=False)
+    with pytest.raises(control.RunStateError, match="not in the future"):
+        control.create_or_validate_run_contract(tmp_path, contract, resume=True)
+    assert not (tmp_path / "stop_budget_amendments.jsonl").exists()
+
+
+def test_identical_authorized_stop_budget_resume_is_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = dt.datetime(2026, 9, 15, 12, 0, tzinfo=control._HKT)
+    monkeypatch.setattr(control, "_now_hkt", lambda: now)
+    contract = _current_contract(tool="control", stop_args={
+        "effective_max_updates": 200, "effective_end_time_hkt": "2099-12-31T23:59:00+08:00",
+    })
+    control.create_or_validate_run_contract(tmp_path, contract, resume=False)
+    control.atomic_save_recovery(tmp_path / "recovery.pt", {
+        "model": {}, "optimizer": {}, "completed_update": 0,
+        "rng": control.capture_rng_state(),
+    })
+    raised = {**contract, "stop_args": {**contract["stop_args"], "effective_max_updates": 275}}
     control.create_or_validate_run_contract(tmp_path, raised, resume=True)
-    audit = tmp_path / 'stop_budget_amendments.jsonl'
+    audit = tmp_path / "stop_budget_amendments.jsonl"
     assert len(audit.read_text().splitlines()) == 1
     control.create_or_validate_run_contract(tmp_path, raised, resume=True)
     assert len(audit.read_text().splitlines()) == 1
-    for bad in (
-        {**raised, 'stop_args': {**raised['stop_args'], 'effective_max_updates': 274}},
-        {**raised, 'stop_args': {**raised['stop_args'], 'effective_end_time_hkt': '2026-09-15T06:44:00+08:00'}},
-    ):
-        with pytest.raises(control.RunStateError, match='stop budget'):
-            control.create_or_validate_run_contract(tmp_path, bad, resume=True)
 
 
 @pytest.mark.parametrize('changed', [
@@ -207,33 +312,53 @@ def test_stop_extensions_do_not_relax_other_contract_identity(tmp_path: Path, ch
         control.create_or_validate_run_contract(tmp_path, requested, resume=True)
 
 
-def test_malformed_or_nonmonotonic_stop_amendment_fails_closed(tmp_path: Path) -> None:
-    contract = _current_contract(stop_args={'effective_max_updates': 1, 'effective_end_time_hkt': '2026-09-15T06:45:00+08:00'})
+def test_malformed_or_noncontiguous_stop_amendment_fails_closed(tmp_path: Path) -> None:
+    contract = _current_contract(stop_args={'effective_max_updates': 1, 'effective_end_time_hkt': '2099-12-31T23:59:00+08:00'})
     control.create_or_validate_run_contract(tmp_path, contract, resume=False)
     audit = tmp_path / 'stop_budget_amendments.jsonl'
     audit.write_text('{bad json}\n')
     with pytest.raises(control.RunStateError, match='amendment'):
         control.create_or_validate_run_contract(tmp_path, contract, resume=True)
-    audit.write_text(json.dumps({'event': 'stop_budget_extended', 'prior': contract['stop_args'], 'new': contract['stop_args'],
-                                 'at_hkt': '2026-09-15T07:00:00+08:00', 'runtime_provenance': {}}) + '\n')
+    audit.write_text(json.dumps({
+        'event': 'stop_budget_extended', 'prior': contract['stop_args'], 'new': contract['stop_args'],
+        'completed_update': 0, 'at_hkt': '2026-09-15T07:00:00+08:00', 'runtime_provenance': {},
+    }) + '\n')
     with pytest.raises(control.RunStateError, match='amendment'):
         control.create_or_validate_run_contract(tmp_path, contract, resume=True)
 
 
 def test_stop_amendments_must_be_timestamp_ordered_and_contiguous(tmp_path: Path) -> None:
-    contract = _current_contract(stop_args={'effective_max_updates': 1, 'effective_end_time_hkt': '2026-09-15T06:45:00+08:00'})
+    contract = _current_contract(stop_args={'effective_max_updates': 1, 'effective_end_time_hkt': '2099-12-31T23:59:00+08:00'})
     control.create_or_validate_run_contract(tmp_path, contract, resume=False)
-    first = {'effective_max_updates': 2, 'effective_end_time_hkt': '2026-09-15T06:45:00+08:00'}
-    second = {'effective_max_updates': 3, 'effective_end_time_hkt': '2026-09-15T06:45:00+08:00'}
+    first = {'effective_max_updates': 2, 'effective_end_time_hkt': '2099-12-31T23:59:00+08:00'}
+    second = {'effective_max_updates': 3, 'effective_end_time_hkt': '2099-12-31T23:59:00+08:00'}
     rows = [
         {'event': 'stop_budget_extended', 'prior': contract['stop_args'], 'new': first,
-         'at_hkt': '2026-09-15T08:00:00+08:00', 'runtime_provenance': {}},
+         'completed_update': 0, 'at_hkt': '2026-09-15T08:00:00+08:00', 'runtime_provenance': {}},
         {'event': 'stop_budget_extended', 'prior': first, 'new': second,
-         'at_hkt': '2026-09-15T07:00:00+08:00', 'runtime_provenance': {}},
+         'completed_update': 0, 'at_hkt': '2026-09-15T07:00:00+08:00', 'runtime_provenance': {}},
     ]
     (tmp_path / 'stop_budget_amendments.jsonl').write_text('\n'.join(json.dumps(row) for row in rows) + '\n')
     with pytest.raises(control.RunStateError, match='amendment'):
         control.create_or_validate_run_contract(tmp_path, _current_contract(stop_args=second), resume=True)
+
+
+@pytest.mark.parametrize("stop_args", [
+    {"effective_max_updates": -1, "effective_end_time_hkt": "2099-12-31T23:59:00+08:00"},
+    {"effective_max_updates": True, "effective_end_time_hkt": "2099-12-31T23:59:00+08:00"},
+    {"effective_max_updates": 10, "effective_end_time_hkt": "not-a-deadline"},
+    {"effective_max_updates": 10, "effective_end_time_hkt": "2026-09-16T08:00:00"},
+])
+def test_invalid_requested_stop_budget_fails_closed(tmp_path: Path, stop_args: dict) -> None:
+    contract = _current_contract(stop_args={
+        "effective_max_updates": 10, "effective_end_time_hkt": "2099-12-31T23:59:00+08:00",
+    })
+    control.create_or_validate_run_contract(tmp_path, contract, resume=False)
+    with pytest.raises(control.RunStateError, match="malformed"):
+        control.create_or_validate_run_contract(
+            tmp_path, {**contract, "stop_args": stop_args}, resume=True,
+        )
+    assert not (tmp_path / "stop_budget_amendments.jsonl").exists()
 
 
 @pytest.mark.parametrize('bad_version', [None, 0, 2, True, 1.0])
@@ -259,7 +384,7 @@ def test_resume_requires_exact_integer_current_schema_version(tmp_path: Path, ba
 
 def test_fresh_contract_writes_schema_version_and_exact_current_version_resumes(tmp_path: Path) -> None:
     contract = _current_contract(tool='control', stop_args={
-        'effective_max_updates': 1, 'effective_end_time_hkt': '2026-09-15T06:45:00+08:00',
+        'effective_max_updates': 1, 'effective_end_time_hkt': '2099-12-31T23:59:00+08:00',
     })
     control.create_or_validate_run_contract(tmp_path, contract, resume=False)
     assert json.loads((tmp_path / 'run.json').read_text())['schema_version'] == _CURRENT_SCHEMA_VERSION
@@ -275,7 +400,7 @@ def test_fresh_contract_without_current_schema_version_is_rejected(tmp_path: Pat
 def test_contract_is_immutable_and_recovery_is_atomic_and_fail_closed(tmp_path: Path) -> None:
     contract = _current_contract(tool="control", inputs={"checkpoint": "a"}, no_promotion=True,
                                  stop_args={"effective_max_updates": 1,
-                                            "effective_end_time_hkt": "2026-09-15T06:45:00+08:00"})
+                                            "effective_end_time_hkt": "2099-12-31T23:59:00+08:00"})
     control.create_or_validate_run_contract(tmp_path, contract, resume=False)
     assert json.loads((tmp_path / "run.json").read_text()) == contract
     control.create_or_validate_run_contract(tmp_path, contract, resume=True)
@@ -388,3 +513,149 @@ def test_max_update_and_hkt_deadline_have_explicit_boundary_reasons() -> None:
         completed=0, configured_updates=10, max_updates=8, end_time=deadline,
         now=deadline + dt.timedelta(seconds=1),
     ) == "deadline"
+
+
+def _stub_rollout(seed: int = 0) -> control.Rollout:
+    return control.Rollout(
+        seed=seed,
+        player=[__import__("numpy").zeros(PLAYER_FEAT_V4, dtype="float32")],
+        bullets=[__import__("numpy").zeros((MAX_BULLETS_V4, BULLET_FEAT_V4), dtype="float32")],
+        pad=[__import__("numpy").ones(MAX_BULLETS_V4, dtype="bool")],
+        actions=[0], log_probs=[0.0], values=[0.0], rewards=[0.0], dones=[True],
+        elapsed=1.0, censored=False,
+    )
+
+
+def _tiny_ranked(seed: int = 0) -> PlayerRankedTopK:
+    torch.manual_seed(seed)
+    return PlayerRankedTopK(top_k=8, hidden=16)
+
+
+def _arm_args(tmp_path: Path, *, max_updates: int, resume: bool = False) -> argparse.Namespace:
+    end = dt.datetime(2099, 12, 31, 23, 59, tzinfo=control._HKT)
+    return argparse.Namespace(
+        updates=10, episodes_per_update=1, max_frames=4, eval_seeds=[0], eval_max_steps=4,
+        out_dir=tmp_path, run_dir=tmp_path, resume=resume, seed=1, max_updates=max_updates,
+        end_time=end, effective_max_updates=max_updates, effective_end_time=end,
+    )
+
+
+def _stub_control_loop(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    updates: list[int] = []
+
+    def fake_collect(net, device, seed, max_frames):
+        return _stub_rollout(seed)
+
+    def fake_ppo(net, opt, rollouts, device):
+        updates.append(1)
+        return {"optimizer_steps": 1, "approx_kl": 0.0, "clip_fraction": 0.0,
+                "explained_variance": 0.0, "entropy": 0.0, "policy_loss": 0.0,
+                "value_loss": 0.0, "total_loss": 0.0, "n_samples": 1}
+
+    monkeypatch.setattr(control, "collect_rollout", fake_collect)
+    monkeypatch.setattr(control, "ppo_update", fake_ppo)
+    monkeypatch.setattr(
+        control, "evaluate_deterministic",
+        lambda *a, **k: [{"seed": 0, "elapsed": 1.0, "censored": True}],
+    )
+    return updates
+
+
+def _stub_aux_loop(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    updates: list[int] = []
+
+    def fake_collect(net, device, seed, max_frames):
+        return _stub_rollout(seed)
+
+    def fake_aux_update(net, opt, rollouts, train_tensors, alpha, device, **kwargs):
+        updates.append(1)
+        alignment = {
+            "g_ppo_norm": 1.0, "g_ret_norm": 1.0, "cosine_similarity": 0.0,
+            "grad_ratio": 0.15, "g_ret_weighted_norm": 0.15, "alpha": float(alpha),
+            "measurement": "pre_update_on_policy", "recomputed_post_update": False,
+        }
+        return {
+            "optimizer_steps": 1, "approx_kl": 0.0, "clip_fraction": 0.0,
+            "explained_variance": 0.0, "entropy": 0.0, "ppo_policy_loss": 0.0,
+            "ppo_value_loss": 0.0, "total_loss": 0.0, "retention_hybrid_loss": 0.0,
+            "retention_hard_ce": 0.0, "retention_soft_kl": 0.0, "retention_soft_ce": 0.0,
+            "alpha": float(alpha), "g_ppo_norm": 1.0, "g_ret_norm": 1.0,
+            "g_ret_weighted_norm": 0.15, "grad_ratio": 0.15, "cosine_similarity": 0.0,
+            "grad_alignment": alignment, "n_samples": 1, "n_retention_samples": 1,
+        }
+
+    monkeypatch.setattr(aux, "collect_rollout", fake_collect)
+    monkeypatch.setattr(aux, "ppo_aux_update", fake_aux_update)
+    monkeypatch.setattr(
+        aux, "calibrate_alpha",
+        lambda *a, **k: {"alpha": 0.15, "g_ppo_norm": 1.0, "g_ret_norm": 1.0},
+    )
+    monkeypatch.setattr(
+        aux, "evaluate_deterministic",
+        lambda *a, **k: [{"seed": 0, "elapsed": 1.0, "censored": True}],
+    )
+    monkeypatch.setattr(aux, "teacher_diagnostics", lambda *a, **k: {"agreement": 1.0})
+    return updates
+
+
+def test_control_resume_loop_consumes_amended_authorized_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    updates = _stub_control_loop(monkeypatch)
+    net = _tiny_ranked()
+    contract = _current_contract(stop_args={
+        "effective_max_updates": 10, "effective_end_time_hkt": "2099-12-31T23:59:00+08:00",
+    })
+    control.create_or_validate_run_contract(tmp_path, contract, resume=False)
+    first = control.run_ppo_arm(
+        net, torch.device("cpu"), _arm_args(tmp_path, max_updates=2), [], None, tmp_path,
+        parent_state_dict_sha256="p", parent_file_sha256="f", dataset_hash="d", ppo_knobs={},
+    )
+    assert first["completed_updates"] == 2
+    reduced = {**contract, "stop_args": {**contract["stop_args"], "effective_max_updates": 2}}
+    authorized = control.create_or_validate_run_contract(tmp_path, reduced, resume=True)
+    args = _arm_args(tmp_path, max_updates=authorized["effective_max_updates"], resume=True)
+    updates.clear()
+    resumed = control.run_ppo_arm(
+        net, torch.device("cpu"), args, [], None, tmp_path,
+        parent_state_dict_sha256="p", parent_file_sha256="f", dataset_hash="d", ppo_knobs={},
+    )
+    assert updates == []
+    assert resumed["completed_updates"] == 2
+    assert resumed["effective_max_updates"] == 2
+
+
+def test_aux_resume_loop_consumes_amended_authorized_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    updates = _stub_aux_loop(monkeypatch)
+    net = _tiny_ranked()
+    train = {
+        "player": torch.zeros(8, PLAYER_FEAT_V4),
+        "bullets": torch.zeros(8, MAX_BULLETS_V4, BULLET_FEAT_V4),
+        "pad": torch.ones(8, MAX_BULLETS_V4, dtype=torch.bool),
+        "teacher_logits": torch.zeros(8, 5),
+        "elapsed": torch.zeros(8),
+    }
+    contract = _current_contract(stop_args={
+        "effective_max_updates": 10, "effective_end_time_hkt": "2099-12-31T23:59:00+08:00",
+    })
+    control.create_or_validate_run_contract(tmp_path, contract, resume=False)
+    first = aux.run_aux_arm(
+        net, torch.device("cpu"), _arm_args(tmp_path, max_updates=2), [], train, None, tmp_path,
+        parent_state_dict_sha256="p", parent_file_sha256="f", dataset_hash="d", ppo_knobs={},
+        minibatch=4,
+    )
+    assert first["completed_updates"] == 2
+    reduced = {**contract, "stop_args": {**contract["stop_args"], "effective_max_updates": 2}}
+    authorized = control.create_or_validate_run_contract(tmp_path, reduced, resume=True)
+    args = _arm_args(tmp_path, max_updates=authorized["effective_max_updates"], resume=True)
+    updates.clear()
+    resumed = aux.run_aux_arm(
+        net, torch.device("cpu"), args, [], train, None, tmp_path,
+        parent_state_dict_sha256="p", parent_file_sha256="f", dataset_hash="d", ppo_knobs={},
+        minibatch=4,
+    )
+    assert updates == []
+    assert resumed["completed_updates"] == 2
+    assert resumed["effective_max_updates"] == 2
