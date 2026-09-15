@@ -40,7 +40,49 @@ append-only `ppo_updates.jsonl` (or `ppo_aux_updates.jsonl`), atomic
 locked knobs, resolved effective stop budget, effective seed, and the
 no-promotion guarantee.
 
-Resume only with the same arguments and identities:
+Resume retains every experiment-defining identity: tool/arm, checkpoint and
+teacher identities/hashes, effective seed, locked PPO/retention knobs and
+objective, no-promotion guarantee, and all recovery/model/optimizer state.
+The sole resume-time exception is an effective stop-budget extension. Both
+values must be at least the currently authorized values and at least one must
+increase. Lower targets or earlier deadlines fail closed. Resuming with the
+already authorized pair is allowed and creates no duplicate audit record.
+
+For a recognized legacy run whose `run.json` has
+`{"end_time_hkt": ..., "max_updates": null}` and which completed update 200
+by 06:45 HKT on 2026-09-15, extend the deadline to 12:00 HKT with
+**only** `--end-time`:
+
+```bash
+PYTHONPATH=. python -m tools.phase3_ranked_ppo_retention \
+  --init-checkpoint artifacts/player.pt --teacher artifacts/teacher.pt \
+  --run-dir runs/phase3-control-01 --end-time 20260915-1200 --seed 123 --resume
+```
+
+For this end-time-only invocation, the effective target resolves to
+2147483647, so update 201 is authorized. Passing `--max-updates 200` would
+retain target 200 and cannot begin update 201. The focused regression covering
+the parser/default, legacy authorization, and update-boundary path passed
+without a production change; no production fix was required.
+
+`run.json` is never rewritten. Each approved extension appends and fsyncs one
+`stop_budget_amendments.jsonl` record with the explicit
+`stop_budget_extended` event, prior and new effective values, HKT timestamp,
+and current runtime provenance. Resume resolves authority from the original
+run contract plus this strictly contiguous, monotonic chain; malformed,
+reordered, or tampered records fail closed.
+
+There is one narrow compatibility adoption for actual pre-extension Phase 3
+folders: their `stop_args` shape is exactly
+`{"end_time_hkt": ..., "max_updates": null}`. It is interpreted as its
+historical effective target of 200 and may be extended only monotonically.
+Its first amendment records the current runtime commit/provenance. This is not
+a general provenance bypass: only runtime fields (Git commit, dirty status,
+Torch version, and device) may evolve for that recognized legacy shape;
+inputs and their identities, tool/arm, seed, knobs, objective, and
+no-promotion remain exact matches.
+
+An ordinary same-budget resume remains:
 
 ```bash
 PYTHONPATH=. python -m tools.phase3_ranked_ppo_retention \
@@ -49,7 +91,7 @@ PYTHONPATH=. python -m tools.phase3_ranked_ppo_retention \
 ```
 
 Resume fails closed if `run.json` or `recovery.pt` is absent/corrupt, or the
-immutable contract differs, including either resolved effective stop value. It begins at `completed_update + 1` and never
+immutable contract differs. It begins at `completed_update + 1` and never
 truncates the journals. After every fully completed update the model, Adam
 state, totals, Python/NumPy/Torch CPU/CUDA RNG state are atomically saved. The
 auxiliary arm additionally saves frozen alpha/calibration information and all

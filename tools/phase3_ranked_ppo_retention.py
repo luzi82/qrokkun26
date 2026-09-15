@@ -204,8 +204,119 @@ def load_recovery(path: Path, device: torch.device) -> dict[str, Any]:
         raise RunStateError("resume recovery state is malformed") from exc
 
 
+_STOP_AMENDMENTS = "stop_budget_amendments.jsonl"
+_RUNTIME_PROVENANCE_FIELDS = frozenset({"git_commit", "dirty", "torch_version", "device"})
+
+
+def _stop_budget(stop_args: Any, *, legacy: bool = False) -> dict[str, Any]:
+    """Validate and normalize a persisted/requested effective stop budget."""
+    if not isinstance(stop_args, dict):
+        raise RunStateError("resume stop budget is malformed")
+    max_key = "max_updates" if legacy else "effective_max_updates"
+    end_key = "end_time_hkt" if legacy else "effective_end_time_hkt"
+    if set(stop_args) != {max_key, end_key}:
+        raise RunStateError("resume stop budget is malformed")
+    maximum = stop_args[max_key]
+    if legacy and maximum is None:
+        maximum = PPO_UPDATES
+    if isinstance(maximum, bool) or not isinstance(maximum, int) or maximum < 0:
+        raise RunStateError("resume stop budget is malformed")
+    end_text = stop_args[end_key]
+    if not isinstance(end_text, str):
+        raise RunStateError("resume stop budget is malformed")
+    try:
+        end = dt.datetime.fromisoformat(end_text)
+    except ValueError as exc:
+        raise RunStateError("resume stop budget is malformed") from exc
+    if end.tzinfo is None or end.utcoffset() != dt.timedelta(hours=8):
+        raise RunStateError("resume stop budget is malformed")
+    # Keep the serialized form canonical so a textual alias cannot split an
+    # otherwise contiguous audit chain.
+    if end.isoformat() != end_text:
+        raise RunStateError("resume stop budget is malformed")
+    return {"effective_max_updates": maximum, "effective_end_time_hkt": end_text}
+
+
+def _legacy_contract(existing: dict[str, Any]) -> bool:
+    stop = existing.get("stop_args")
+    if not isinstance(stop, dict) or set(stop) != {"max_updates", "end_time_hkt"} \
+            or stop["max_updates"] is not None:
+        return False
+    try:
+        _stop_budget(stop, legacy=True)
+    except RunStateError:
+        return False
+    return True
+
+
+def _without_stop_and_runtime_provenance(contract: dict[str, Any], *, legacy: bool) -> dict[str, Any]:
+    """The sole legacy migration exception is runtime provenance evolution."""
+    reduced = dict(contract)
+    reduced.pop("stop_args", None)
+    if legacy:
+        provenance = reduced.get("provenance")
+        if not isinstance(provenance, dict):
+            raise RunStateError("legacy resume contract is malformed")
+        reduced["provenance"] = {
+            key: value for key, value in provenance.items() if key not in _RUNTIME_PROVENANCE_FIELDS
+        }
+    return reduced
+
+
+def _read_authorized_stop_budget(run_dir: Path, original: dict[str, Any]) -> dict[str, Any]:
+    """Resolve original budget plus a strictly contiguous amendment chain."""
+    legacy = _legacy_contract(original)
+    authorized = _stop_budget(original.get("stop_args"), legacy=legacy)
+    path = run_dir / _STOP_AMENDMENTS
+    if not path.exists():
+        return authorized
+    try:
+        lines = path.read_text().splitlines()
+        previous_at: dt.datetime | None = None
+        for number, line in enumerate(lines, start=1):
+            row = json.loads(line)
+            if not isinstance(row, dict) or set(row) != {
+                "event", "prior", "new", "at_hkt", "runtime_provenance"
+            } or row["event"] != "stop_budget_extended" or not isinstance(row["runtime_provenance"], dict):
+                raise ValueError(f"bad row {number}")
+            at_hkt = row["at_hkt"]
+            if not isinstance(at_hkt, str):
+                raise ValueError(f"bad timestamp {number}")
+            _stop_budget({"effective_max_updates": 0, "effective_end_time_hkt": at_hkt})
+            recorded_at = dt.datetime.fromisoformat(at_hkt)
+            if previous_at is not None and recorded_at < previous_at:
+                raise ValueError(f"out-of-order timestamp {number}")
+            prior = _stop_budget(row["prior"])
+            new = _stop_budget(row["new"])
+            if prior != authorized or new["effective_max_updates"] < prior["effective_max_updates"] \
+                    or new["effective_end_time_hkt"] < prior["effective_end_time_hkt"] \
+                    or new == prior:
+                raise ValueError(f"non-monotonic row {number}")
+            authorized = new
+            previous_at = recorded_at
+    except (OSError, json.JSONDecodeError, TypeError, ValueError, RunStateError) as exc:
+        raise RunStateError("stop budget amendment log is malformed") from exc
+    return authorized
+
+
+def _append_stop_budget_amendment(
+    run_dir: Path, *, prior: dict[str, Any], new: dict[str, Any], runtime_provenance: Any,
+) -> None:
+    if not isinstance(runtime_provenance, dict):
+        raise RunStateError("resume runtime provenance is malformed")
+    row = {
+        "event": "stop_budget_extended", "prior": prior, "new": new,
+        "at_hkt": dt.datetime.now(_HKT).isoformat(), "runtime_provenance": runtime_provenance,
+    }
+    path = run_dir / _STOP_AMENDMENTS
+    with path.open("a") as audit:
+        audit.write(json.dumps(row, sort_keys=True) + "\n")
+        audit.flush()
+        os.fsync(audit.fileno())
+
+
 def create_or_validate_run_contract(run_dir: Path, contract: dict[str, Any], *, resume: bool) -> None:
-    """Create immutable ``run.json`` once, or fail closed on any difference."""
+    """Lock all experiment state; append audited monotonic stop extensions."""
     path = run_dir / "run.json"
     if resume:
         if not path.is_file():
@@ -214,8 +325,26 @@ def create_or_validate_run_contract(run_dir: Path, contract: dict[str, Any], *, 
             existing = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError) as exc:
             raise RunStateError("resume run.json is malformed") from exc
-        if existing != contract:
+        if not isinstance(existing, dict) or not isinstance(contract, dict):
             raise RunStateError("resume immutable run contract mismatch")
+        legacy = _legacy_contract(existing)
+        if _without_stop_and_runtime_provenance(existing, legacy=legacy) != \
+                _without_stop_and_runtime_provenance(contract, legacy=legacy):
+            raise RunStateError("resume immutable run contract mismatch")
+        # Current-schema runs retain exact provenance.  Only the explicitly
+        # recognized pre-extension shape may adopt a later runtime commit.
+        if not legacy and existing.get("provenance") != contract.get("provenance"):
+            raise RunStateError("resume immutable run contract mismatch")
+        authorized = _read_authorized_stop_budget(run_dir, existing)
+        requested = _stop_budget(contract.get("stop_args"))
+        if requested["effective_max_updates"] < authorized["effective_max_updates"] \
+                or requested["effective_end_time_hkt"] < authorized["effective_end_time_hkt"]:
+            raise RunStateError("resume stop budget decreases are forbidden")
+        if requested != authorized:
+            _append_stop_budget_amendment(
+                run_dir, prior=authorized, new=requested,
+                runtime_provenance=contract.get("provenance", {}),
+            )
         return
     if path.exists():
         raise RunStateError("run directory already has run.json; use --resume")
