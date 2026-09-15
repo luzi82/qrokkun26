@@ -18,10 +18,16 @@ if str(_ROOT) not in sys.path:
 from tools import phase3_ranked_ppo_retention as control
 from tools import phase3_ranked_ppo_retention_aux as aux
 
+_CURRENT_SCHEMA_VERSION = control.CURRENT_RUN_SCHEMA_VERSION
+
+
+def _current_contract(**fields: object) -> dict:
+    return {"schema_version": _CURRENT_SCHEMA_VERSION, **fields}
+
 
 @pytest.mark.parametrize(
     "existing_contract, error",
-    [(None, "run.json is missing"), ({"wrong": True}, "contract mismatch")],
+    [(None, "run.json is missing"), ({"wrong": True}, "schema_version")],
 )
 def test_resume_contract_rejection_precedes_initial_evaluation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existing_contract, error: str,
@@ -49,9 +55,18 @@ def test_resume_contract_rejection_precedes_initial_evaluation(
         control, "evaluate_deterministic",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("evaluation ran before contract rejection")),
     )
+    recovery_called = False
+
+    def unexpected_recovery(*_args, **_kwargs):
+        nonlocal recovery_called
+        recovery_called = True
+        raise AssertionError("recovery ran before contract rejection")
+
+    monkeypatch.setattr(control, "load_recovery", unexpected_recovery)
 
     with pytest.raises(control.RunStateError, match=error):
         control.run_experiment(args, __import__("torch").device("cpu"))
+    assert recovery_called is False
 
 
 def test_progress_journal_recovers_a_crash_after_fsync_without_duplicate_row(tmp_path: Path) -> None:
@@ -141,19 +156,19 @@ def test_effective_stop_budget_controls_boundary_order_and_allows_past_200() -> 
 
 def test_resume_contract_allows_monotonic_deadline_extension_and_audits_it(tmp_path: Path) -> None:
     """Only a larger effective deadline can amend an otherwise locked run."""
-    contract = {
+    contract = _current_contract(**{
         'stop_args': {
             'effective_max_updates': 2_147_483_647,
             'effective_end_time_hkt': '2026-09-15T23:59:00+08:00',
         },
-    }
+    })
     control.create_or_validate_run_contract(tmp_path, contract, resume=False)
-    changed = {
+    changed = _current_contract(**{
         'stop_args': {
             'effective_max_updates': 2_147_483_647,
             'effective_end_time_hkt': '2026-09-16T12:00:00+08:00',
         },
-    }
+    })
     control.create_or_validate_run_contract(tmp_path, changed, resume=True)
     rows = [json.loads(row) for row in (tmp_path / 'stop_budget_amendments.jsonl').read_text().splitlines()]
     assert rows[0]['event'] == 'stop_budget_extended'
@@ -162,9 +177,9 @@ def test_resume_contract_allows_monotonic_deadline_extension_and_audits_it(tmp_p
 
 
 def test_stop_budget_max_extension_is_idempotent_and_lower_values_fail_closed(tmp_path: Path) -> None:
-    contract = {'tool': 'control', 'stop_args': {
+    contract = _current_contract(tool='control', stop_args={
         'effective_max_updates': 200, 'effective_end_time_hkt': '2026-09-15T06:45:00+08:00'},
-    }
+    )
     control.create_or_validate_run_contract(tmp_path, contract, resume=False)
     raised = {**contract, 'stop_args': {**contract['stop_args'], 'effective_max_updates': 275}}
     control.create_or_validate_run_contract(tmp_path, raised, resume=True)
@@ -184,8 +199,8 @@ def test_stop_budget_max_extension_is_idempotent_and_lower_values_fail_closed(tm
     {'tool': 'other'}, {'arm': 'other'}, {'inputs': {'checkpoint': 'other'}}, {'knobs': {'lr': 7}}, {'effective_seed': 2},
 ])
 def test_stop_extensions_do_not_relax_other_contract_identity(tmp_path: Path, changed: dict) -> None:
-    contract = {'tool': 'control', 'inputs': {'checkpoint': 'a'}, 'knobs': {'lr': 1}, 'effective_seed': 1,
-                'stop_args': {'effective_max_updates': 1, 'effective_end_time_hkt': '2026-09-15T06:45:00+08:00'}}
+    contract = _current_contract(tool='control', inputs={'checkpoint': 'a'}, knobs={'lr': 1}, effective_seed=1,
+                                 stop_args={'effective_max_updates': 1, 'effective_end_time_hkt': '2026-09-15T06:45:00+08:00'})
     control.create_or_validate_run_contract(tmp_path, contract, resume=False)
     requested = {**contract, **changed, 'stop_args': {**contract['stop_args'], 'effective_max_updates': 2}}
     with pytest.raises(control.RunStateError, match='mismatch'):
@@ -193,7 +208,7 @@ def test_stop_extensions_do_not_relax_other_contract_identity(tmp_path: Path, ch
 
 
 def test_malformed_or_nonmonotonic_stop_amendment_fails_closed(tmp_path: Path) -> None:
-    contract = {'stop_args': {'effective_max_updates': 1, 'effective_end_time_hkt': '2026-09-15T06:45:00+08:00'}}
+    contract = _current_contract(stop_args={'effective_max_updates': 1, 'effective_end_time_hkt': '2026-09-15T06:45:00+08:00'})
     control.create_or_validate_run_contract(tmp_path, contract, resume=False)
     audit = tmp_path / 'stop_budget_amendments.jsonl'
     audit.write_text('{bad json}\n')
@@ -206,7 +221,7 @@ def test_malformed_or_nonmonotonic_stop_amendment_fails_closed(tmp_path: Path) -
 
 
 def test_stop_amendments_must_be_timestamp_ordered_and_contiguous(tmp_path: Path) -> None:
-    contract = {'stop_args': {'effective_max_updates': 1, 'effective_end_time_hkt': '2026-09-15T06:45:00+08:00'}}
+    contract = _current_contract(stop_args={'effective_max_updates': 1, 'effective_end_time_hkt': '2026-09-15T06:45:00+08:00'})
     control.create_or_validate_run_contract(tmp_path, contract, resume=False)
     first = {'effective_max_updates': 2, 'effective_end_time_hkt': '2026-09-15T06:45:00+08:00'}
     second = {'effective_max_updates': 3, 'effective_end_time_hkt': '2026-09-15T06:45:00+08:00'}
@@ -218,84 +233,49 @@ def test_stop_amendments_must_be_timestamp_ordered_and_contiguous(tmp_path: Path
     ]
     (tmp_path / 'stop_budget_amendments.jsonl').write_text('\n'.join(json.dumps(row) for row in rows) + '\n')
     with pytest.raises(control.RunStateError, match='amendment'):
-        control.create_or_validate_run_contract(tmp_path, {'stop_args': second}, resume=True)
+        control.create_or_validate_run_contract(tmp_path, _current_contract(stop_args=second), resume=True)
 
 
-def test_legacy_null_max_budget_can_be_adopted_but_its_identity_remains_locked(tmp_path: Path) -> None:
-    legacy = {'tool': 'control', 'inputs': {'checkpoint': 'a'}, 'knobs': {'lr': 1}, 'effective_seed': 1,
-              'provenance': {'git_commit': 'old-runtime'},
-              'stop_args': {'end_time_hkt': '2026-09-15T06:45:00+08:00', 'max_updates': None}}
-    (tmp_path / 'run.json').write_text(json.dumps(legacy))
-    requested = {'tool': 'control', 'inputs': {'checkpoint': 'a'}, 'knobs': {'lr': 1}, 'effective_seed': 1,
-                 'provenance': {'git_commit': 'new-runtime'},
-                 'stop_args': {'effective_max_updates': 250, 'effective_end_time_hkt': '2026-09-15T12:00:00+08:00'}}
-    control.create_or_validate_run_contract(tmp_path, requested, resume=True)
-    assert json.loads((tmp_path / 'run.json').read_text()) == legacy
-    assert json.loads((tmp_path / 'stop_budget_amendments.jsonl').read_text())['prior']['effective_max_updates'] == 200
-    assert json.loads((tmp_path / 'stop_budget_amendments.jsonl').read_text())['runtime_provenance']['git_commit'] == 'new-runtime'
-    with pytest.raises(control.RunStateError, match='mismatch'):
-        control.create_or_validate_run_contract(tmp_path, {**requested, 'inputs': {'checkpoint': 'changed'}}, resume=True)
-    with pytest.raises(control.RunStateError, match='mismatch'):
-        control.create_or_validate_run_contract(
-            tmp_path, {**requested, 'provenance': {'git_commit': 'new-runtime', 'init_checkpoint': 'changed'}}, resume=True,
-        )
-
-
-def test_legacy_looking_integer_max_does_not_adopt_runtime_provenance(tmp_path: Path) -> None:
-    """Only the historical null-max stop shape may adopt runtime provenance."""
-    existing = {
-        'tool': 'control', 'provenance': {'git_commit': 'old-runtime'},
-        'stop_args': {'end_time_hkt': '2026-09-15T06:45:00+08:00', 'max_updates': 201},
-    }
+@pytest.mark.parametrize('bad_version', [None, 0, 2, True, 1.0])
+def test_resume_requires_exact_integer_current_schema_version(tmp_path: Path, bad_version: object) -> None:
+    """Versionless, old, unsupported, bool, and float runs are archival-only."""
+    existing = {'tool': 'control', 'stop_args': {
+        'end_time_hkt': '2026-09-15T06:45:00+08:00', 'max_updates': None,
+    }}
+    if bad_version is not None:
+        existing['schema_version'] = bad_version
     (tmp_path / 'run.json').write_text(json.dumps(existing))
-    requested = {
-        'tool': 'control', 'provenance': {'git_commit': 'new-runtime'},
-        'stop_args': {
-            'effective_max_updates': 201,
-            'effective_end_time_hkt': '2026-09-15T06:45:00+08:00',
-        },
-    }
+    with pytest.raises(control.RunStateError, match='schema_version'):
+        control.create_or_validate_run_contract(
+            tmp_path,
+            _current_contract(tool='control', stop_args={
+                'effective_max_updates': 201,
+                'effective_end_time_hkt': '2026-09-15T07:00:00+08:00',
+            }),
+            resume=True,
+        )
+    assert not (tmp_path / 'stop_budget_amendments.jsonl').exists()
 
-    with pytest.raises(control.RunStateError, match='mismatch'):
-        control.create_or_validate_run_contract(tmp_path, requested, resume=True)
+
+def test_fresh_contract_writes_schema_version_and_exact_current_version_resumes(tmp_path: Path) -> None:
+    contract = _current_contract(tool='control', stop_args={
+        'effective_max_updates': 1, 'effective_end_time_hkt': '2026-09-15T06:45:00+08:00',
+    })
+    control.create_or_validate_run_contract(tmp_path, contract, resume=False)
+    assert json.loads((tmp_path / 'run.json').read_text())['schema_version'] == _CURRENT_SCHEMA_VERSION
+    control.create_or_validate_run_contract(tmp_path, contract, resume=True)
 
 
-def test_legacy_completed_200_resume_with_only_end_time_authorizes_update_201(tmp_path: Path) -> None:
-    """A legacy null target adopts the end-time-only unbounded target on resume."""
-    legacy = {
-        'tool': 'control', 'provenance': {'git_commit': 'old-runtime'},
-        'stop_args': {'end_time_hkt': '2026-09-15T06:45:00+08:00', 'max_updates': None},
-    }
-    (tmp_path / 'run.json').write_text(json.dumps(legacy))
-    args = control.apply_mode_defaults(control.build_parser().parse_args([
-        '--init-checkpoint', 'init.pt', '--teacher', 'teacher.pt', '--run-dir', str(tmp_path),
-        '--end-time', '20260915-1200', '--resume',
-    ]))
-    requested = {
-        'tool': 'control', 'provenance': {'git_commit': 'new-runtime'},
-        'stop_args': {
-            'effective_max_updates': args.effective_max_updates,
-            'effective_end_time_hkt': args.effective_end_time.isoformat(),
-        },
-    }
-
-    completed = 200
-    control.create_or_validate_run_contract(tmp_path, requested, resume=True)
-    authorized = control._read_authorized_stop_budget(tmp_path, legacy)
-
-    assert authorized['effective_max_updates'] == 2_147_483_647
-    assert completed + 1 == 201
-    assert control.boundary_stop_reason(
-        completed=completed, configured_updates=args.updates,
-        max_updates=authorized['effective_max_updates'], end_time=args.effective_end_time,
-        now=control.parse_end_time('20260915-0700'), max_updates_explicit=False,
-    ) is None
+def test_fresh_contract_without_current_schema_version_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(control.RunStateError, match='schema_version'):
+        control.create_or_validate_run_contract(tmp_path, {'tool': 'control'}, resume=False)
+    assert not (tmp_path / 'run.json').exists()
 
 
 def test_contract_is_immutable_and_recovery_is_atomic_and_fail_closed(tmp_path: Path) -> None:
-    contract = {"tool": "control", "inputs": {"checkpoint": "a"}, "no_promotion": True,
-                "stop_args": {"effective_max_updates": 1,
-                              "effective_end_time_hkt": "2026-09-15T06:45:00+08:00"}}
+    contract = _current_contract(tool="control", inputs={"checkpoint": "a"}, no_promotion=True,
+                                 stop_args={"effective_max_updates": 1,
+                                            "effective_end_time_hkt": "2026-09-15T06:45:00+08:00"})
     control.create_or_validate_run_contract(tmp_path, contract, resume=False)
     assert json.loads((tmp_path / "run.json").read_text()) == contract
     control.create_or_validate_run_contract(tmp_path, contract, resume=True)

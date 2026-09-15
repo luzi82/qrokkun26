@@ -54,6 +54,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _HKT = ZoneInfo("Asia/Hong_Kong")
 UNBOUNDED_MAX_UPDATES = 2_147_483_647
 FAR_FUTURE_END_TIME = dt.datetime(2099, 12, 31, 23, 59, tzinfo=_HKT)
+CURRENT_RUN_SCHEMA_VERSION = 1
 
 
 class RunStateError(RuntimeError):
@@ -69,12 +70,12 @@ def parse_end_time(value: str) -> dt.datetime:
 
 
 def resolve_stop_budget(
-    max_updates: int | None, end_time: dt.datetime | None, *, legacy_max_updates: int,
+    max_updates: int | None, end_time: dt.datetime | None, *, default_max_updates: int,
 ) -> tuple[int, dt.datetime]:
     """Resolve the paired stop budget without changing the public CLI."""
     return (
         UNBOUNDED_MAX_UPDATES if max_updates is None and end_time is not None
-        else legacy_max_updates if max_updates is None else max_updates,
+        else default_max_updates if max_updates is None else max_updates,
         FAR_FUTURE_END_TIME if end_time is None else end_time,
     )
 
@@ -84,7 +85,7 @@ def effective_stop_budget(args: argparse.Namespace) -> tuple[int, dt.datetime]:
     if not hasattr(args, "effective_max_updates") or not hasattr(args, "effective_end_time"):
         effective_max, effective_end = resolve_stop_budget(
             getattr(args, "max_updates", None), getattr(args, "end_time", None),
-            legacy_max_updates=args.updates,
+            default_max_updates=args.updates,
         )
         args.effective_max_updates = effective_max
         args.effective_end_time = effective_end
@@ -208,20 +209,15 @@ def load_recovery(path: Path, device: torch.device) -> dict[str, Any]:
 
 
 _STOP_AMENDMENTS = "stop_budget_amendments.jsonl"
-_RUNTIME_PROVENANCE_FIELDS = frozenset({"git_commit", "dirty", "torch_version", "device"})
-
-
-def _stop_budget(stop_args: Any, *, legacy: bool = False) -> dict[str, Any]:
+def _stop_budget(stop_args: Any) -> dict[str, Any]:
     """Validate and normalize a persisted/requested effective stop budget."""
     if not isinstance(stop_args, dict):
         raise RunStateError("resume stop budget is malformed")
-    max_key = "max_updates" if legacy else "effective_max_updates"
-    end_key = "end_time_hkt" if legacy else "effective_end_time_hkt"
+    max_key = "effective_max_updates"
+    end_key = "effective_end_time_hkt"
     if set(stop_args) != {max_key, end_key}:
         raise RunStateError("resume stop budget is malformed")
     maximum = stop_args[max_key]
-    if legacy and maximum is None:
-        maximum = PPO_UPDATES
     if isinstance(maximum, bool) or not isinstance(maximum, int) or maximum < 0:
         raise RunStateError("resume stop budget is malformed")
     end_text = stop_args[end_key]
@@ -240,36 +236,22 @@ def _stop_budget(stop_args: Any, *, legacy: bool = False) -> dict[str, Any]:
     return {"effective_max_updates": maximum, "effective_end_time_hkt": end_text}
 
 
-def _legacy_contract(existing: dict[str, Any]) -> bool:
-    stop = existing.get("stop_args")
-    if not isinstance(stop, dict) or set(stop) != {"max_updates", "end_time_hkt"} \
-            or stop["max_updates"] is not None:
-        return False
-    try:
-        _stop_budget(stop, legacy=True)
-    except RunStateError:
-        return False
-    return True
-
-
-def _without_stop_and_runtime_provenance(contract: dict[str, Any], *, legacy: bool) -> dict[str, Any]:
-    """The sole legacy migration exception is runtime provenance evolution."""
+def _without_stop(contract: dict[str, Any]) -> dict[str, Any]:
     reduced = dict(contract)
     reduced.pop("stop_args", None)
-    if legacy:
-        provenance = reduced.get("provenance")
-        if not isinstance(provenance, dict):
-            raise RunStateError("legacy resume contract is malformed")
-        reduced["provenance"] = {
-            key: value for key, value in provenance.items() if key not in _RUNTIME_PROVENANCE_FIELDS
-        }
     return reduced
+
+
+def _require_current_schema_version(contract: dict[str, Any]) -> None:
+    schema_version = contract.get("schema_version")
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int) \
+            or schema_version != CURRENT_RUN_SCHEMA_VERSION:
+        raise RunStateError("run.json schema_version is unsupported")
 
 
 def _read_authorized_stop_budget(run_dir: Path, original: dict[str, Any]) -> dict[str, Any]:
     """Resolve original budget plus a strictly contiguous amendment chain."""
-    legacy = _legacy_contract(original)
-    authorized = _stop_budget(original.get("stop_args"), legacy=legacy)
+    authorized = _stop_budget(original.get("stop_args"))
     path = run_dir / _STOP_AMENDMENTS
     if not path.exists():
         return authorized
@@ -330,13 +312,8 @@ def create_or_validate_run_contract(run_dir: Path, contract: dict[str, Any], *, 
             raise RunStateError("resume run.json is malformed") from exc
         if not isinstance(existing, dict) or not isinstance(contract, dict):
             raise RunStateError("resume immutable run contract mismatch")
-        legacy = _legacy_contract(existing)
-        if _without_stop_and_runtime_provenance(existing, legacy=legacy) != \
-                _without_stop_and_runtime_provenance(contract, legacy=legacy):
-            raise RunStateError("resume immutable run contract mismatch")
-        # Current-schema runs retain exact provenance.  Only the explicitly
-        # recognized pre-extension shape may adopt a later runtime commit.
-        if not legacy and existing.get("provenance") != contract.get("provenance"):
+        _require_current_schema_version(existing)
+        if _without_stop(existing) != _without_stop(contract):
             raise RunStateError("resume immutable run contract mismatch")
         authorized = _read_authorized_stop_budget(run_dir, existing)
         requested = _stop_budget(contract.get("stop_args"))
@@ -351,6 +328,9 @@ def create_or_validate_run_contract(run_dir: Path, contract: dict[str, Any], *, 
         return
     if path.exists():
         raise RunStateError("run directory already has run.json; use --resume")
+    if not isinstance(contract, dict):
+        raise RunStateError("run.json schema_version is unsupported")
+    _require_current_schema_version(contract)
     atomic_write_json(path, contract)
 
 
@@ -1327,7 +1307,7 @@ def apply_mode_defaults(args: argparse.Namespace) -> argparse.Namespace:
         raise ValueError("--max-updates must be non-negative")
     args.effective_max_updates, args.effective_end_time = resolve_stop_budget(
         getattr(args, "max_updates", None), getattr(args, "end_time", None),
-        legacy_max_updates=args.updates,
+        default_max_updates=args.updates,
     )
     if getattr(args, "run_dir", None) is not None:
         args.run_dir = Path(args.run_dir)
@@ -1397,7 +1377,8 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
     knobs["data_frames_cap"] = args.data_frames_cap
 
     contract = {
-        "format": 1, "tool": "phase3_ranked_ppo_retention", "arm": "control",
+        "format": 1, "schema_version": CURRENT_RUN_SCHEMA_VERSION,
+        "tool": "phase3_ranked_ppo_retention", "arm": "control",
         "inputs": {"init_checkpoint": init_prov, "teacher": teacher_prov}, "provenance": provenance,
         "knobs": knobs,
         "stop_args": {

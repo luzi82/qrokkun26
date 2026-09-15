@@ -999,6 +999,7 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
 
     contract = {
         "format": 1,
+        "schema_version": ret_mod.CURRENT_RUN_SCHEMA_VERSION,
         "tool": "phase3_ranked_ppo_retention_aux",
         "arm": "aux",
         "inputs": {"init_checkpoint": init_prov, "teacher": provenance["teacher"]},
