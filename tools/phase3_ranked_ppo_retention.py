@@ -54,7 +54,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _HKT = ZoneInfo("Asia/Hong_Kong")
 UNBOUNDED_MAX_UPDATES = 2_147_483_647
 FAR_FUTURE_END_TIME = dt.datetime(2099, 12, 31, 23, 59, tzinfo=_HKT)
-CURRENT_RUN_SCHEMA_VERSION = 1
+CURRENT_RUN_SCHEMA_VERSION = 2
+RECOVERY_ARCHIVE_INTERVAL = 200
+RECOVERY_ARCHIVE_DIRNAME = "recovery_archives"
 
 
 def _now_hkt() -> dt.datetime:
@@ -94,6 +96,34 @@ def effective_stop_budget(args: argparse.Namespace) -> tuple[int, dt.datetime]:
         args.effective_max_updates = effective_max
         args.effective_end_time = effective_end
     return args.effective_max_updates, args.effective_end_time
+
+
+def resolve_resume_from_stop_budget(
+    args: argparse.Namespace, selected_update: int, *, now: dt.datetime | None = None,
+) -> tuple[int, dt.datetime]:
+    """Treat selected archive N as resume mode and resolve this invocation's stop budget."""
+    args.resume = True
+    if (
+        isinstance(selected_update, bool)
+        or not isinstance(selected_update, int)
+        or selected_update <= 0
+        or selected_update % RECOVERY_ARCHIVE_INTERVAL != 0
+    ):
+        raise ValueError("--resume-from-update must be a positive multiple of 200")
+    max_updates = getattr(args, "max_updates", None)
+    end_time = getattr(args, "end_time", None)
+    if max_updates is None and end_time is None:
+        raise ValueError("--resume-from-update requires a stop flag (--max-updates and/or --end-time)")
+    if max_updates is not None and max_updates <= selected_update:
+        raise ValueError("--max-updates must be strictly greater than --resume-from-update")
+    current = _now_hkt() if now is None else now
+    if end_time is not None and end_time <= current:
+        raise ValueError("--end-time must be strictly later than the current HKT time")
+    target = UNBOUNDED_MAX_UPDATES if max_updates is None else max_updates
+    deadline = FAR_FUTURE_END_TIME if end_time is None else end_time
+    args.effective_max_updates = target
+    args.effective_end_time = deadline
+    return target, deadline
 
 
 def _atomic_replace(path: Path, write: Any) -> None:
@@ -192,6 +222,100 @@ def restore_rng_state(state: dict[str, Any]) -> None:
 
 def atomic_save_recovery(path: Path, state: dict[str, Any]) -> None:
     _atomic_replace(path, lambda tmp: torch.save(state, tmp))
+
+
+def archived_recovery_path(run_dir: Path, update: int) -> Path:
+    return run_dir / RECOVERY_ARCHIVE_DIRNAME / f"update_{update}.pt"
+
+
+def save_archived_recovery_if_due(run_dir: Path, state: dict[str, Any]) -> None:
+    update = state["completed_update"]
+    if update > 0 and update % RECOVERY_ARCHIVE_INTERVAL == 0:
+        atomic_save_recovery(archived_recovery_path(run_dir, update), state)
+
+
+def load_archived_recovery(run_dir: Path, update: int, device: torch.device) -> dict[str, Any]:
+    """Load a schema-v2 archived full recovery; do not restore RNG as a side effect."""
+    if (
+        isinstance(update, bool)
+        or not isinstance(update, int)
+        or update <= 0
+        or update % RECOVERY_ARCHIVE_INTERVAL != 0
+    ):
+        raise RunStateError("--resume-from-update must be a positive multiple of 200")
+    path = archived_recovery_path(run_dir, update)
+    if not path.is_file():
+        raise RunStateError("selected recovery archive is missing")
+    try:
+        state = torch.load(path, map_location=torch.device("cpu"), weights_only=False)
+        if not isinstance(state, dict) or not isinstance(state.get("completed_update"), int):
+            raise ValueError("missing completed_update")
+    except (OSError, EOFError, RuntimeError, TypeError, ValueError, KeyError, pickle.UnpicklingError) as exc:
+        raise RunStateError("selected recovery archive is malformed") from exc
+    if state["completed_update"] != update:
+        raise RunStateError("selected recovery archive completed_update does not match N")
+    return state
+
+
+def _atomic_rewrite_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
+    payload = "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows)
+    _atomic_replace(path, lambda tmp: tmp.write_text(payload))
+
+
+def rewind_run_to_archived_recovery(
+    run_dir: Path, update: int, *, progress_filename: str, device: torch.device,
+) -> None:
+    """Restore archive N as latest recovery and destroy same-run history after N."""
+    state = load_archived_recovery(run_dir, update, device)
+    atomic_save_recovery(run_dir / "recovery.pt", state)
+    progress_path = run_dir / progress_filename
+    if progress_path.exists():
+        try:
+            kept: list[dict[str, Any]] = []
+            seen: set[int] = set()
+            for number, line in enumerate(progress_path.read_text().splitlines(), start=1):
+                row = json.loads(line)
+                row_update = row.get("update")
+                if isinstance(row_update, bool) or not isinstance(row_update, int) or row_update < 1:
+                    raise ValueError(f"invalid update on line {number}")
+                if row_update in seen:
+                    raise ValueError(f"duplicate update {row_update}")
+                seen.add(row_update)
+                if row_update <= update:
+                    kept.append(row)
+        except (OSError, json.JSONDecodeError, AttributeError, ValueError) as exc:
+            raise RunStateError("progress journal is malformed") from exc
+        _atomic_rewrite_jsonl(progress_path, kept)
+    archive_dir = run_dir / RECOVERY_ARCHIVE_DIRNAME
+    if archive_dir.is_dir():
+        for archive in archive_dir.iterdir():
+            name = archive.name
+            if not name.startswith("update_") or not name.endswith(".pt"):
+                continue
+            try:
+                parsed = int(name[len("update_"):-len(".pt")])
+            except ValueError:
+                continue
+            if parsed > update:
+                archive.unlink()
+    amendments_path = run_dir / _STOP_AMENDMENTS
+    if amendments_path.exists():
+        try:
+            kept_amendments: list[dict[str, Any]] = []
+            for line in amendments_path.read_text().splitlines():
+                if not line:
+                    continue
+                row = json.loads(line)
+                completed = row.get("completed_update")
+                if isinstance(completed, bool) or not isinstance(completed, int) or completed < 0:
+                    raise ValueError("bad completed_update")
+                if completed <= update:
+                    kept_amendments.append(row)
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise RunStateError("stop budget amendment log is malformed") from exc
+        _atomic_rewrite_jsonl(amendments_path, kept_amendments)
+    append_run_status(run_dir, {"event": "rewound_to_archived_recovery", "completed_update": update})
+
 
 
 def load_recovery(path: Path, device: torch.device) -> dict[str, Any]:
@@ -313,21 +437,28 @@ def _append_stop_budget_amendment(
         os.fsync(audit.fileno())
 
 
+def require_matching_current_run_contract(run_dir: Path, contract: dict[str, Any]) -> dict[str, Any]:
+    """Fail closed on schema/identity before any resume mutation."""
+    path = run_dir / "run.json"
+    if not path.is_file():
+        raise RunStateError("resume requested but run.json is missing")
+    try:
+        existing = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RunStateError("resume run.json is malformed") from exc
+    if not isinstance(existing, dict) or not isinstance(contract, dict):
+        raise RunStateError("resume immutable run contract mismatch")
+    _require_current_schema_version(existing)
+    if _without_stop(existing) != _without_stop(contract):
+        raise RunStateError("resume immutable run contract mismatch")
+    return existing
+
+
 def create_or_validate_run_contract(run_dir: Path, contract: dict[str, Any], *, resume: bool) -> dict[str, Any] | None:
     """Lock experiment identity; append audited stop-budget revisions."""
     path = run_dir / "run.json"
     if resume:
-        if not path.is_file():
-            raise RunStateError("resume requested but run.json is missing")
-        try:
-            existing = json.loads(path.read_text())
-        except (OSError, json.JSONDecodeError) as exc:
-            raise RunStateError("resume run.json is malformed") from exc
-        if not isinstance(existing, dict) or not isinstance(contract, dict):
-            raise RunStateError("resume immutable run contract mismatch")
-        _require_current_schema_version(existing)
-        if _without_stop(existing) != _without_stop(contract):
-            raise RunStateError("resume immutable run contract mismatch")
+        existing = require_matching_current_run_contract(run_dir, contract)
         authorized = _read_authorized_stop_budget(run_dir, existing)
         requested = _stop_budget(contract.get("stop_args"))
         requested_end = dt.datetime.fromisoformat(requested["effective_end_time_hkt"])
@@ -1175,12 +1306,14 @@ def run_ppo_arm(
     reconcile_progress_journal(jsonl_path, completed_update=completed)
 
     def _save_boundary() -> None:
-        atomic_save_recovery(recovery_path, {
+        state = {
             "format": 1, "arm": "control", "model": net.state_dict(),
             "optimizer": opt.state_dict(), "completed_update": completed,
             "total_frames": total_frames, "optimizer_steps": optimizer_steps,
             "snapshots": snapshots, "rng": capture_rng_state(),
-        })
+        }
+        atomic_save_recovery(recovery_path, state)
+        save_archived_recovery_if_due(out_dir, state)
 
     if not getattr(args, "resume", False):
         _save_boundary()
@@ -1287,6 +1420,10 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--end-time", type=parse_end_time, help="HKT deadline: YYYYMMDD-HHMM")
     ap.add_argument("--max-updates", type=int, help="maximum completed updates for this run")
     ap.add_argument("--resume", action="store_true", help="resume only from a matching recovery boundary")
+    ap.add_argument(
+        "--resume-from-update", type=int, metavar="N",
+        help="resume exactly from archived full recovery update N (positive multiple of 200)",
+    )
     ap.add_argument("--seed", type=int, help="optional explicit RNG seed")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--quick", action="store_true")
@@ -1322,10 +1459,16 @@ def apply_mode_defaults(args: argparse.Namespace) -> argparse.Namespace:
         args.initial_gate_median_min = INITIAL_GATE_MEDIAN_MIN
     if getattr(args, "max_updates", None) is not None and args.max_updates < 0:
         raise ValueError("--max-updates must be non-negative")
-    args.effective_max_updates, args.effective_end_time = resolve_stop_budget(
-        getattr(args, "max_updates", None), getattr(args, "end_time", None),
-        default_max_updates=args.updates,
-    )
+    selected = getattr(args, "resume_from_update", None)
+    if selected is not None:
+        args.effective_max_updates, args.effective_end_time = resolve_resume_from_stop_budget(
+            args, selected,
+        )
+    else:
+        args.effective_max_updates, args.effective_end_time = resolve_stop_budget(
+            getattr(args, "max_updates", None), getattr(args, "end_time", None),
+            default_max_updates=args.updates,
+        )
     if getattr(args, "run_dir", None) is not None:
         args.run_dir = Path(args.run_dir)
     elif hasattr(args, "out_dir"):
@@ -1407,7 +1550,25 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
     # A resume is tied to an immutable contract.  Validate it before the
     # initial gate, which evaluates the environment, while retaining the
     # historical new-run gate-before-run-creation behaviour.
-    if getattr(args, "resume", False):
+    selected = getattr(args, "resume_from_update", None)
+    if selected is not None:
+        resolved_max, resolved_end = resolve_resume_from_stop_budget(args, selected)
+        args.effective_max_updates = resolved_max
+        args.effective_end_time = resolved_end
+        effective_max_updates, effective_end_time = resolved_max, resolved_end
+        contract["stop_args"] = {
+            "effective_end_time_hkt": resolved_end.isoformat(),
+            "effective_max_updates": resolved_max,
+        }
+        require_matching_current_run_contract(out_dir, contract)
+        rewind_run_to_archived_recovery(
+            out_dir, selected, progress_filename="ppo_updates.jsonl", device=device,
+        )
+        authorized = create_or_validate_run_contract(out_dir, contract, resume=True)
+        args.effective_max_updates = authorized["effective_max_updates"]
+        args.effective_end_time = dt.datetime.fromisoformat(authorized["effective_end_time_hkt"])
+        effective_max_updates, effective_end_time = args.effective_max_updates, args.effective_end_time
+    elif getattr(args, "resume", False):
         authorized = create_or_validate_run_contract(out_dir, contract, resume=True)
         args.effective_max_updates = authorized["effective_max_updates"]
         args.effective_end_time = dt.datetime.fromisoformat(authorized["effective_end_time_hkt"])

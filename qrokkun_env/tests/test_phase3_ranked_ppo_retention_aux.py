@@ -1198,6 +1198,7 @@ def test_parser_exposes_only_the_allowed_flags() -> None:
         "--end-time",
         "--max-updates",
         "--resume",
+        "--resume-from-update",
         "--seed",
         "--device",
         "--quick",

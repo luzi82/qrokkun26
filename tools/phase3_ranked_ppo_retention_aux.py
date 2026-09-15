@@ -794,7 +794,7 @@ def run_aux_arm(
     reconcile_progress_journal(jsonl_path, completed_update=completed)
 
     def _save_boundary() -> None:
-        ret_mod.atomic_save_recovery(recovery_path, {
+        state = {
             "format": 1, "arm": "aux", "model": net.state_dict(), "optimizer": opt.state_dict(),
             "completed_update": completed, "total_episodes": total_episodes, "total_frames": total_frames,
             "optimizer_steps": optimizer_steps, "snapshots": snapshots, "alpha": alpha,
@@ -805,7 +805,9 @@ def run_aux_arm(
             "training_generator_state": generator.get_state(),
             "calibration_generator_state": calib_gen.get_state(),
             "diagnostic_generator_state": diag_gen.get_state(), "rng": ret_mod.capture_rng_state(),
-        })
+        }
+        ret_mod.atomic_save_recovery(recovery_path, state)
+        ret_mod.save_archived_recovery_if_due(out_dir, state)
 
     if not getattr(args, "resume", False):
         _save_boundary()
@@ -940,6 +942,10 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--end-time", type=ret_mod.parse_end_time, help="HKT deadline: YYYYMMDD-HHMM")
     ap.add_argument("--max-updates", type=int, help="maximum completed updates for this run")
     ap.add_argument("--resume", action="store_true", help="resume only from a matching recovery boundary")
+    ap.add_argument(
+        "--resume-from-update", type=int, metavar="N",
+        help="resume exactly from archived full recovery update N (positive multiple of 200)",
+    )
     ap.add_argument("--seed", type=int, help="optional explicit RNG seed")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--quick", action="store_true")
@@ -1012,9 +1018,25 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
         "effective_seed": getattr(args, "effective_seed", PPO_TORCH_SEED),
         "no_promotion": True,
     }
-    authorized = ret_mod.create_or_validate_run_contract(
-        out_dir, contract, resume=getattr(args, "resume", False),
-    )
+    selected = getattr(args, "resume_from_update", None)
+    if selected is not None:
+        resolved_max, resolved_end = ret_mod.resolve_resume_from_stop_budget(args, selected)
+        args.effective_max_updates = resolved_max
+        args.effective_end_time = resolved_end
+        effective_max_updates, effective_end_time = resolved_max, resolved_end
+        contract["stop_args"] = {
+            "effective_end_time_hkt": resolved_end.isoformat(),
+            "effective_max_updates": resolved_max,
+        }
+        ret_mod.require_matching_current_run_contract(out_dir, contract)
+        ret_mod.rewind_run_to_archived_recovery(
+            out_dir, selected, progress_filename="ppo_aux_updates.jsonl", device=device,
+        )
+        authorized = ret_mod.create_or_validate_run_contract(out_dir, contract, resume=True)
+    else:
+        authorized = ret_mod.create_or_validate_run_contract(
+            out_dir, contract, resume=getattr(args, "resume", False),
+        )
     if authorized is not None:
         args.effective_max_updates = authorized["effective_max_updates"]
         args.effective_end_time = ret_mod.dt.datetime.fromisoformat(

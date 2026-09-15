@@ -7,6 +7,7 @@ import json
 import datetime as dt
 import argparse
 from pathlib import Path
+from typing import Any
 
 import pytest
 import torch
@@ -361,7 +362,7 @@ def test_invalid_requested_stop_budget_fails_closed(tmp_path: Path, stop_args: d
     assert not (tmp_path / "stop_budget_amendments.jsonl").exists()
 
 
-@pytest.mark.parametrize('bad_version', [None, 0, 2, True, 1.0])
+@pytest.mark.parametrize('bad_version', [None, 0, 1, True, 1.0])
 def test_resume_requires_exact_integer_current_schema_version(tmp_path: Path, bad_version: object) -> None:
     """Versionless, old, unsupported, bool, and float runs are archival-only."""
     existing = {'tool': 'control', 'stop_args': {
@@ -659,3 +660,594 @@ def test_aux_resume_loop_consumes_amended_authorized_budget(
     assert updates == []
     assert resumed["completed_updates"] == 2
     assert resumed["effective_max_updates"] == 2
+
+
+def _resume_from_update_argv(*extra: str) -> list[str]:
+    return ["--init-checkpoint", "init.pt", "--teacher", "teacher.pt", *extra]
+
+
+@pytest.mark.parametrize("module", [control, aux])
+def test_resume_from_update_parser_implies_resume_mode(module) -> None:
+    """`--resume-from-update` is itself resume mode; explicit `--resume` is equivalent."""
+    without = module.apply_mode_defaults(module.build_parser().parse_args(
+        _resume_from_update_argv("--resume-from-update", "200", "--max-updates", "201"),
+    ))
+    with_flag = module.apply_mode_defaults(module.build_parser().parse_args(
+        _resume_from_update_argv("--resume", "--resume-from-update", "200", "--max-updates", "201"),
+    ))
+    assert without.resume_from_update == with_flag.resume_from_update == 200
+    assert without.resume is True and with_flag.resume is True
+    assert control.resolve_resume_from_stop_budget(without, 200) == (
+        control.resolve_resume_from_stop_budget(with_flag, 200)
+    )
+    assert without.effective_max_updates == 201
+
+
+@pytest.mark.parametrize("module", [control, aux])
+@pytest.mark.parametrize("n", [0, 199, 201])
+def test_resume_from_update_rejects_non_positive_200_multiples(module, n: int) -> None:
+    args = module.build_parser().parse_args(
+        _resume_from_update_argv("--resume-from-update", str(n), "--max-updates", "400"),
+    )
+    with pytest.raises((ValueError, control.RunStateError), match="200"):
+        control.resolve_resume_from_stop_budget(args, n)
+
+
+@pytest.mark.parametrize("module", [control, aux])
+def test_resume_from_update_rejects_missing_stop_flags(module) -> None:
+    args = module.build_parser().parse_args(
+        _resume_from_update_argv("--resume", "--resume-from-update", "200"),
+    )
+    with pytest.raises((ValueError, control.RunStateError), match="stop"):
+        control.resolve_resume_from_stop_budget(args, 200)
+
+
+@pytest.mark.parametrize("module", [control, aux])
+def test_resume_from_update_rejects_max_updates_not_strictly_greater_than_n(module) -> None:
+    args = module.build_parser().parse_args(
+        _resume_from_update_argv("--resume", "--resume-from-update", "200", "--max-updates", "200"),
+    )
+    with pytest.raises((ValueError, control.RunStateError), match="max-updates"):
+        control.resolve_resume_from_stop_budget(args, 200)
+
+
+@pytest.mark.parametrize("module", [control, aux])
+def test_resume_from_update_end_time_only_uses_unbounded_max_updates(module) -> None:
+    args = module.apply_mode_defaults(module.build_parser().parse_args(
+        _resume_from_update_argv("--resume-from-update", "200", "--end-time", "20991231-2359"),
+    ))
+    target, deadline = control.resolve_resume_from_stop_budget(args, 200)
+    assert target == control.UNBOUNDED_MAX_UPDATES
+    assert deadline == args.end_time
+
+
+@pytest.mark.parametrize("module", [control, aux])
+def test_resume_from_update_max_only_uses_far_future_end_time(module) -> None:
+    args = module.apply_mode_defaults(module.build_parser().parse_args(
+        _resume_from_update_argv("--resume-from-update", "200", "--max-updates", "400"),
+    ))
+    target, deadline = control.resolve_resume_from_stop_budget(args, 200)
+    assert target == 400
+    assert deadline == control.FAR_FUTURE_END_TIME
+
+
+def test_new_control_contract_has_schema_version_2(tmp_path: Path) -> None:
+    contract = _current_contract(tool="phase3_ranked_ppo_retention", stop_args={
+        "effective_max_updates": 1, "effective_end_time_hkt": "2099-12-31T23:59:00+08:00",
+    })
+    control.create_or_validate_run_contract(tmp_path, contract, resume=False)
+    assert json.loads((tmp_path / "run.json").read_text())["schema_version"] == 2
+    assert control.CURRENT_RUN_SCHEMA_VERSION == 2
+
+
+def test_new_aux_contract_has_schema_version_2(tmp_path: Path) -> None:
+    contract = _current_contract(tool="phase3_ranked_ppo_retention_aux", arm="aux", stop_args={
+        "effective_max_updates": 1, "effective_end_time_hkt": "2099-12-31T23:59:00+08:00",
+    })
+    control.create_or_validate_run_contract(tmp_path, contract, resume=False)
+    assert json.loads((tmp_path / "run.json").read_text())["schema_version"] == 2
+    assert aux.ret_mod.CURRENT_RUN_SCHEMA_VERSION == 2
+
+
+def _stub_control_experiment_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        control, "load_initial_checkpoint",
+        lambda *_: (torch.nn.Linear(1, 1), {"metadata": {}}),
+    )
+    monkeypatch.setattr(
+        control, "checkpoint_provenance",
+        lambda *_: {"file_sha256": "init", "state_dict_sha256": "state"},
+    )
+    monkeypatch.setattr(control, "file_sha256", lambda *_: "teacher")
+    monkeypatch.setattr(control, "current_git_commit", lambda *_: "commit")
+    monkeypatch.setattr(control, "_git_dirty", lambda *_: False)
+
+
+def test_schema_v1_is_rejected_on_normal_resume_before_evaluation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    args = argparse.Namespace(
+        out_dir=tmp_path, run_dir=tmp_path, init_checkpoint=Path("init.pt"),
+        teacher=Path("teacher.pt"), updates=1, episodes_per_update=1,
+        max_frames=1, eval_seeds=[0], eval_max_steps=1,
+        initial_gate_mean_min=0.0, initial_gate_median_min=0.0,
+        data_episodes=1, data_max_steps=1, data_frames_cap=1,
+        end_time=None, max_updates=201, effective_seed=1, resume=True,
+        resume_from_update=None, effective_max_updates=201,
+        effective_end_time=control.FAR_FUTURE_END_TIME,
+    )
+    _stub_control_experiment_identity(monkeypatch)
+    (tmp_path / "run.json").write_text(json.dumps({"schema_version": 1, "tool": "control"}))
+    monkeypatch.setattr(
+        control, "evaluate_deterministic",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("evaluation ran before schema rejection")),
+    )
+    with pytest.raises(control.RunStateError, match="schema_version"):
+        control.run_experiment(args, torch.device("cpu"))
+
+
+def test_schema_v1_is_rejected_on_resume_from_update_before_rewind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    args = argparse.Namespace(
+        out_dir=tmp_path, run_dir=tmp_path, init_checkpoint=Path("init.pt"),
+        teacher=Path("teacher.pt"), updates=1, episodes_per_update=1,
+        max_frames=1, eval_seeds=[0], eval_max_steps=1,
+        initial_gate_mean_min=0.0, initial_gate_median_min=0.0,
+        data_episodes=1, data_max_steps=1, data_frames_cap=1,
+        end_time=None, max_updates=201, effective_seed=1, resume=True,
+        resume_from_update=200, effective_max_updates=201,
+        effective_end_time=control.FAR_FUTURE_END_TIME,
+    )
+    _stub_control_experiment_identity(monkeypatch)
+    (tmp_path / "run.json").write_text(json.dumps({"schema_version": 1, "tool": "control"}))
+    (tmp_path / "recovery.pt").write_bytes(b"latest-recovery")
+    archive = tmp_path / "recovery_archives" / "update_200.pt"
+    archive.parent.mkdir(parents=True)
+    archive.write_bytes(b"archive-200")
+    monkeypatch.setattr(
+        control, "evaluate_deterministic",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("evaluation ran before schema rejection")),
+    )
+    with pytest.raises(control.RunStateError, match="schema_version"):
+        control.run_experiment(args, torch.device("cpu"))
+    assert (tmp_path / "recovery.pt").read_bytes() == b"latest-recovery"
+    assert archive.read_bytes() == b"archive-200"
+
+
+def test_archived_recovery_path_for_update_200(tmp_path: Path) -> None:
+    assert control.archived_recovery_path(tmp_path, 200) == tmp_path / "recovery_archives" / "update_200.pt"
+
+
+def test_update_199_creates_no_recovery_archive(tmp_path: Path) -> None:
+    control.save_archived_recovery_if_due(tmp_path, {
+        "completed_update": 199, "model": {}, "optimizer": {}, "rng": control.capture_rng_state(),
+    })
+    assert not (tmp_path / "recovery_archives").exists()
+
+
+def test_update_200_archive_matches_full_recovery_payload(tmp_path: Path) -> None:
+    state = {
+        "format": 1, "arm": "control", "completed_update": 200,
+        "model": {"w": 3}, "optimizer": {"p": 4}, "total_frames": 9,
+        "optimizer_steps": 7, "snapshots": [{"update": 200}],
+        "rng": {"python": 1},
+    }
+    control.atomic_save_recovery(tmp_path / "recovery.pt", state)
+    control.save_archived_recovery_if_due(tmp_path, state)
+    archive = tmp_path / "recovery_archives" / "update_200.pt"
+    assert archive.is_file()
+    loaded = torch.load(archive, map_location="cpu", weights_only=False)
+    latest = torch.load(tmp_path / "recovery.pt", map_location="cpu", weights_only=False)
+    assert loaded == latest == state
+
+
+def test_archive_at_400_does_not_remove_update_200(tmp_path: Path) -> None:
+    control.save_archived_recovery_if_due(tmp_path, {"completed_update": 200, "marker": "a200"})
+    control.save_archived_recovery_if_due(tmp_path, {"completed_update": 400, "marker": "a400"})
+    first = torch.load(tmp_path / "recovery_archives" / "update_200.pt", map_location="cpu", weights_only=False)
+    second = torch.load(tmp_path / "recovery_archives" / "update_400.pt", map_location="cpu", weights_only=False)
+    assert first["marker"] == "a200"
+    assert second["marker"] == "a400"
+
+
+def test_control_update_200_archive_includes_scheduled_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_control_loop(monkeypatch)
+    net = _tiny_ranked()
+    control.run_ppo_arm(
+        net, torch.device("cpu"), _arm_args(tmp_path, max_updates=200), [200], None, tmp_path,
+        parent_state_dict_sha256="p", parent_file_sha256="f", dataset_hash="d", ppo_knobs={},
+    )
+    archive = torch.load(
+        tmp_path / "recovery_archives" / "update_200.pt", map_location="cpu", weights_only=False,
+    )
+    latest = control.load_recovery(tmp_path / "recovery.pt", torch.device("cpu"))
+    assert archive["completed_update"] == latest["completed_update"] == 200
+    assert any(item["update"] == 200 for item in archive["snapshots"])
+    assert archive["snapshots"] == latest["snapshots"]
+    assert set(archive) >= {"model", "optimizer", "completed_update", "total_frames", "optimizer_steps", "snapshots", "rng"}
+
+
+def test_aux_update_200_archive_includes_aux_recovery_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_aux_loop(monkeypatch)
+    net = _tiny_ranked()
+    train = {
+        "player": torch.zeros(8, PLAYER_FEAT_V4),
+        "bullets": torch.zeros(8, MAX_BULLETS_V4, BULLET_FEAT_V4),
+        "pad": torch.ones(8, MAX_BULLETS_V4, dtype=torch.bool),
+        "teacher_logits": torch.zeros(8, 5),
+        "elapsed": torch.zeros(8),
+    }
+    aux.run_aux_arm(
+        net, torch.device("cpu"), _arm_args(tmp_path, max_updates=200), [200], train, None, tmp_path,
+        parent_state_dict_sha256="p", parent_file_sha256="f", dataset_hash="d", ppo_knobs={},
+        minibatch=4,
+    )
+    archive = torch.load(
+        tmp_path / "recovery_archives" / "update_200.pt", map_location="cpu", weights_only=False,
+    )
+    latest = control.load_recovery(tmp_path / "recovery.pt", torch.device("cpu"))
+    for key in (
+        "alpha", "calibration", "training_generator_state",
+        "calibration_generator_state", "diagnostic_generator_state",
+        "model", "optimizer", "completed_update", "rng",
+    ):
+        assert key in archive
+        assert key in latest
+    assert archive["completed_update"] == 200
+    assert any(item["update"] == 200 for item in archive["snapshots"])
+
+
+def _synthetic_v2_run_through_400(tmp_path: Path) -> dict[str, Any]:
+    """A v2 run with progress 1..400, archives 200/400, latest recovery 400, mixed amendments."""
+    stop = {
+        "effective_max_updates": 800, "effective_end_time_hkt": "2099-12-31T23:59:00+08:00",
+    }
+    contract = _current_contract(tool="control", stop_args=stop)
+    control.create_or_validate_run_contract(tmp_path, contract, resume=False)
+    progress = tmp_path / "ppo_updates.jsonl"
+    progress.write_text("".join(json.dumps({"update": n, "metric": n}) + "\n" for n in range(1, 401)))
+    state_200 = {
+        "format": 1, "arm": "control", "model": {"w": 200}, "optimizer": {"p": 200},
+        "completed_update": 200, "total_frames": 200, "optimizer_steps": 200,
+        "snapshots": [{"update": 200}], "rng": control.capture_rng_state(),
+    }
+    state_400 = {
+        "format": 1, "arm": "control", "model": {"w": 400}, "optimizer": {"p": 400},
+        "completed_update": 400, "total_frames": 400, "optimizer_steps": 400,
+        "snapshots": [{"update": 200}, {"update": 400}], "rng": control.capture_rng_state(),
+    }
+    control.atomic_save_recovery(control.archived_recovery_path(tmp_path, 200), state_200)
+    control.atomic_save_recovery(control.archived_recovery_path(tmp_path, 400), state_400)
+    control.atomic_save_recovery(tmp_path / "recovery.pt", state_400)
+    amendments = [
+        {
+            "event": "stop_budget_extended",
+            "prior": stop,
+            "new": {"effective_max_updates": 600, "effective_end_time_hkt": stop["effective_end_time_hkt"]},
+            "completed_update": 100,
+            "at_hkt": "2026-09-15T08:00:00+08:00",
+            "runtime_provenance": {},
+        },
+        {
+            "event": "stop_budget_extended",
+            "prior": {"effective_max_updates": 600, "effective_end_time_hkt": stop["effective_end_time_hkt"]},
+            "new": {"effective_max_updates": 800, "effective_end_time_hkt": stop["effective_end_time_hkt"]},
+            "completed_update": 300,
+            "at_hkt": "2026-09-15T09:00:00+08:00",
+            "runtime_provenance": {},
+        },
+    ]
+    (tmp_path / "stop_budget_amendments.jsonl").write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in amendments)
+    )
+    return {"state_200": state_200, "state_400": state_400, "amendments": amendments}
+
+
+def test_rewind_to_archived_recovery_200_restores_and_prunes(tmp_path: Path) -> None:
+    fixture = _synthetic_v2_run_through_400(tmp_path)
+    control.rewind_run_to_archived_recovery(
+        tmp_path, 200, progress_filename="ppo_updates.jsonl", device=torch.device("cpu"),
+    )
+    latest = torch.load(tmp_path / "recovery.pt", map_location="cpu", weights_only=False)
+    assert latest["completed_update"] == 200
+    assert latest["model"] == fixture["state_200"]["model"]
+    updates = [json.loads(line)["update"] for line in (tmp_path / "ppo_updates.jsonl").read_text().splitlines()]
+    assert updates == list(range(1, 201))
+    assert (tmp_path / "recovery_archives" / "update_200.pt").is_file()
+    assert not (tmp_path / "recovery_archives" / "update_400.pt").exists()
+    kept = [json.loads(line) for line in (tmp_path / "stop_budget_amendments.jsonl").read_text().splitlines()]
+    assert [row["completed_update"] for row in kept] == [100]
+    events = [json.loads(line)["event"] for line in (tmp_path / "status.jsonl").read_text().splitlines()]
+    assert events[-1] == "rewound_to_archived_recovery"
+
+
+def test_rewind_missing_archive_raises_before_destructive_changes(tmp_path: Path) -> None:
+    _synthetic_v2_run_through_400(tmp_path)
+    control.archived_recovery_path(tmp_path, 200).unlink()
+    progress_before = (tmp_path / "ppo_updates.jsonl").read_text()
+    recovery_before = (tmp_path / "recovery.pt").read_bytes()
+    amendments_before = (tmp_path / "stop_budget_amendments.jsonl").read_text()
+    with pytest.raises(control.RunStateError, match="archive"):
+        control.rewind_run_to_archived_recovery(
+            tmp_path, 200, progress_filename="ppo_updates.jsonl", device=torch.device("cpu"),
+        )
+    assert (tmp_path / "ppo_updates.jsonl").read_text() == progress_before
+    assert (tmp_path / "recovery.pt").read_bytes() == recovery_before
+    assert (tmp_path / "stop_budget_amendments.jsonl").read_text() == amendments_before
+    assert (tmp_path / "recovery_archives" / "update_400.pt").is_file()
+
+
+@pytest.mark.parametrize("n", [0, 199])
+def test_rewind_rejects_non_archive_n_before_destructive_changes(tmp_path: Path, n: int) -> None:
+    _synthetic_v2_run_through_400(tmp_path)
+    progress_before = (tmp_path / "ppo_updates.jsonl").read_text()
+    recovery_before = (tmp_path / "recovery.pt").read_bytes()
+    with pytest.raises(control.RunStateError, match="200"):
+        control.rewind_run_to_archived_recovery(
+            tmp_path, n, progress_filename="ppo_updates.jsonl", device=torch.device("cpu"),
+        )
+    assert (tmp_path / "ppo_updates.jsonl").read_text() == progress_before
+    assert (tmp_path / "recovery.pt").read_bytes() == recovery_before
+    assert (tmp_path / "recovery_archives" / "update_400.pt").is_file()
+
+
+def test_rewind_rejects_archive_completed_update_mismatch_before_destructive_changes(tmp_path: Path) -> None:
+    _synthetic_v2_run_through_400(tmp_path)
+    wrong = {
+        "format": 1, "arm": "control", "model": {}, "optimizer": {},
+        "completed_update": 199, "rng": control.capture_rng_state(),
+    }
+    control.atomic_save_recovery(control.archived_recovery_path(tmp_path, 200), wrong)
+    progress_before = (tmp_path / "ppo_updates.jsonl").read_text()
+    recovery_before = (tmp_path / "recovery.pt").read_bytes()
+    with pytest.raises(control.RunStateError, match="completed_update"):
+        control.rewind_run_to_archived_recovery(
+            tmp_path, 200, progress_filename="ppo_updates.jsonl", device=torch.device("cpu"),
+        )
+    assert (tmp_path / "ppo_updates.jsonl").read_text() == progress_before
+    assert (tmp_path / "recovery.pt").read_bytes() == recovery_before
+    assert (tmp_path / "recovery_archives" / "update_400.pt").is_file()
+
+
+def _control_knobs(args: argparse.Namespace) -> dict[str, Any]:
+    knobs = control.ppo_hyperparameters()
+    knobs["updates"] = args.updates
+    knobs["episodes_per_update"] = args.episodes_per_update
+    knobs["max_frames_per_episode"] = args.max_frames
+    knobs["eval_seeds"] = args.eval_seeds
+    knobs["eval_max_steps"] = args.eval_max_steps
+    knobs["initial_gate_mean_min"] = args.initial_gate_mean_min
+    knobs["initial_gate_median_min"] = args.initial_gate_median_min
+    knobs["data_episodes"] = args.data_episodes
+    knobs["data_max_steps"] = args.data_max_steps
+    knobs["data_frames_cap"] = args.data_frames_cap
+    return knobs
+
+
+def _aux_knobs(args: argparse.Namespace) -> dict[str, Any]:
+    knobs = _control_knobs(args)
+    knobs["target_retention_grad_ratio"] = aux.TARGET_RETENTION_GRAD_RATIO
+    knobs["retention_objective"] = "phase2_ranked_multiseed.hybrid_loss"
+    knobs["retention_hard_weight"] = aux.HYBRID_HARD_WEIGHT
+    knobs["retention_soft_weight"] = aux.HYBRID_SOFT_WEIGHT
+    knobs["retention_temperature"] = aux.HYBRID_TEMPERATURE
+    knobs["retention_sampler_seed"] = aux.RETENTION_SAMPLER_SEED
+    knobs["retention_calibration_seed"] = aux.RETENTION_CALIBRATION_SEED
+    knobs["retention_diagnostic_seed"] = aux.RETENTION_DIAGNOSTIC_SEED
+    knobs["calibration_grad_samples"] = aux.CALIBRATION_GRAD_SAMPLES
+    return knobs
+
+
+def _write_matching_run_json(
+    tmp_path: Path, args: argparse.Namespace, *, tool: str, arm: str, knobs: dict[str, Any],
+    historical_max: int = 800,
+) -> None:
+    init_prov = {"file_sha256": "init", "state_dict_sha256": "state"}
+    teacher_prov = {"file_sha256": "teacher"}
+    provenance = {
+        "init_checkpoint": init_prov, "teacher": teacher_prov,
+        "git_commit": "commit", "dirty": False,
+        "torch_version": torch.__version__, "device": "cpu",
+    }
+    contract = {
+        "format": 1, "schema_version": control.CURRENT_RUN_SCHEMA_VERSION,
+        "tool": tool, "arm": arm,
+        "inputs": {"init_checkpoint": init_prov, "teacher": teacher_prov},
+        "provenance": provenance, "knobs": knobs,
+        "stop_args": {
+            "effective_end_time_hkt": "2099-12-31T23:59:00+08:00",
+            "effective_max_updates": historical_max,
+        },
+        "effective_seed": args.effective_seed, "no_promotion": True,
+    }
+    (tmp_path / "run.json").write_text(json.dumps(contract, indent=2, sort_keys=True))
+
+
+def _orch_args(tmp_path: Path, *, resume_from_update: int = 200, max_updates: int = 201) -> argparse.Namespace:
+    return argparse.Namespace(
+        updates=200, episodes_per_update=1, max_frames=4, eval_seeds=[0], eval_max_steps=4,
+        out_dir=tmp_path, run_dir=tmp_path, resume=False, seed=1,
+        max_updates=max_updates, end_time=None, resume_from_update=resume_from_update,
+        effective_max_updates=max_updates, effective_end_time=control.FAR_FUTURE_END_TIME,
+        initial_gate_mean_min=0.0, initial_gate_median_min=0.0,
+        data_episodes=1, data_max_steps=1, data_frames_cap=1,
+        init_checkpoint=Path("init.pt"), teacher=Path("teacher.pt"), effective_seed=1,
+    )
+
+
+def _stub_control_experiment(monkeypatch: pytest.MonkeyPatch, net: PlayerRankedTopK) -> list[str]:
+    order: list[str] = []
+    _stub_control_loop(monkeypatch)
+    monkeypatch.setattr(control, "load_initial_checkpoint", lambda *_: (net, {"metadata": {}}))
+    monkeypatch.setattr(control, "checkpoint_provenance", lambda *_: {"file_sha256": "init", "state_dict_sha256": "state"})
+    monkeypatch.setattr(control, "file_sha256", lambda *_: "teacher")
+    monkeypatch.setattr(control, "current_git_commit", lambda *_: "commit")
+    monkeypatch.setattr(control, "_git_dirty", lambda *_: False)
+    monkeypatch.setattr(control, "load_teacher", lambda *_: net)
+    monkeypatch.setattr(control, "collect_canonical_dataset", lambda *_a, **_k: {
+        "hash": "d", "n_episodes": 1, "n_held_episodes": 0, "n_train_episodes": 1,
+        "n_held_frames": 0, "n_train_frames": 1, "teacher_file_sha256": "teacher",
+        "held_tensors": None,
+    })
+    monkeypatch.setattr(control, "run_frozen_arm", lambda *_a, **_k: {"ok": True})
+    monkeypatch.setattr(control, "build_retention_reference", lambda snap: {"update": snap.get("update")})
+    monkeypatch.setattr(control, "evaluate_retention", lambda *_a, **_k: {})
+    real_schema = control._require_current_schema_version
+    real_rewind = control.rewind_run_to_archived_recovery
+
+    def spy_schema(contract):
+        order.append("schema")
+        return real_schema(contract)
+
+    def spy_rewind(*a, **k):
+        order.append("rewind")
+        return real_rewind(*a, **k)
+
+    def spy_eval(*a, **k):
+        order.append("eval")
+        return [{"seed": 0, "elapsed": 1.0, "censored": True}]
+
+    monkeypatch.setattr(control, "_require_current_schema_version", spy_schema)
+    monkeypatch.setattr(control, "rewind_run_to_archived_recovery", spy_rewind)
+    monkeypatch.setattr(control, "evaluate_deterministic", spy_eval)
+    return order
+
+
+def _stub_aux_experiment(monkeypatch: pytest.MonkeyPatch, net: PlayerRankedTopK) -> list[str]:
+    order: list[str] = []
+    _stub_aux_loop(monkeypatch)
+    monkeypatch.setattr(aux, "load_initial_checkpoint", lambda *_: (net, {"metadata": {}}))
+    monkeypatch.setattr(aux, "checkpoint_provenance", lambda *_: {"file_sha256": "init", "state_dict_sha256": "state"})
+    monkeypatch.setattr(aux, "file_sha256", lambda *_: "teacher")
+    monkeypatch.setattr(aux, "current_git_commit", lambda *_: "commit")
+    monkeypatch.setattr(aux, "_git_dirty", lambda *_: False)
+    monkeypatch.setattr(aux, "load_teacher", lambda *_: net)
+    monkeypatch.setattr(aux, "collect_aux_dataset", lambda *_a, **_k: {
+        "hash": "d", "n_episodes": 1, "n_held_episodes": 0, "n_train_episodes": 1,
+        "n_held_frames": 0, "n_train_frames": 1, "teacher_file_sha256": "teacher",
+        "held_tensors": None,
+        "train_tensors": {
+            "player": torch.zeros(8, PLAYER_FEAT_V4),
+            "bullets": torch.zeros(8, MAX_BULLETS_V4, BULLET_FEAT_V4),
+            "pad": torch.ones(8, MAX_BULLETS_V4, dtype=torch.bool),
+            "teacher_logits": torch.zeros(8, 5),
+            "elapsed": torch.zeros(8),
+        },
+    })
+    monkeypatch.setattr(aux, "build_retention_reference", lambda snap: {"update": snap.get("update")})
+    monkeypatch.setattr(aux, "evaluate_retention", lambda *_a, **_k: {})
+    real_schema = control._require_current_schema_version
+    real_rewind = control.rewind_run_to_archived_recovery
+
+    def spy_schema(contract):
+        order.append("schema")
+        return real_schema(contract)
+
+    def spy_rewind(*a, **k):
+        order.append("rewind")
+        return real_rewind(*a, **k)
+
+    def spy_eval(*a, **k):
+        order.append("eval")
+        return [{"seed": 0, "elapsed": 1.0, "censored": True}]
+
+    monkeypatch.setattr(control, "_require_current_schema_version", spy_schema)
+    monkeypatch.setattr(control, "rewind_run_to_archived_recovery", spy_rewind)
+    monkeypatch.setattr(aux, "evaluate_deterministic", spy_eval)
+    return order
+
+
+def _control_archive_state(net: PlayerRankedTopK, completed: int) -> dict[str, Any]:
+    opt = torch.optim.Adam(net.parameters(), lr=control.PPO_LR, eps=1e-8)
+    return {
+        "format": 1, "arm": "control", "model": net.state_dict(), "optimizer": opt.state_dict(),
+        "completed_update": completed, "total_frames": completed, "optimizer_steps": completed,
+        "snapshots": [{"update": u} for u in (200,) if u <= completed],
+        "rng": control.capture_rng_state(),
+    }
+
+
+def test_control_resume_from_update_rewinds_then_runs_n_plus_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    net = _tiny_ranked()
+    fixture = _synthetic_v2_run_through_400(tmp_path)
+    state_200 = _control_archive_state(net, 200)
+    control.atomic_save_recovery(control.archived_recovery_path(tmp_path, 200), state_200)
+    args = _orch_args(tmp_path)
+    _write_matching_run_json(
+        tmp_path, args, tool="phase3_ranked_ppo_retention", arm="control", knobs=_control_knobs(args),
+    )
+    order = _stub_control_experiment(monkeypatch, net)
+    report = control.run_experiment(args, torch.device("cpu"))
+    assert "schema" in order and "rewind" in order and "eval" in order
+    assert order.index("schema") < order.index("rewind") < order.index("eval")
+    assert report["ppo_arm"]["completed_updates"] == 201
+    assert report["stop_budget"]["effective_max_updates"] == 201
+    assert report["stop_budget"]["effective_max_updates"] != fixture["state_400"]["completed_update"]
+    latest = control.load_recovery(tmp_path / "recovery.pt", torch.device("cpu"))
+    assert latest["completed_update"] == 201
+    rows = [json.loads(line) for line in (tmp_path / "stop_budget_amendments.jsonl").read_text().splitlines()]
+    assert rows[-1]["new"]["effective_max_updates"] == 201
+
+
+def test_aux_resume_from_update_rewinds_then_runs_n_plus_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    net = _tiny_ranked()
+    args = _orch_args(tmp_path)
+    _synthetic_v2_run_through_400(tmp_path)
+    progress = tmp_path / "ppo_aux_updates.jsonl"
+    progress.write_text("".join(json.dumps({"update": n}) + "\n" for n in range(1, 401)))
+    state_200 = {
+        "format": 1, "arm": "aux", "model": net.state_dict(),
+        "optimizer": torch.optim.Adam(net.parameters()).state_dict(),
+        "completed_update": 200, "total_episodes": 200, "total_frames": 200,
+        "optimizer_steps": 200, "snapshots": [{"update": 200}], "alpha": 0.15,
+        "calibration": {"alpha": 0.15}, "calib_seeds": [50000],
+        "first_update_rollouts": [_stub_rollout(50000)],
+        "last_update_rollouts": [_stub_rollout(50000)],
+        "last_grad_alignment": {"g_ppo_norm": 1.0},
+        "training_generator_state": aux.training_generator().get_state(),
+        "calibration_generator_state": aux.calibration_generator().get_state(),
+        "diagnostic_generator_state": aux.diagnostic_generator().get_state(),
+        "rng": control.capture_rng_state(),
+    }
+    control.atomic_save_recovery(control.archived_recovery_path(tmp_path, 200), state_200)
+    control.atomic_save_recovery(tmp_path / "recovery.pt", {**state_200, "completed_update": 400})
+    _write_matching_run_json(
+        tmp_path, args, tool="phase3_ranked_ppo_retention_aux", arm="aux", knobs=_aux_knobs(args),
+    )
+    order = _stub_aux_experiment(monkeypatch, net)
+    report = aux.run_experiment(args, torch.device("cpu"))
+    assert "schema" in order and "rewind" in order and "eval" in order
+    assert order.index("schema") < order.index("rewind") < order.index("eval")
+    assert report["aux_arm"]["completed_updates"] == 201
+    assert report["stop_budget"]["effective_max_updates"] == 201
+    latest = control.load_recovery(tmp_path / "recovery.pt", torch.device("cpu"))
+    assert latest["completed_update"] == 201
+
+
+def test_resume_from_update_ignores_historical_stop_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    net = _tiny_ranked()
+    args = _orch_args(tmp_path, max_updates=201)
+    _synthetic_v2_run_through_400(tmp_path)
+    control.atomic_save_recovery(
+        control.archived_recovery_path(tmp_path, 200), _control_archive_state(net, 200),
+    )
+    _write_matching_run_json(
+        tmp_path, args, tool="phase3_ranked_ppo_retention", arm="control",
+        knobs=_control_knobs(args), historical_max=800,
+    )
+    _stub_control_experiment(monkeypatch, net)
+    report = control.run_experiment(args, torch.device("cpu"))
+    assert report["stop_budget"]["effective_max_updates"] == 201
+    assert report["ppo_arm"]["effective_max_updates"] == 201
+    assert json.loads((tmp_path / "run.json").read_text())["stop_args"]["effective_max_updates"] == 800
