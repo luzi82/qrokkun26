@@ -193,7 +193,10 @@ def load_recovery(path: Path, device: torch.device) -> dict[str, Any]:
     if not path.is_file():
         raise RunStateError("resume requested but recovery.pt is missing")
     try:
-        state = torch.load(path, map_location=device, weights_only=False)
+        # Keep the captured CPU RNG ByteTensor on CPU: torch.set_rng_state
+        # rejects CUDA tensors.  The normal subsequent model/optimizer
+        # load_state_dict calls place their tensors for ``device``.
+        state = torch.load(path, map_location=torch.device("cpu"), weights_only=False)
         if not isinstance(state, dict) or not isinstance(state.get("completed_update"), int):
             raise ValueError("missing completed_update")
         if not isinstance(state.get("model"), dict) or not isinstance(state.get("optimizer"), dict):

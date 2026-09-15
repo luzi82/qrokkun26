@@ -9,6 +9,7 @@ import argparse
 from pathlib import Path
 
 import pytest
+import torch
 
 _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
@@ -322,6 +323,56 @@ def test_recovery_round_trip_and_status_history_are_append_only(tmp_path: Path) 
     control.append_run_status(tmp_path, {"event": "resumed", "completed_update": 1})
     rows = (tmp_path / "status.jsonl").read_text().splitlines()
     assert [json.loads(row)["event"] for row in rows] == ["update_complete", "resumed"]
+
+
+def test_recovery_load_keeps_cpu_rng_state_when_resuming_to_cuda_without_gpu(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Recovery deserialization must not relocate CPU RNG state to CUDA.
+
+    The fake loader models ``torch.load(..., map_location=cuda)`` relocating
+    the saved CPU ByteTensor.  The isolated fake setter then reproduces the
+    real CPU-only ``torch.set_rng_state`` rejection without requiring CUDA.
+    """
+    cuda = torch.device("cuda")
+    cpu_rng = torch.get_rng_state()
+    relocated_rng = object()
+    map_locations: list[object] = []
+    real_set_rng_state = torch.set_rng_state
+
+    def fake_load(_path, *, map_location, weights_only):
+        assert weights_only is False
+        map_locations.append(map_location)
+        return {
+            "model": {}, "optimizer": {}, "completed_update": 201,
+            "rng": {
+                "python": control.random.getstate(),
+                "numpy": control.np.random.get_state(),
+                "torch_cpu": relocated_rng if map_location == cuda else cpu_rng,
+            },
+        }
+
+    def fake_set_rng_state(state):
+        if state is relocated_rng:
+            raise TypeError("RNG state must be a torch.ByteTensor")
+        real_set_rng_state(state)
+
+    recovery_path = tmp_path / "recovery.pt"
+    recovery_path.touch()
+    monkeypatch.setattr(control.torch, "load", fake_load)
+    monkeypatch.setattr(control.torch, "set_rng_state", fake_set_rng_state)
+
+    state = control.load_recovery(recovery_path, cuda)
+
+    assert state["completed_update"] == 201
+    assert map_locations == [torch.device("cpu")]
+    assert state["rng"]["torch_cpu"].device.type == "cpu"
+    assert state["rng"]["torch_cpu"].dtype == torch.uint8
+
+
+def test_aux_resume_uses_the_shared_control_recovery_loader() -> None:
+    assert aux.ret_mod is control
+    assert aux.ret_mod.load_recovery is control.load_recovery
 
 
 def test_stop_request_is_boundary_request_and_aux_recovery_has_alpha_generators(tmp_path: Path) -> None:
