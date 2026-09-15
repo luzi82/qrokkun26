@@ -97,6 +97,66 @@ def test_long_run_parser_accepts_run_directory_stop_controls_and_seed(module) ->
     assert args.seed == 19
 
 
+@pytest.mark.parametrize("module", [control, aux])
+@pytest.mark.parametrize(
+    "argv, expected_max, expected_end",
+    [
+        (['--end-time', '20260915-2359'], 2_147_483_647, '2026-09-15T23:59:00+08:00'),
+        (['--max-updates', '275'], 275, '2099-12-31T23:59:00+08:00'),
+        ([], 200, '2099-12-31T23:59:00+08:00'),
+        (
+            ['--end-time', '20260915-2359', '--max-updates', '275'],
+            275,
+            '2026-09-15T23:59:00+08:00',
+        ),
+    ],
+)
+def test_stop_budget_defaults_are_effective_and_not_limited_by_ppo_plan(
+    module, argv: list[str], expected_max: int, expected_end: str,
+) -> None:
+    """Parser/default handling resolves the two stop controls as one contract."""
+    args = module.apply_mode_defaults(module.build_parser().parse_args([
+        '--init-checkpoint', 'init.pt', '--teacher', 'teacher.pt', *argv,
+    ]))
+    assert args.effective_max_updates == expected_max
+    assert args.effective_end_time.isoformat() == expected_end
+
+
+def test_effective_stop_budget_controls_boundary_order_and_allows_past_200() -> None:
+    deadline = control.parse_end_time('20260915-1200')
+    assert control.boundary_stop_reason(
+        completed=200, configured_updates=200, max_updates=2_147_483_647,
+        end_time=control.FAR_FUTURE_END_TIME, now=deadline,
+    ) is None
+    assert control.boundary_stop_reason(
+        completed=275, configured_updates=200, max_updates=275,
+        end_time=deadline, now=deadline,
+    ) == 'deadline'
+    assert control.boundary_stop_reason(
+        completed=275, configured_updates=200, max_updates=275,
+        end_time=control.FAR_FUTURE_END_TIME, now=deadline,
+    ) == 'max_updates'
+
+
+def test_resume_contract_binds_effective_stop_budget(tmp_path: Path) -> None:
+    """Changing a resolved default is as incompatible as changing a CLI value."""
+    contract = {
+        'stop_args': {
+            'effective_max_updates': 2_147_483_647,
+            'effective_end_time_hkt': '2026-09-15T23:59:00+08:00',
+        },
+    }
+    control.create_or_validate_run_contract(tmp_path, contract, resume=False)
+    changed = {
+        'stop_args': {
+            'effective_max_updates': 200,
+            'effective_end_time_hkt': '2026-09-15T23:59:00+08:00',
+        },
+    }
+    with pytest.raises(control.RunStateError, match='mismatch'):
+        control.create_or_validate_run_contract(tmp_path, changed, resume=True)
+
+
 def test_contract_is_immutable_and_recovery_is_atomic_and_fail_closed(tmp_path: Path) -> None:
     contract = {"tool": "control", "inputs": {"checkpoint": "a"}, "no_promotion": True}
     control.create_or_validate_run_contract(tmp_path, contract, resume=False)

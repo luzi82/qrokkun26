@@ -52,6 +52,8 @@ from tools.phase2_ranked_multiseed import dataset_identity
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _HKT = ZoneInfo("Asia/Hong_Kong")
+UNBOUNDED_MAX_UPDATES = 2_147_483_647
+FAR_FUTURE_END_TIME = dt.datetime(2099, 12, 31, 23, 59, tzinfo=_HKT)
 
 
 class RunStateError(RuntimeError):
@@ -64,6 +66,29 @@ def parse_end_time(value: str) -> dt.datetime:
         return dt.datetime.strptime(value, "%Y%m%d-%H%M").replace(tzinfo=_HKT)
     except ValueError as exc:
         raise argparse.ArgumentTypeError("end time must be YYYYMMDD-HHMM (HKT)") from exc
+
+
+def resolve_stop_budget(
+    max_updates: int | None, end_time: dt.datetime | None, *, legacy_max_updates: int,
+) -> tuple[int, dt.datetime]:
+    """Resolve the paired stop budget without changing the public CLI."""
+    return (
+        UNBOUNDED_MAX_UPDATES if max_updates is None and end_time is not None
+        else legacy_max_updates if max_updates is None else max_updates,
+        FAR_FUTURE_END_TIME if end_time is None else end_time,
+    )
+
+
+def effective_stop_budget(args: argparse.Namespace) -> tuple[int, dt.datetime]:
+    """Return and cache the immutable budget used by a run and its resume."""
+    if not hasattr(args, "effective_max_updates") or not hasattr(args, "effective_end_time"):
+        effective_max, effective_end = resolve_stop_budget(
+            getattr(args, "max_updates", None), getattr(args, "end_time", None),
+            legacy_max_updates=args.updates,
+        )
+        args.effective_max_updates = effective_max
+        args.effective_end_time = effective_end
+    return args.effective_max_updates, args.effective_end_time
 
 
 def _atomic_replace(path: Path, write: Any) -> None:
@@ -223,15 +248,16 @@ def configure_seed(seed: int | None) -> int:
 def boundary_stop_reason(
     *, completed: int, configured_updates: int, max_updates: int | None,
     end_time: dt.datetime | None, now: dt.datetime | None = None, interrupted: bool = False,
+    max_updates_explicit: bool = True,
 ) -> str | None:
     """Return a boundary-only stop reason; deadline wins before a new update."""
     if interrupted:
         return "interrupted"
     if end_time is not None and (now or dt.datetime.now(_HKT)) >= end_time:
         return "deadline"
-    limit = min(configured_updates, max_updates) if max_updates is not None else configured_updates
+    limit = configured_updates if max_updates is None else max_updates
     if completed >= limit:
-        return "completed" if completed >= configured_updates else "max_updates"
+        return "max_updates" if max_updates_explicit else "completed"
     return None
 
 # --------------------------------------------------------------------------- #
@@ -1034,15 +1060,16 @@ def run_ppo_arm(
     for s in old_handlers:
         signal.signal(s, stop.handler)
     stop_reason: str | None = None
-    max_updates = min(args.updates, args.max_updates) if getattr(args, "max_updates", None) is not None else args.updates
+    max_updates, end_time = effective_stop_budget(args)
+    max_updates_explicit = getattr(args, "max_updates", None) is not None
     try:
         for update in range(completed + 1, max_updates + 1):
                 # A signal only requests an orderly boundary; none is claimed
                 # until this whole update has been optimized and checkpointed.
                 requested_reason = boundary_stop_reason(
                     completed=completed, configured_updates=args.updates,
-                    max_updates=getattr(args, "max_updates", None), end_time=getattr(args, "end_time", None),
-                    interrupted=stop.requested,
+                    max_updates=max_updates, end_time=end_time, interrupted=stop.requested,
+                    max_updates_explicit=max_updates_explicit,
                 )
                 if requested_reason is not None:
                     stop_reason = requested_reason
@@ -1060,23 +1087,37 @@ def run_ppo_arm(
                 append_progress_row(jsonl_path, row)
                 completed = update
                 _save_boundary()
-                append_run_status(out_dir, {"event": "update_complete", "update": update, "total_frames": total_frames})
+                append_run_status(out_dir, {
+                    "event": "update_complete", "update": update, "total_frames": total_frames,
+                    "effective_max_updates": max_updates, "effective_end_time_hkt": end_time.isoformat(),
+                })
                 if update in snapshot_updates:
                     _snapshot(update)
                     _save_boundary()
                 if stop.requested:
                     stop_reason = "interrupted"
                     break
-                if completed >= max_updates and max_updates < args.updates:
-                    stop_reason = "max_updates"
+                requested_reason = boundary_stop_reason(
+                    completed=completed, configured_updates=args.updates,
+                    max_updates=max_updates, end_time=end_time,
+                    interrupted=False, max_updates_explicit=max_updates_explicit,
+                )
+                if requested_reason is not None:
+                    stop_reason = requested_reason
                     break
     finally:
         for s, previous in old_handlers.items():
             signal.signal(s, previous)
 
     if stop_reason is None:
-        stop_reason = "completed" if completed >= args.updates else "max_updates"
-    append_run_status(out_dir, {"event": stop_reason, "completed_update": completed})
+        stop_reason = boundary_stop_reason(
+            completed=completed, configured_updates=args.updates, max_updates=max_updates,
+            end_time=end_time, max_updates_explicit=max_updates_explicit,
+        ) or "max_updates"
+    append_run_status(out_dir, {
+        "event": stop_reason, "completed_update": completed,
+        "effective_max_updates": max_updates, "effective_end_time_hkt": end_time.isoformat(),
+    })
     if completed and not any(item["update"] == completed for item in snapshots):
         _snapshot(completed)
         _save_boundary()
@@ -1100,6 +1141,8 @@ def run_ppo_arm(
         "final_checkpoint": str(final_path),
         "completed_updates": completed,
         "stop_reason": stop_reason,
+        "effective_max_updates": max_updates,
+        "effective_end_time_hkt": end_time.isoformat(),
     }
 
 
@@ -1150,6 +1193,10 @@ def apply_mode_defaults(args: argparse.Namespace) -> argparse.Namespace:
         args.initial_gate_median_min = INITIAL_GATE_MEDIAN_MIN
     if getattr(args, "max_updates", None) is not None and args.max_updates < 0:
         raise ValueError("--max-updates must be non-negative")
+    args.effective_max_updates, args.effective_end_time = resolve_stop_budget(
+        getattr(args, "max_updates", None), getattr(args, "end_time", None),
+        legacy_max_updates=args.updates,
+    )
     if getattr(args, "run_dir", None) is not None:
         args.run_dir = Path(args.run_dir)
     elif hasattr(args, "out_dir"):
@@ -1189,6 +1236,7 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
     gate passes; no checkpoint promotion happens anywhere."""
     out_dir = Path(getattr(args, "run_dir", args.out_dir))
     out_dir.mkdir(parents=True, exist_ok=True)
+    effective_max_updates, effective_end_time = effective_stop_budget(args)
 
     init_net, init_meta = load_initial_checkpoint(args.init_checkpoint, device)
     init_prov = checkpoint_provenance(args.init_checkpoint, init_meta)
@@ -1220,8 +1268,10 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
         "format": 1, "tool": "phase3_ranked_ppo_retention", "arm": "control",
         "inputs": {"init_checkpoint": init_prov, "teacher": teacher_prov}, "provenance": provenance,
         "knobs": knobs,
-        "stop_args": {"end_time_hkt": args.end_time.isoformat() if getattr(args, "end_time", None) else None,
-                      "max_updates": getattr(args, "max_updates", None)},
+        "stop_args": {
+            "effective_end_time_hkt": effective_end_time.isoformat(),
+            "effective_max_updates": effective_max_updates,
+        },
         "effective_seed": getattr(args, "effective_seed", PPO_TORCH_SEED), "no_promotion": True,
     }
     # A resume is tied to an immutable contract.  Validate it before the
@@ -1246,6 +1296,10 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
         "frozen_arm": None,
         "ppo_arm": None,
         "retention": None,
+        "stop_budget": {
+            "effective_max_updates": effective_max_updates,
+            "effective_end_time_hkt": effective_end_time.isoformat(),
+        },
     }
 
     if not initial_gate["gate_pass"]:
@@ -1260,7 +1314,11 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
 
     if not getattr(args, "resume", False):
         create_or_validate_run_contract(out_dir, contract, resume=False)
-    append_run_status(out_dir, {"event": "resume_requested" if getattr(args, "resume", False) else "started"})
+    append_run_status(out_dir, {
+        "event": "resume_requested" if getattr(args, "resume", False) else "started",
+        "effective_max_updates": effective_max_updates,
+        "effective_end_time_hkt": effective_end_time.isoformat(),
+    })
 
     teacher = load_teacher(args.teacher, device)
     dataset = collect_canonical_dataset(

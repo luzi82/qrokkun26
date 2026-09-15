@@ -813,14 +813,15 @@ def run_aux_arm(
     old_handlers = {s: signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM)}
     for s in old_handlers:
         signal.signal(s, stop.handler)
-    max_updates = min(args.updates, args.max_updates) if getattr(args, "max_updates", None) is not None else args.updates
+    max_updates, end_time = ret_mod.effective_stop_budget(args)
+    max_updates_explicit = getattr(args, "max_updates", None) is not None
     stop_reason: str | None = None
     try:
         for update in range(completed + 1, max_updates + 1):
                 requested_reason = ret_mod.boundary_stop_reason(
                     completed=completed, configured_updates=args.updates,
-                    max_updates=getattr(args, "max_updates", None), end_time=getattr(args, "end_time", None),
-                    interrupted=stop.requested,
+                    max_updates=max_updates, end_time=end_time, interrupted=stop.requested,
+                    max_updates_explicit=max_updates_explicit,
                 )
                 if requested_reason is not None:
                     stop_reason = requested_reason
@@ -857,23 +858,37 @@ def run_aux_arm(
                 last_update_rollouts = rollouts
                 last_grad_alignment = metrics["grad_alignment"]
                 _save_boundary()
-                ret_mod.append_run_status(out_dir, {"event": "update_complete", "update": update, "total_frames": total_frames})
+                ret_mod.append_run_status(out_dir, {
+                    "event": "update_complete", "update": update, "total_frames": total_frames,
+                    "effective_max_updates": max_updates, "effective_end_time_hkt": end_time.isoformat(),
+                })
                 if update in snapshot_updates:
                     _snapshot(update, rollouts, alignment=metrics["grad_alignment"])
                     _save_boundary()
                 if stop.requested:
                     stop_reason = "interrupted"
                     break
-                if completed >= max_updates and max_updates < args.updates:
-                    stop_reason = "max_updates"
+                requested_reason = ret_mod.boundary_stop_reason(
+                    completed=completed, configured_updates=args.updates,
+                    max_updates=max_updates, end_time=end_time,
+                    max_updates_explicit=max_updates_explicit,
+                )
+                if requested_reason is not None:
+                    stop_reason = requested_reason
                     break
     finally:
         for s, previous in old_handlers.items():
             signal.signal(s, previous)
 
     if stop_reason is None:
-        stop_reason = "completed" if completed >= args.updates else "max_updates"
-    ret_mod.append_run_status(out_dir, {"event": stop_reason, "completed_update": completed})
+        stop_reason = ret_mod.boundary_stop_reason(
+            completed=completed, configured_updates=args.updates, max_updates=max_updates,
+            end_time=end_time, max_updates_explicit=max_updates_explicit,
+        ) or "max_updates"
+    ret_mod.append_run_status(out_dir, {
+        "event": stop_reason, "completed_update": completed,
+        "effective_max_updates": max_updates, "effective_end_time_hkt": end_time.isoformat(),
+    })
     if completed and not any(item["update"] == completed for item in snapshots):
         if last_update_rollouts is None or last_grad_alignment is None:
             raise ret_mod.RunStateError("missing final update diagnostic state")
@@ -904,6 +919,8 @@ def run_aux_arm(
         "updates_jsonl": str(jsonl_path),
         "completed_updates": completed,
         "stop_reason": stop_reason,
+        "effective_max_updates": max_updates,
+        "effective_end_time_hkt": end_time.isoformat(),
     }
 
 
@@ -947,6 +964,7 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
     """
     out_dir = Path(getattr(args, "run_dir", args.out_dir))
     out_dir.mkdir(parents=True, exist_ok=True)
+    effective_max_updates, effective_end_time = ret_mod.effective_stop_budget(args)
 
     init_net, init_meta = load_initial_checkpoint(args.init_checkpoint, device)
     init_prov = checkpoint_provenance(args.init_checkpoint, init_meta)
@@ -987,14 +1005,18 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
         "provenance": provenance,
         "knobs": knobs,
         "stop_args": {
-            "end_time_hkt": args.end_time.isoformat() if getattr(args, "end_time", None) else None,
-            "max_updates": getattr(args, "max_updates", None),
+            "effective_end_time_hkt": effective_end_time.isoformat(),
+            "effective_max_updates": effective_max_updates,
         },
         "effective_seed": getattr(args, "effective_seed", PPO_TORCH_SEED),
         "no_promotion": True,
     }
     ret_mod.create_or_validate_run_contract(out_dir, contract, resume=getattr(args, "resume", False))
-    ret_mod.append_run_status(out_dir, {"event": "resume_requested" if getattr(args, "resume", False) else "started"})
+    ret_mod.append_run_status(out_dir, {
+        "event": "resume_requested" if getattr(args, "resume", False) else "started",
+        "effective_max_updates": effective_max_updates,
+        "effective_end_time_hkt": effective_end_time.isoformat(),
+    })
 
     gate_summary = summarize_evaluation(
         evaluate_deterministic(init_net, device, args.eval_seeds, args.eval_max_steps)
@@ -1015,6 +1037,10 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
         "alpha_calibration": None,
         "aux_arm": None,
         "retention": None,
+        "stop_budget": {
+            "effective_max_updates": effective_max_updates,
+            "effective_end_time_hkt": effective_end_time.isoformat(),
+        },
     }
 
     if not initial_gate["gate_pass"]:
