@@ -47,6 +47,85 @@ def test_fixed_parser_has_no_seed_cap_or_action_override():
     assert not ({"seed", "cap", "max_frames", "action", "greedy"} & options)
 
 
+def test_bullet_sprite_loader_uses_the_godot_kind_mapping(tmp_path: Path):
+    from PIL import Image
+    from qrokkun_env.render_player_v5_demo import load_bullet_sprites
+
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    expected = {
+        0: "bullet_small.png",
+        1: "bullet_med.png",
+        2: "bullet_big.png",
+        3: "bullet_lime.png",
+    }
+    colors = {
+        0: (10, 20, 30, 255),
+        1: (40, 50, 60, 255),
+        2: (70, 80, 90, 255),
+        3: (100, 110, 120, 255),
+    }
+    for kind, filename in expected.items():
+        Image.new("RGBA", (kind + 2, kind + 2), colors[kind]).save(assets / filename)
+
+    sprites = load_bullet_sprites(assets)
+
+    assert set(sprites) == set(expected)
+    for kind in expected:
+        assert sprites[kind].mode == "RGBA"
+        assert sprites[kind].size == (kind + 2, kind + 2)
+        assert sprites[kind].getpixel((0, 0)) == colors[kind]
+
+
+def test_bullet_sprite_loader_rejects_any_missing_required_sprite(tmp_path: Path):
+    from PIL import Image
+    from qrokkun_env.render_player_v5_demo import DemoRenderError, load_bullet_sprites
+
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    for filename in ("bullet_small.png", "bullet_med.png", "bullet_big.png"):
+        Image.new("RGBA", (5, 5), (1, 2, 3, 255)).save(assets / filename)
+
+    with pytest.raises(DemoRenderError, match=r"kind 3.*bullet_lime\.png"):
+        load_bullet_sprites(assets)
+
+
+def test_render_frame_composites_preloaded_godot_bullet_sprites(tmp_path: Path):
+    from PIL import Image
+    from qrokkun_env.env import Bullet, Qrokkun26Env
+    from qrokkun_env.render_player_v5_demo import load_bullet_sprites, render_frame
+
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    filenames = {
+        0: "bullet_small.png",
+        1: "bullet_med.png",
+        2: "bullet_big.png",
+        3: "bullet_lime.png",
+    }
+    colors = {
+        0: (255, 1, 2, 255),
+        1: (3, 255, 4, 255),
+        2: (5, 6, 255, 255),
+        3: (255, 7, 8, 255),
+    }
+    for kind, filename in filenames.items():
+        Image.new("RGBA", (1, 1), colors[kind]).save(assets / filename)
+    Image.new("RGBA", (1, 1), (255, 255, 255, 255)).save(assets / "player.png")
+
+    env = Qrokkun26Env(seed=3000)
+    env.reset(seed=3000)
+    env.bullets = [
+        Bullet(40.0 + kind * 30.0, 80.0, 0.0, 0.0, kind, 2.0, moved=True)
+        for kind in range(4)
+    ]
+    sprites = load_bullet_sprites(assets)
+    image = render_frame(env, "idle", assets, scale=1, bullet_sprites=sprites)
+
+    for kind, color in colors.items():
+        assert image.getpixel((40 + kind * 30, 80)) == color[:3]
+
+
 def test_loader_contract_rejects_wrong_architecture_and_hash_and_action_is_deterministic(tmp_path: Path):
     from qrokkun_env.agents.player_checkpoints import CheckpointArchitectureError, CheckpointSchemaError, pack_player_checkpoint
     from qrokkun_env.agents.player_ranked_topk import PlayerRankedTopK
@@ -192,6 +271,45 @@ def test_renderer_writes_identity_sidecar_and_refuses_any_overwrite(tmp_path: Pa
     assert not (tmp_path / ".demo.player_v5_frames").exists()
     with pytest.raises(DemoRenderError):
         render_demo(checkpoint, output, assets=Path("assets"), scale=1)
+
+
+def test_renderer_reaches_ffmpeg_with_all_repository_bullet_sprites(tmp_path: Path, monkeypatch):
+    """The normal demo path preloads all four real repository bullet sprites."""
+    from qrokkun_env.agents.player_checkpoints import save_player_checkpoint
+    from qrokkun_env.agents.player_ranked_topk import PlayerRankedTopK
+    from qrokkun_env.render_player_v5_demo import render_demo
+
+    checkpoint = tmp_path / "player_update_200.pt"
+    save_player_checkpoint(PlayerRankedTopK(top_k=8, hidden=16), checkpoint, source_tool="test")
+    output = tmp_path / "repo-assets.mp4"
+    calls = []
+
+    def fake_ffmpeg(command, check):
+        calls.append(command)
+        assert check is True
+        Path(command[-1]).write_bytes(b"synthetic mp4")
+
+    monkeypatch.setattr("qrokkun_env.render_player_v5_demo.subprocess.run", fake_ffmpeg)
+    render_demo(checkpoint, output, assets=_REPO_ROOT / "assets", scale=1)
+
+    assert calls
+
+
+def test_renderer_rejects_missing_bullet_sprites_before_output(tmp_path: Path):
+    from qrokkun_env.agents.player_checkpoints import save_player_checkpoint
+    from qrokkun_env.agents.player_ranked_topk import PlayerRankedTopK
+    from qrokkun_env.render_player_v5_demo import DemoRenderError, render_demo
+
+    checkpoint = tmp_path / "player_update_200.pt"
+    save_player_checkpoint(PlayerRankedTopK(top_k=8, hidden=16), checkpoint, source_tool="test")
+    output = tmp_path / "missing-bullets.mp4"
+    empty_assets = tmp_path / "assets"
+    empty_assets.mkdir()
+
+    with pytest.raises(DemoRenderError, match=r"missing required bullet sprite"):
+        render_demo(checkpoint, output, assets=empty_assets, scale=1)
+    assert not output.exists()
+    assert not output.with_suffix(".mp4.json").exists()
 
 
 def test_renderer_accepts_experimental_update_200_and_keeps_diagnostic_sidecar(tmp_path: Path, monkeypatch):

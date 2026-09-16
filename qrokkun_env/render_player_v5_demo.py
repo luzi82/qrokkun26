@@ -28,9 +28,30 @@ from qrokkun_env.env import ACTIONS, Qrokkun26Env
 FIXED_SEED = 3000
 FIXED_FRAME_CAP = 4200
 
+BULLET_SPRITE_FILES = {
+    0: "bullet_small.png",
+    1: "bullet_med.png",
+    2: "bullet_big.png",
+    3: "bullet_lime.png",
+}
+
 
 class DemoRenderError(RuntimeError):
     """A fixed-contract diagnostic render cannot safely proceed."""
+
+
+def load_bullet_sprites(assets: Path) -> dict[int, Image.Image]:
+    """Load the exact Godot sprite for every canonical bullet kind."""
+    sprites: dict[int, Image.Image] = {}
+    for kind, filename in BULLET_SPRITE_FILES.items():
+        path = assets / filename
+        if not path.is_file():
+            raise DemoRenderError(
+                f"missing required bullet sprite for kind {kind}: {path}"
+            )
+        with Image.open(path) as source:
+            sprites[kind] = source.convert("RGBA")
+    return sprites
 
 
 def load_demo_player(checkpoint: Path | str, device: torch.device | str = "cpu") -> tuple[PlayerRankedTopK, dict[str, object]]:
@@ -120,7 +141,14 @@ def _paste_centered(canvas: Image.Image, sprite: Image.Image, x: float, y: float
     canvas.alpha_composite(sprite, (round(x * scale - width / 2), round(y * scale - height / 2)))
 
 
-def render_frame(env: Qrokkun26Env, action: str, assets: Path, scale: int) -> Image.Image:
+def render_frame(
+    env: Qrokkun26Env,
+    action: str,
+    assets: Path,
+    scale: int,
+    *,
+    bullet_sprites: dict[int, Image.Image],
+) -> Image.Image:
     """Draw one post-step canonical-environment frame without legacy renderer state."""
     from PIL import ImageDraw
 
@@ -131,9 +159,8 @@ def render_frame(env: Qrokkun26Env, action: str, assets: Path, scale: int) -> Im
         (C.FIELD_X * scale, C.FIELD_Y * scale, (C.FIELD_X + C.FIELD_W) * scale, (C.FIELD_Y + C.FIELD_H) * scale),
         fill=(28, 32, 48, 255), outline=(90, 100, 140, 255),
     )
-    colors = ((220, 80, 80), (80, 200, 120), (120, 160, 255), (240, 200, 60))
     for bullet in env.bullets:
-        _paste_centered(image, _load_sprite(assets / f"bullet_{bullet.kind}.png", int(bullet.radius), colors[bullet.kind]), bullet.x, bullet.y, scale)
+        _paste_centered(image, bullet_sprites[bullet.kind], bullet.x, bullet.y, scale)
     player_files = {"idle": "player.png", **{name: f"player_{name}.png" for name in ACTIONS if name != "idle"}}
     _paste_centered(image, _load_sprite(assets / player_files[action], int(C.PLAYER_RADIUS), (240, 240, 250)), env.px, env.py, scale)
     draw.text((6, 2), f"t={env.elapsed:5.1f}s  bullets={len(env.bullets):3d}  act={action}", fill=(220, 230, 255, 255))
@@ -153,6 +180,7 @@ def render_demo(checkpoint: Path | str, output: Path | str, *, assets: Path | st
         raise DemoRenderError("refusing to overwrite output, sidecar, or frame directory")
     if scale <= 0:
         raise DemoRenderError("scale must be positive")
+    bullet_sprites = load_bullet_sprites(assets)
     frames_dir.mkdir(parents=True)
     try:
         # One strict load supplies both the rollout weights and sidecar identity.
@@ -162,7 +190,13 @@ def render_demo(checkpoint: Path | str, output: Path | str, *, assets: Path | st
         env.reset(seed=FIXED_SEED)
 
         def write_frame(env: Qrokkun26Env, action: str, frame: int) -> None:
-            render_frame(env, action, assets, scale).save(frames_dir / f"f{frame - 1:06d}.png")
+            render_frame(
+                env,
+                action,
+                assets,
+                scale,
+                bullet_sprites=bullet_sprites,
+            ).save(frames_dir / f"f{frame - 1:06d}.png")
 
         result = _run_loaded_rollout(net, device, env, on_frame=write_frame)
         command = ["ffmpeg", "-framerate", "60", "-i", str(frames_dir / "f%06d.png"), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", str(output)]
