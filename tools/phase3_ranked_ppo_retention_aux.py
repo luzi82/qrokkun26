@@ -781,6 +781,26 @@ def run_aux_arm(
             }
         )
 
+    def _save_periodic_model_checkpoint(update: int) -> None:
+        if update <= 0 or update % ret_mod.RECOVERY_ARCHIVE_INTERVAL != 0:
+            return
+        if update in snapshot_updates and update <= ret_mod.RECOVERY_ARCHIVE_INTERVAL:
+            return
+        evaluation = summarize_evaluation(
+            evaluate_deterministic(net, device, args.eval_seeds, args.eval_max_steps)
+        )
+        save_player_checkpoint(
+            net,
+            out_dir / f"ppo_aux_update_{update}.pt",
+            source_tool="phase3_ranked_ppo_retention_aux",
+            experimental=True,
+            production_compatible=False,
+            extra={
+                **_pack_extra(update, evaluation),
+                "checkpoint_kind": "periodic_model_only",
+            },
+        )
+
     if getattr(args, "resume", False):
         snapshots = list(recovery.get("snapshots", []))
         total_episodes = int(recovery.get("total_episodes", 0))
@@ -864,9 +884,10 @@ def run_aux_arm(
                     "event": "update_complete", "update": update, "total_frames": total_frames,
                     "effective_max_updates": max_updates, "effective_end_time_hkt": end_time.isoformat(),
                 })
-                if update in snapshot_updates:
+                if update in snapshot_updates and update <= ret_mod.RECOVERY_ARCHIVE_INTERVAL:
                     _snapshot(update, rollouts, alignment=metrics["grad_alignment"])
                     _save_boundary()
+                _save_periodic_model_checkpoint(update)
                 if stop.requested:
                     stop_reason = "interrupted"
                     break
@@ -891,7 +912,14 @@ def run_aux_arm(
         "event": stop_reason, "completed_update": completed,
         "effective_max_updates": max_updates, "effective_end_time_hkt": end_time.isoformat(),
     })
-    if completed and not any(item["update"] == completed for item in snapshots):
+    if (
+        completed
+        and not any(item["update"] == completed for item in snapshots)
+        and not (
+            completed > ret_mod.RECOVERY_ARCHIVE_INTERVAL
+            and completed % ret_mod.RECOVERY_ARCHIVE_INTERVAL == 0
+        )
+    ):
         if last_update_rollouts is None or last_grad_alignment is None:
             raise ret_mod.RunStateError("missing final update diagnostic state")
         _snapshot(completed, last_update_rollouts, alignment=last_grad_alignment)

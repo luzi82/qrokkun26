@@ -39,6 +39,21 @@ append-only `ppo_updates.jsonl` (or `ppo_aux_updates.jsonl`), atomic
 200 completed updates, reports, and experimental snapshots/final checkpoint.
 Diagnostic Player snapshots remain on the pre-registered 0/10/25/50/100/200
 schedule and are distinct from full recovery archives.
+
+## Periodic Player checkpoints versus exact recovery
+
+`ppo_update_<N>.pt` and `ppo_aux_update_<N>.pt` are experimental Player model
+checkpoints written every 200 updates. Update 200 remains the pre-existing full
+diagnostic snapshot; later periodic files include deterministic evaluation
+metadata but no teacher diagnostics, retention measurement, or grad-alignment
+diagnostics.
+
+`recovery_archives/update_<N>.pt` is instead the full optimizer/RNG/aux-state
+exact-resume archive. Both artifact families use the same 200-update cadence,
+but Player checkpoints are for render, evaluation, and inspection, whereas a
+full recovery archive is what `--resume-from-update N` uses for exact resume.
+Schema v2 remains unchanged: these are output-only artifacts and do not alter
+contract identity or resume semantics.
 `run.json` records `schema_version: 2`, tool/arm, input identities,
 Git/device/Torch provenance, locked knobs, resolved effective stop budget,
 effective seed, and the no-promotion guarantee. Version 2 is the current

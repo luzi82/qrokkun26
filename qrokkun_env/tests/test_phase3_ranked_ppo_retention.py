@@ -609,6 +609,52 @@ def test_default_torch_seed_remains_after_control_arm_construction(
     assert events.index(("construct", None)) < events.index(("seed", ret.PPO_TORCH_SEED))
 
 
+def test_periodic_model_only_checkpoint_at_update_400(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The 400 boundary is an evaluation-bearing artifact, not a snapshot."""
+    init_net = _tiny_net()
+    evaluations: list[int] = []
+    diagnostics: list[int] = []
+
+    monkeypatch.setattr(ret, "collect_rollout", lambda *_args, **_kwargs: _fake_rollout([0.0], [True], [0.0]))
+    monkeypatch.setattr(ret, "ppo_update", lambda *_args, **_kwargs: {
+        "optimizer_steps": 1, "approx_kl": 0.0, "clip_fraction": 0.0,
+        "explained_variance": 0.0, "entropy": 0.0, "policy_loss": 0.0,
+        "value_loss": 0.0, "total_loss": 0.0, "n_samples": 1,
+    })
+    monkeypatch.setattr(
+        ret, "evaluate_deterministic",
+        lambda *_args, **_kwargs: evaluations.append(1) or [{"seed": 0, "elapsed": 1.0, "censored": False}],
+    )
+    monkeypatch.setattr(
+        ret, "teacher_diagnostics", lambda *_args, **_kwargs: diagnostics.append(1) or {"agreement": 1.0},
+    )
+    args = argparse.Namespace(
+        updates=401, episodes_per_update=1, max_frames=1, eval_seeds=[0], eval_max_steps=1,
+        out_dir=tmp_path, max_updates=401, end_time=ret.FAR_FUTURE_END_TIME, seed=1,
+    )
+    result = ret.run_ppo_arm(
+        init_net, torch.device("cpu"), args, [0, 10, 25, 50, 100, 200], {"held": torch.zeros(1)}, tmp_path,
+        parent_state_dict_sha256="parent-sd", parent_file_sha256="parent-file",
+        dataset_hash="dataset", ppo_knobs={"lr": ret.PPO_LR},
+    )
+    path = tmp_path / "ppo_update_400.pt"
+    assert path.is_file()
+    _loaded, metadata = load_ranked_top_k_checkpoint(path, torch.device("cpu"))
+    assert metadata["experimental"] is True
+    assert metadata["production_compatible"] is False
+    assert metadata["extra"]["checkpoint_kind"] == "periodic_model_only"
+    assert metadata["extra"]["update"] == 400
+    assert metadata["extra"]["eval_summary"]["mean"] == 1.0
+    # Scheduled snapshots account for six evaluations/diagnostics through 200;
+    # 400 adds one evaluation only. The unchanged terminal snapshot at 401
+    # and existing final-checkpoint evaluation account for the other calls.
+    assert len(evaluations) == 9
+    assert len(diagnostics) == 7
+    assert all(snapshot["update"] != 400 for snapshot in result["snapshots"])
+
+
 # --------------------------------------------------------------------------- #
 # 9. fail-closed: no env rollouts / no PPO when the initial gate fails
 # --------------------------------------------------------------------------- #

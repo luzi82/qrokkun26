@@ -902,6 +902,140 @@ def test_aux_update_200_archive_includes_aux_recovery_keys(
     assert any(item["update"] == 200 for item in archive["snapshots"])
 
 
+def test_control_periodic_model_only_cadence_preserves_diagnostics_and_archives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_control_loop(monkeypatch)
+    writes: list[str] = []
+    evaluations: list[int] = []
+    diagnostics: list[int] = []
+    save = control.save_player_checkpoint
+
+    def record_save(net, path, **kwargs):
+        writes.append(Path(path).name)
+        return save(net, path, **kwargs)
+
+    monkeypatch.setattr(control, "save_player_checkpoint", record_save)
+    monkeypatch.setattr(
+        control, "evaluate_deterministic",
+        lambda *_args, **_kwargs: evaluations.append(1) or [{"seed": 0, "elapsed": 1.0, "censored": False}],
+    )
+    monkeypatch.setattr(
+        control, "teacher_diagnostics", lambda *_args, **_kwargs: diagnostics.append(1) or {"agreement": 1.0},
+    )
+    result = control.run_ppo_arm(
+        _tiny_ranked(), torch.device("cpu"), _arm_args(tmp_path, max_updates=601), [200], {"held": torch.zeros(1)}, tmp_path,
+        parent_state_dict_sha256="p", parent_file_sha256="f", dataset_hash="d", ppo_knobs={},
+    )
+    assert not (tmp_path / "ppo_update_199.pt").exists()
+    assert writes.count("ppo_update_200.pt") == 1
+    for update in (400, 600):
+        assert (tmp_path / f"ppo_update_{update}.pt").is_file()
+        assert (tmp_path / "recovery_archives" / f"update_{update}.pt").is_file()
+    assert (tmp_path / "ppo_update_400.pt").is_file()
+    assert [item["update"] for item in result["snapshots"]] == [200, 601]
+    assert len(evaluations) == 5
+    assert len(diagnostics) == 2
+
+
+def test_control_terminal_400_is_periodic_model_only_not_a_diagnostic_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_control_loop(monkeypatch)
+    diagnostics: list[int] = []
+    monkeypatch.setattr(
+        control, "teacher_diagnostics", lambda *_args, **_kwargs: diagnostics.append(1) or {"agreement": 1.0},
+    )
+    result = control.run_ppo_arm(
+        _tiny_ranked(), torch.device("cpu"), _arm_args(tmp_path, max_updates=400), control.snapshot_schedule(400),
+        {"held": torch.zeros(1)}, tmp_path,
+        parent_state_dict_sha256="p", parent_file_sha256="f", dataset_hash="d", ppo_knobs={},
+    )
+    checkpoint = torch.load(tmp_path / "ppo_update_400.pt", map_location="cpu", weights_only=False)
+    assert checkpoint["extra"]["checkpoint_kind"] == "periodic_model_only"
+    assert all(item["update"] != 400 for item in result["snapshots"])
+    assert len(diagnostics) == 6
+
+
+def test_aux_periodic_model_only_cadence_preserves_diagnostics_and_archives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_aux_loop(monkeypatch)
+    writes: list[str] = []
+    evaluations: list[int] = []
+    diagnostics: list[int] = []
+    save = aux.save_player_checkpoint
+
+    def record_save(net, path, **kwargs):
+        writes.append(Path(path).name)
+        return save(net, path, **kwargs)
+
+    monkeypatch.setattr(aux, "save_player_checkpoint", record_save)
+    monkeypatch.setattr(
+        aux, "evaluate_deterministic",
+        lambda *_args, **_kwargs: evaluations.append(1) or [{"seed": 0, "elapsed": 1.0, "censored": False}],
+    )
+    monkeypatch.setattr(
+        aux, "teacher_diagnostics", lambda *_args, **_kwargs: diagnostics.append(1) or {"agreement": 1.0},
+    )
+    monkeypatch.setattr(
+        aux, "grad_alignment", lambda *_args, **_kwargs: {
+            "g_ppo_norm": 1.0, "g_ret_norm": 1.0, "cosine_similarity": 0.0,
+        },
+    )
+    train = {
+        "player": torch.zeros(8, PLAYER_FEAT_V4),
+        "bullets": torch.zeros(8, MAX_BULLETS_V4, BULLET_FEAT_V4),
+        "pad": torch.ones(8, MAX_BULLETS_V4, dtype=torch.bool),
+        "teacher_logits": torch.zeros(8, 5),
+        "elapsed": torch.zeros(8),
+    }
+    result = aux.run_aux_arm(
+        _tiny_ranked(), torch.device("cpu"), _arm_args(tmp_path, max_updates=601), [200], train, train, tmp_path,
+        parent_state_dict_sha256="p", parent_file_sha256="f", dataset_hash="d", ppo_knobs={}, minibatch=4,
+    )
+    assert not (tmp_path / "ppo_aux_update_199.pt").exists()
+    assert writes.count("ppo_aux_update_200.pt") == 1
+    for update in (400, 600):
+        assert (tmp_path / f"ppo_aux_update_{update}.pt").is_file()
+        assert (tmp_path / "recovery_archives" / f"update_{update}.pt").is_file()
+    assert (tmp_path / "ppo_aux_update_400.pt").is_file()
+    assert [item["update"] for item in result["snapshots"]] == [200, 601]
+    assert len(evaluations) == 5
+    assert len(diagnostics) == 2
+
+
+def test_aux_terminal_400_is_periodic_model_only_not_a_diagnostic_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_aux_loop(monkeypatch)
+    diagnostics: list[int] = []
+    monkeypatch.setattr(
+        aux, "teacher_diagnostics", lambda *_args, **_kwargs: diagnostics.append(1) or {"agreement": 1.0},
+    )
+    monkeypatch.setattr(
+        aux, "grad_alignment", lambda *_args, **_kwargs: {
+            "g_ppo_norm": 1.0, "g_ret_norm": 1.0, "cosine_similarity": 0.0,
+        },
+    )
+    train = {
+        "player": torch.zeros(8, PLAYER_FEAT_V4),
+        "bullets": torch.zeros(8, MAX_BULLETS_V4, BULLET_FEAT_V4),
+        "pad": torch.ones(8, MAX_BULLETS_V4, dtype=torch.bool),
+        "teacher_logits": torch.zeros(8, 5),
+        "elapsed": torch.zeros(8),
+    }
+    result = aux.run_aux_arm(
+        _tiny_ranked(), torch.device("cpu"), _arm_args(tmp_path, max_updates=400), control.snapshot_schedule(400),
+        train, train, tmp_path,
+        parent_state_dict_sha256="p", parent_file_sha256="f", dataset_hash="d", ppo_knobs={}, minibatch=4,
+    )
+    checkpoint = torch.load(tmp_path / "ppo_aux_update_400.pt", map_location="cpu", weights_only=False)
+    assert checkpoint["extra"]["checkpoint_kind"] == "periodic_model_only"
+    assert all(item["update"] != 400 for item in result["snapshots"])
+    assert len(diagnostics) == 6
+
+
 def _synthetic_v2_run_through_400(tmp_path: Path) -> dict[str, Any]:
     """A v2 run with progress 1..400, archives 200/400, latest recovery 400, mixed amendments."""
     stop = {

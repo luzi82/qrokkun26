@@ -53,6 +53,7 @@ from qrokkun_env.agents.player_ranked_topk import PlayerRankedTopK  # noqa: E402
 from qrokkun_env.agents.player_v1 import PlayerV1  # noqa: E402
 from qrokkun_env.agents.player_checkpoints import (  # noqa: E402
     CheckpointError,
+    load_ranked_top_k_checkpoint,
     save_player_checkpoint,
 )
 from qrokkun_env.env import ACTIONS  # noqa: E402
@@ -1306,6 +1307,71 @@ def test_evaluate_retention_is_reused_and_fails_closed_without_agreement() -> No
 # --------------------------------------------------------------------------- #
 # 11. quick end-to-end: report schema, alpha frozen, promotion always false
 # --------------------------------------------------------------------------- #
+def test_periodic_model_only_checkpoint_at_update_400(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The aux 400 boundary adds no diagnostic or retention measurement."""
+    evaluations: list[int] = []
+    diagnostics: list[int] = []
+    alignments: list[int] = []
+    train = _teacher_tensors(n=8)
+
+    monkeypatch.setattr(aux, "collect_rollout", lambda *_args, **_kwargs: _fake_rollout(1, n_frames=1))
+    monkeypatch.setattr(aux, "calibrate_alpha", lambda *_args, **_kwargs: {"alpha": 0.15})
+    def fake_aux_update(net, opt, rollouts, train_tensors, alpha, device, **kwargs):
+        return {
+        "optimizer_steps": 1, "approx_kl": 0.0, "clip_fraction": 0.0,
+        "explained_variance": 0.0, "entropy": 0.0, "ppo_policy_loss": 0.0,
+        "ppo_value_loss": 0.0, "total_loss": 0.0, "retention_hybrid_loss": 0.0,
+        "retention_hard_ce": 0.0, "retention_soft_kl": 0.0, "retention_soft_ce": 0.0,
+        "alpha": alpha, "g_ppo_norm": 1.0, "g_ret_norm": 1.0,
+        "g_ret_weighted_norm": 0.15, "grad_ratio": 0.15, "cosine_similarity": 0.0,
+        "grad_alignment": {"g_ppo_norm": 1.0, "g_ret_norm": 1.0, "cosine_similarity": 0.0,
+                           "grad_ratio": 0.15, "g_ret_weighted_norm": 0.15, "alpha": alpha},
+            "n_samples": 1, "n_retention_samples": 1,
+        }
+
+    monkeypatch.setattr(aux, "ppo_aux_update", fake_aux_update)
+    monkeypatch.setattr(
+        aux, "evaluate_deterministic",
+        lambda *_args, **_kwargs: evaluations.append(1) or [{"seed": 0, "elapsed": 1.0, "censored": False}],
+    )
+    monkeypatch.setattr(
+        aux, "teacher_diagnostics", lambda *_args, **_kwargs: diagnostics.append(1) or {"agreement": 1.0},
+    )
+    monkeypatch.setattr(
+        aux, "grad_alignment", lambda *_args, **_kwargs: alignments.append(1) or {
+            "g_ppo_norm": 1.0, "g_ret_norm": 1.0, "cosine_similarity": 0.0,
+        },
+    )
+    args = argparse.Namespace(
+        updates=401, episodes_per_update=1, max_frames=1, eval_seeds=[0], eval_max_steps=1,
+        out_dir=tmp_path, max_updates=401, end_time=ret.FAR_FUTURE_END_TIME, seed=1,
+    )
+    result = aux.run_aux_arm(
+        _tiny_net(), torch.device("cpu"), args, [0, 10, 25, 50, 100, 200], train, train, tmp_path,
+        parent_state_dict_sha256="parent-sd", parent_file_sha256="parent-file",
+        dataset_hash="dataset", ppo_knobs={"lr": aux.PPO_LR}, minibatch=4,
+    )
+    path = tmp_path / "ppo_aux_update_400.pt"
+    assert path.is_file()
+    loaded, metadata = load_ranked_top_k_checkpoint(path, torch.device("cpu"))
+    assert isinstance(loaded, PlayerRankedTopK)
+    assert metadata["experimental"] is True
+    assert metadata["production_compatible"] is False
+    extra = metadata["extra"]
+    assert extra["checkpoint_kind"] == "periodic_model_only"
+    assert extra["update"] == 400
+    assert extra["eval_summary"]["mean"] == 1.0
+    for key in ("parent_state_dict_sha256", "parent_file_sha256", "dataset_hash", "ppo_knobs",
+                "alpha", "alpha_calibration", "retention_objective"):
+        assert key in extra
+    assert len(evaluations) == 9
+    assert len(diagnostics) == 7
+    assert len(alignments) == 1
+    assert all(snapshot["update"] != 400 for snapshot in result["snapshots"])
+
+
 def test_quick_end_to_end_writes_report_with_alpha_and_no_promotion(tmp_path: Path) -> None:
     torch.manual_seed(0)
     init_path = tmp_path / "init.pt"

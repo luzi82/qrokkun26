@@ -1283,6 +1283,26 @@ def run_ppo_arm(
             }
         )
 
+    def _save_periodic_model_checkpoint(update: int) -> None:
+        if update <= 0 or update % RECOVERY_ARCHIVE_INTERVAL != 0:
+            return
+        if update in snapshot_updates and update <= RECOVERY_ARCHIVE_INTERVAL:
+            return
+        evaluation = summarize_evaluation(
+            evaluate_deterministic(net, device, args.eval_seeds, args.eval_max_steps)
+        )
+        save_player_checkpoint(
+            net,
+            out_dir / f"ppo_update_{update}.pt",
+            source_tool="phase3_ranked_ppo_retention",
+            experimental=True,
+            production_compatible=False,
+            extra={
+                **_pack_extra(update, evaluation),
+                "checkpoint_kind": "periodic_model_only",
+            },
+        )
+
     recovery_path = out_dir / "recovery.pt"
     completed = 0
     if getattr(args, "resume", False):
@@ -1353,9 +1373,10 @@ def run_ppo_arm(
                     "event": "update_complete", "update": update, "total_frames": total_frames,
                     "effective_max_updates": max_updates, "effective_end_time_hkt": end_time.isoformat(),
                 })
-                if update in snapshot_updates:
+                if update in snapshot_updates and update <= RECOVERY_ARCHIVE_INTERVAL:
                     _snapshot(update)
                     _save_boundary()
+                _save_periodic_model_checkpoint(update)
                 if stop.requested:
                     stop_reason = "interrupted"
                     break
@@ -1380,7 +1401,11 @@ def run_ppo_arm(
         "event": stop_reason, "completed_update": completed,
         "effective_max_updates": max_updates, "effective_end_time_hkt": end_time.isoformat(),
     })
-    if completed and not any(item["update"] == completed for item in snapshots):
+    if (
+        completed
+        and not any(item["update"] == completed for item in snapshots)
+        and not (completed > RECOVERY_ARCHIVE_INTERVAL and completed % RECOVERY_ARCHIVE_INTERVAL == 0)
+    ):
         _snapshot(completed)
         _save_boundary()
 
