@@ -1,0 +1,127 @@
+PlayerV5「壞 critic」診斷（BC 後 PPO 開局 value 未對齊）
+========================================================
+
+狀態
+----
+
+這是對既有 Phase 3 診斷數字的因果詮釋，不是新的訓練 run，也不是
+preregistered gate。不改寫先前 retention PASS/FAIL，不 promote 任何
+checkpoint。PlayerV5（code class ``PlayerRankedTopK``；architecture key
+``player_ranked_topk``）的架構身份不變。
+
+先前 journal 已記錄 update-1 explained variance 為負，但沒有把它寫成
+「BC 階段沒有訓練 critic，因此不該讓 PPO 同時改 actor」。本紀錄補上
+這條詮釋，並標明哪些是已量到的事實、哪些是尚未用對照實驗驗證的假說。
+
+已記錄的事實（不重跑、不改數字）
+--------------------------------
+
+來源：``docs/journal/1789155208_ranked_player_multiseed_and_ppo_retention.txt``
+（未正則化 scripted PPO control）與
+``docs/journal/1789233643_player_v5_corrected_aux_round1.txt``
+（校正 aux round 1）。
+
+BC（Phase 2 ranked hybrid）只優化 teacher logits 的 ``hybrid_loss``。
+``PlayerRankedTopK.forward`` 雖回傳 ``(Categorical, value)``，value 頭
+（``self.value``，即 actor-critic 裡的 critic）沒有 return / GAE 目標。
+Seed-6 BC 起點 closed-loop 約 34.0906 s mean，held agreement 約 0.6999。
+
+同一套 PPO 合約（lr 3e-4、gamma=0.99、entropy 0.02、value coef 0.5、
+4 PPO epochs、truncation 當 terminal、無 value bootstrap）下：
+
+- Control update 1 EV = -0.36717；update 200 EV = 0.74823。
+  Update 200 mean 24.5350 s，held agreement 0.1731。
+- 校正 aux update 1 EV = -0.367；update 200 EV = 0.718。
+  Update 200 mean 38.8967 s，held agreement 0.6941（retention gate PASS，
+  paired survival CI 含 0；promotion false）。
+
+EV < 0 表示 critic 比「每次猜平均 return」更差。兩個 arm 開局都是這個
+狀態；差在 aux 有凍結 alpha 的 hybrid BC 拉住 policy，control 沒有。
+
+詮釋（假說，尚未單因子驗證）
+----------------------------
+
+「壞 critic」= 開局的 ``value`` 頭（以及它讀到的凍結前 ``body`` 特徵）
+還不能當 GAE 的基線。PPO 用這個 value 算 advantage，等於用噪音更新
+一個已經會躲的 actor；shared ``body`` 上的 value loss 也會沖到 policy
+用的特徵。
+
+這解釋的是 **為什麼從 34s 克隆出發的 PPO 和從弱 flee 出發的 PlayerV1
+PPO 處境不同**，不是「EV 為負所以一定崩到 24s」的唯一原因。Control
+崩技能、aux 保住技能但沒證明顯著變強，都和這條路徑相容：
+
+- Control：壞 advantage 改 actor → occupancy 離開 BC → 後來 EV 轉正
+  只代表 critic 開始準確評價 **已經變差的政策**，不能時光倒流。
+- Aux：teacher 手剎讓 actor 走不遠；critic 同樣從 EV=-0.37 學到 ~0.72，
+  但 retention 項不訓 ``_ret_value``，也不修復 43s−34s 的 BC 缺口。
+
+「後來 EV 變好就會洗掉開局傷害」與 control 的數字矛盾：update 200 時
+critic 已經可用，生存與 agreement 沒有回到 update 0。
+
+與既有 journal 的關係
+--------------------
+
+- ``1788785426`` / ``1788786737`` 已指出 60Hz 下 gamma=0.99 半衰期約
+  1.15s，以及 truncation 應 bootstrap。Phase 3 故意鎖這些 knobs 以對齊
+  歷史 PlayerV1 PPO，一次只改 retention。本診斷 **不解除** 那些鎖定，
+  也不把壞 critic 說成比短視野 / flee-shaping 更優先的唯一根因。
+- ``1789155208`` 把 EV 當 PPO diagnostic 記錄，limitation 寫了 truncation
+  語意未測，沒寫 critic warmup。
+- ``1789225070`` 的有序下一步是 retention 之後才動 entropy、gamma、
+  Spawner、DAgger。本紀錄建議：若下一輪仍從 seed-6 BC 做 PPO，應把
+  **critic warmup** 列為候選單因子，而不是默認 BC 完可直接 joint PPO。
+
+不成立或不足的修法
+------------------
+
+- 把另一個 ~30s checkpoint 的 ``value.*`` 權重貼到 seed-6 BC 上：
+  ``value`` 是 ``Linear(hidden, 1)``，對齊的是來源 ``body`` 的特徵空間。
+  來源若也是純 BC，critic 同樣沒被當價值函數訓過；來源若是 PPO 過的
+  模型，body 已變，只貼 Linear 會錯位。這不是本假說的檢驗。
+- 只把 entropy 從 0.02 調小、或只把 PPO epochs 從 4 減到 1：可能減輕
+  傷害，但不回答「開局 advantage 是否噪音」。
+- 在現有 ``hybrid_loss`` 裡無 return 標籤地加 value MSE：沒有監督目標，
+  不是在訓 critic。
+
+若要檢驗本假說（尚未跑、需另寫 preregistration）
+------------------------------------------------
+
+建議一次只改這件事，其餘 knobs 鎖在校正 aux / control 合約：
+
+1. 載入 production-compatible seed-6 BC（policy 已由 BC 訓練）。
+2. 凍結 ``body`` 與 ``policy``，只用 **該模型自己** 的 on-policy
+   ``sample()`` 軌跡訓 ``value``。開局用 Monte Carlo return，不要用
+   仍不可靠的 V 做 GAE bootstrap。看 held/rollout EV，不看生存選停。
+3. EV 穩定為正之後，才允許 PPO 動 ``policy`` / ``body`` / ``value``。
+
+預測（可被推翻）：相對於直接從同一 BC 做 unregularized PPO，warmup 後
+update-1 EV 應為正；held agreement 在前 10 個 update 的崩塌應減弱。
+不預測一定超過 PlayerV1 的 43.42 s，也不預測不需要 aux / 較長 gamma。
+
+生存這一步必須保持不變（policy 凍結）。若第 2 步生存漂移，即凍結失敗，
+實驗無效。
+
+非目標
+------
+
+- 不在本紀錄授權改 ``phase3_ranked_ppo_retention.py`` /
+  ``phase3_ranked_ppo_retention_aux.py`` 的鎖定 knobs。
+- 不把校正 aux 的 retention PASS 讀成「critic 沒問題」。
+- 不把 PlayerV1 7–8 小時 PPO 的成功讀成「同一套 PPO 從 34s 克隆出發
+  也安全」。V1 的 BC 是弱 flee，critic 與 actor 一起從差學起。
+- 不 promote、不改 PlayerV5 命名、不引入 Spawner / self-play / DAgger。
+
+主要依據
+--------
+
+- ``qrokkun_env/agents/player_ranked_topk.py``（shared body、policy、value）
+- ``tools/phase2_ranked_multiseed.py``（BC 只對 logits 做 hybrid_loss）
+- ``tools/phase3_ranked_ppo_retention.py``（GAE 用 rollout value；
+  ``value_loss = MSE(value, returns)`` 與 policy 同時更新）
+- ``tools/phase3_ranked_ppo_retention_aux.py``（teacher 路徑丟棄
+  ``_ret_value``）
+- ``docs/journal/1789155208_ranked_player_multiseed_and_ppo_retention.txt``
+- ``docs/journal/1789233643_player_v5_corrected_aux_round1.txt``
+- ``docs/journal/1789225070_player_v5_recovery_roadmap.txt``
+- ``docs/journal/1788785426_gpt56sol.txt``（gamma 視野；非本假說來源，
+  僅作已知 P0 對照）
