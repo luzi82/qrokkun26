@@ -1,0 +1,189 @@
+PlayerV5「壞 critic」診斷的獨立科學審核
+=========================================
+
+狀態
+----
+
+本文件審核：
+
+``docs/journal/1789633301_player_v5_bad_critic.txt``
+
+Reviewed source commit：
+
+``b2fbe043559b5caeda134e4a9f77fd2a5dede642``
+
+Verdict：**REVISE**。
+
+這不是否定 critic warmup 方向。原文件的主要程式事實成立，而且
+critic warmup 是值得 preregister 的單因子候選；需要修正的是 explained
+variance（EV）的證據強度、aux 對 critic 的間接作用，以及 warmup 對照的
+RNG、sample budget、censor target 與停止規則。
+
+本審核不改寫既有 retention PASS/FAIL，不判定任何 checkpoint promotion，
+不要求停止目前長訓，也沒有執行新 training/evaluation。
+
+已核對且成立的事實
+------------------
+
+1. Phase 2 BC 沒有 value/return target。``tools/phase2_ranked_multiseed.py``
+   的訓練路徑只以 teacher logits 計算 ``hybrid_loss``；forward 回傳的
+   ``_v`` 沒有進入 loss。因此 ``value.*`` 沒有在 BC 階段得到直接監督。
+
+2. ``PlayerRankedTopK`` 的 ``body`` 同時供 policy/value 使用：
+
+   - ``qrokkun_env/agents/player_ranked_topk.py:42-49`` 定義 shared body、
+     policy head、value head；
+   - ``qrokkun_env/agents/player_ranked_topk.py:74-78`` 讓兩個 head 讀取
+     同一個 ``h``。
+
+3. Phase 3 joint PPO 的 value loss 會改動 shared body：
+
+   - ``tools/phase3_ranked_ppo_retention.py:829-842`` 同時計算
+     clipped policy loss、value MSE、entropy，然後對整個 network backward；
+   - value loss 因此可移動 policy 所依賴的 shared representation。
+
+4. 原文件引用的既有數字與 journal 相符：
+
+   - control update-1 EV ``-0.36717``，update-200 EV ``0.74823``；
+   - control update-200 mean ``24.5350 s``、agreement ``0.1731``；
+   - corrected aux update-1 EV 約 ``-0.367``，update-200 EV 約 ``0.718``；
+   - corrected aux update-200 mean ``38.8967 s``、agreement ``0.6941``。
+
+5. Critic warmup 所描述的核心 intervention 是可行的：freeze ``body`` 與
+   ``policy``，只訓 ``value``，可在不直接改變 actor parameters 的前提下，
+   檢驗較好的 PPO 開局 value initialization 是否改善 early retention。
+
+主要修正
+--------
+
+1. EV 不足以直接證明 advantage 是噪音
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+原文件 ``1789633301_player_v5_bad_critic.txt:38-59`` 從負 EV 推進至
+「壞 advantage 改 actor」的因果故事，證據強度過高。
+
+現行 implementation 的 EV 是：
+
+``1 - Var(returns - old_values) / Var(returns)``
+
+見 ``tools/phase3_ranked_ppo_retention.py:857-859``。其中 ``returns`` 並非
+獨立 Monte Carlo policy return；它由同一批 ``old_values`` 經 GAE 產生：
+
+- ``tools/phase3_ranked_ppo_retention.py:743-754``；
+- ``qrokkun_env/train/player_v1.py:109-121``。
+
+因此 update-1 EV < 0 可支持的精確結論是：
+
+> 舊 value prediction 對該批依賴同一 critic 形成的 lambda-return targets，
+> 比相應的 constant predictor 更差。
+
+它支持「critic 尚未對齊」的假說，但不能單獨證明 advantage 主要是噪音、
+不能證明 policy gradient 必然朝錯方向，也不能證明 early degradation 的
+唯一或主要原因就是 critic。Shared-body value gradient 是較直接、可由
+程式路徑確認的 actor 風險；GAE quality 則仍是待單因子驗證的機制。
+
+建議把原文件的因果語氣改成：
+
+> 未受 BC 監督的 value head、負的開局 EV，以及 shared-body value gradient
+> 共同構成一個合理且可推翻的 early-PPO instability 假說。
+
+2. Aux 沒有直接訓 value head，但會間接改變 critic
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``tools/phase3_ranked_ppo_retention_aux.py:487-510`` 的 retention 路徑確實
+丟棄 ``_ret_value``，所以 teacher objective 不直接監督 ``value.*``。
+
+但 retention loss 仍經 shared ``body`` backpropagate。因此 aux 會改變
+critic 讀取的 representation，不能說它令 critic function 完全不受影響。
+精確表述應為：
+
+> Retention 沒有直接的 value-head supervision；它同時經 shared body
+> 約束 policy representation，因而可能間接改變 value function。
+
+3. Warmup 與 direct-PPO 對照必須鎖定 RNG 與 sample budget
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Warmup 會先消耗 on-policy trajectories、environment frames 與 rollout seeds。
+如果 direct arm 立即進 PPO，而 warmup arm 消耗一段 seed stream 後才進 PPO，
+兩臂正式 PPO 階段便不是同一隨機路徑。
+
+Preregistration 至少要鎖定：
+
+- warmup rollout seeds 與正式 PPO rollout seeds 分離；
+- 兩臂正式 PPO 階段使用相同 seed window/RNG state；
+- warmup 額外 episodes、frames、optimizer steps、wall time 完整記帳；
+- 同時報告 update-matched 與 interaction-budget-matched 比較，或明確指定其中
+  一種為 primary contrast；
+- 正式 PPO 的所有其他 knobs、evaluation seeds、initial checkpoint 與
+  checkpoint selection rule 保持相同。
+
+否則觀察到的差異不能乾淨歸因於 critic initialization。
+
+4. Monte Carlo warmup target 仍需定義 censor/truncation 語意
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+用 Monte Carlo returns 做 warmup，可避免直接依賴未成熟 critic bootstrap，
+但不自動消除 4200-frame cap 的 target bias。若 censored rollout 的尾端被當成
+terminal 並令 future return 為零，target 仍會系統性低估未觀察的後續回報。
+
+Preregistration 必須選定並鎖死一種處理：
+
+- 只以真正 terminal trajectories 訓練；或
+- 排除沒有完整 target 的 censored tail；或
+- 使用另一個明確、事前合理化的 truncation target。
+
+若沿用 truncation-as-terminal，也必須明示這是實驗 contract 的限制，不能把
+warmup target 描述成無偏 ground truth。
+
+5. 「EV 穩定為正」尚不是可執行停止規則
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+原文件 ``lines 93-95`` 未定義：
+
+- EV 在 training rollouts 還是獨立 held rollouts 上量；
+- positive threshold；
+- 連續多少次才叫穩定；
+- maximum warmup updates/episodes/frames；
+- 未達門檻時的 FAIL branch。
+
+看同一批 training EV 決定停止會引入 adaptive selection。較乾淨的第一個
+實驗是固定 warmup budget；若必須使用 EV gate，需預先鎖定獨立 held seeds、
+threshold、連續窗口、hard cap 與未達標處理，而且不能看 survival 選停。
+
+6. Value-head-only warmup 的陰性結果有局限
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+只訓 linear ``value`` head 是最窄、最容易解釋的 intervention，值得先做；
+但 BC policy 所形成的 frozen body 未必保留足夠資訊，讓線性 value head 擬合
+return。若 warmup 未能令 held EV 改善，只能推翻「在 frozen BC body 上訓
+linear value head 已足夠」；不能單憑此結果排除更廣義的 critic/body mismatch。
+
+建議的最小 preregistered 實驗
+-----------------------------
+
+第一個實驗可維持 value-head-only warmup，但需包含：
+
+1. 同一個 seed-6 BC checkpoint，核對初始 state hash；
+2. freeze ``body`` 與 ``policy``，optimizer 只收到 ``value.parameters()``；
+3. fixed warmup budget，或完整預登記的 held-EV gate；
+4. warmup 與正式 PPO 使用分離且固定的 rollout seed windows；
+5. warmup 前後逐 tensor 證明 ``body``、``policy`` bitwise unchanged；
+6. 固定 held states 上 policy logits/argmax 完全不變；
+7. 明確的 censored-return target；
+8. 正式 PPO 前 1/10 updates 報告 EV、agreement、fixed-seed survival、KL、
+   environment frames、optimizer steps；
+9. direct-PPO arm 使用相同正式 PPO random stream；
+10. 不以 survival 選 warmup length、checkpoint 或成功 arm。
+
+預測應收窄為：warmup arm 在進入 PPO 時具有較佳的 held value-fit；若假說
+成立，它在正式 PPO 前 10 updates 應比 direct arm 保留更多 held agreement。
+是否超過 PlayerV1 teacher、是否提升長期 survival、是否仍需 retention 或較長
+real-time horizon，均屬另外的問題。
+
+最終判斷
+--------
+
+``1789633301_player_v5_bad_critic.txt`` 是有價值的診斷假說紀錄，核心方向
+值得保留；但負 EV 目前是支持訊號而非因果證明。完成以上語意修正與實驗
+contract 後，critic warmup 可作為下一個低範圍、可推翻的對照，不應因此
+停止、否定或重分類目前的 control/aux 長訓。
