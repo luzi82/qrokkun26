@@ -68,19 +68,20 @@ def run_demo_rollout(
     checkpoint: Path | str,
     *,
     device: torch.device | str = "cpu",
+    seed: int = FIXED_SEED,
     on_frame: Callable[[Qrokkun26Env, str, int], None] | None = None,
 ) -> dict[str, object]:
     """Run one fixed scripted-spawner rollout, optionally emitting post-step frames.
 
     ``Qrokkun26Env.step`` is the canonical float32 Player/update-order path.
-    The action is deliberately argmax-only, and the public API offers no seed,
-    cap, or action override.
+    The action is deliberately argmax-only, and the public API offers no cap
+    or action override.
     """
     dev = torch.device(device)
     net, _meta = load_demo_player(checkpoint, device=dev)
-    env = Qrokkun26Env(seed=FIXED_SEED)
-    env.reset(seed=FIXED_SEED)
-    return _run_loaded_rollout(net, dev, env, on_frame=on_frame)
+    env = Qrokkun26Env(seed=seed)
+    env.reset(seed=seed)
+    return _run_loaded_rollout(net, dev, env, seed=seed, on_frame=on_frame)
 
 
 def _run_loaded_rollout(
@@ -88,6 +89,7 @@ def _run_loaded_rollout(
     device: torch.device | str,
     env: Qrokkun26Env,
     *,
+    seed: int = FIXED_SEED,
     on_frame: Callable[[Qrokkun26Env, str, int], None] | None = None,
 ) -> dict[str, object]:
     """Execute the fixed rollout with a strict-loaded net and canonical env.
@@ -103,7 +105,7 @@ def _run_loaded_rollout(
             on_frame(env, ACTIONS[action], frame)
         if done:
             return {
-                "seed": FIXED_SEED,
+                "seed": seed,
                 "elapsed": float(info["elapsed"]),
                 "frames": frame,
                 "hit": True,
@@ -111,7 +113,7 @@ def _run_loaded_rollout(
                 "termination_reason": "hit",
             }
     return {
-        "seed": FIXED_SEED,
+        "seed": seed,
         "elapsed": float(env.elapsed),
         "frames": FIXED_FRAME_CAP,
         "hit": False,
@@ -171,7 +173,15 @@ def _sidecar_path(output: Path) -> Path:
     return output.with_suffix(output.suffix + ".json")
 
 
-def render_demo(checkpoint: Path | str, output: Path | str, *, assets: Path | str = Path("assets"), scale: int = 3, device: str = "cpu") -> dict[str, object]:
+def render_demo(
+    checkpoint: Path | str,
+    output: Path | str,
+    *,
+    assets: Path | str = Path("assets"),
+    scale: int = 3,
+    device: str = "cpu",
+    seed: int = FIXED_SEED,
+) -> dict[str, object]:
     """Render the fixed demo MP4 and an identity sidecar, refusing overwrite."""
     checkpoint, output, assets = Path(checkpoint), Path(output), Path(assets)
     sidecar = _sidecar_path(output)
@@ -186,8 +196,8 @@ def render_demo(checkpoint: Path | str, output: Path | str, *, assets: Path | st
         # One strict load supplies both the rollout weights and sidecar identity.
         # There is intentionally no directory scan, ranking, or checkpoint choice.
         net, meta = load_demo_player(checkpoint, device=device)
-        env = Qrokkun26Env(seed=FIXED_SEED)
-        env.reset(seed=FIXED_SEED)
+        env = Qrokkun26Env(seed=seed)
+        env.reset(seed=seed)
 
         def write_frame(env: Qrokkun26Env, action: str, frame: int) -> None:
             render_frame(
@@ -198,7 +208,7 @@ def render_demo(checkpoint: Path | str, output: Path | str, *, assets: Path | st
                 bullet_sprites=bullet_sprites,
             ).save(frames_dir / f"f{frame - 1:06d}.png")
 
-        result = _run_loaded_rollout(net, device, env, on_frame=write_frame)
+        result = _run_loaded_rollout(net, device, env, seed=seed, on_frame=write_frame)
         command = ["ffmpeg", "-framerate", "60", "-i", str(frames_dir / "f%06d.png"), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", str(output)]
         try:
             subprocess.run(command, check=True)
@@ -233,6 +243,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ckpt", required=True, type=Path, help="Explicit preselected PlayerRankedTopK checkpoint")
     parser.add_argument("--out", required=True, type=Path, help="New MP4 destination (must not already exist)")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=FIXED_SEED,
+        help="Scripted-spawner seed for this one diagnostic rollout (default: 3000)",
+    )
     parser.add_argument("--assets", type=Path, default=Path("assets"))
     parser.add_argument("--scale", type=int, default=3)
     parser.add_argument("--device", default="cpu")
@@ -241,7 +257,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    metadata = render_demo(args.ckpt, args.out, assets=args.assets, scale=args.scale, device=args.device)
+    metadata = render_demo(args.ckpt, args.out, assets=args.assets, scale=args.scale, device=args.device, seed=args.seed)
     print(json.dumps(metadata, sort_keys=True), flush=True)
 
 

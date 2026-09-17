@@ -39,12 +39,14 @@ def test_rollout_loads_ranked_checkpoint_and_reports_fixed_censor_contract(tmp_p
     assert states and all(value == f32(value) for state in states for value in state)
 
 
-def test_fixed_parser_has_no_seed_cap_or_action_override():
+def test_parser_accepts_seed_and_preserves_default_3000():
     from qrokkun_env.render_player_v5_demo import build_parser
 
-    options = {action.dest for action in build_parser()._actions}
-    assert {"ckpt", "out", "assets", "scale", "device"} <= options
-    assert not ({"seed", "cap", "max_frames", "action", "greedy"} & options)
+    parser = build_parser()
+    assert parser.parse_args(["--ckpt", "model.pt", "--out", "demo.mp4"]).seed == 3000
+    assert parser.parse_args(["--ckpt", "model.pt", "--out", "demo.mp4", "--seed", "3007"]).seed == 3007
+    options = {action.dest for action in parser._actions}
+    assert not ({"cap", "max_frames", "action", "greedy"} & options)
 
 
 def test_bullet_sprite_loader_uses_the_godot_kind_mapping(tmp_path: Path):
@@ -254,12 +256,14 @@ def test_renderer_writes_identity_sidecar_and_refuses_any_overwrite(tmp_path: Pa
         Path(command[-1]).write_bytes(b"synthetic mp4")
 
     monkeypatch.setattr("qrokkun_env.render_player_v5_demo.subprocess.run", fake_ffmpeg)
-    metadata = render_demo(checkpoint, output, assets=Path("assets"), scale=1)
+    metadata = render_demo(checkpoint, output, assets=Path("assets"), scale=1, seed=3007)
 
     sidecar = output.with_suffix(".mp4.json")
     persisted = json.loads(sidecar.read_text(encoding="utf-8"))
     assert calls and output.is_file()
     assert persisted == metadata
+    assert metadata["result"]["seed"] == 3007
+    assert json.loads(output.with_suffix(".mp4.json").read_text())["result"]["seed"] == 3007
     assert metadata["experimental"] is True
     assert metadata["promotion"] == "forbidden"
     assert metadata["checkpoint_selection"] == "none"
