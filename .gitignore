@@ -24,6 +24,7 @@ desktop.ini
 # IDEs
 .idea/
 .vscode/
+.hermes/
 *.csproj
 *.sln
 .mono/
