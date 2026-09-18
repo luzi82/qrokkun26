@@ -1,0 +1,294 @@
+PlayerV5 Phase-3 10k updates：aux 與 control 長訓比較
+====================================================
+
+狀態
+----
+
+兩個 schema-v2 long run 均已完成 ``10000 / 10000`` updates；本文件只分析
+已完成 artifacts，沒有啟動新 training/evaluation，也不 promote 任何
+checkpoint。
+
+這是 exploratory long-run comparison，不是事前鎖定的 best-checkpoint
+promotion gate。所有「best」均為看完整條曲線後的 post-hoc diagnostic
+selection，不得用作顯著 superiority 或 production promotion 證據。
+
+Artifact roots
+--------------
+
+Aux：
+
+``/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20260915-2115-aux``
+
+Control：
+
+``/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20260915-2208-control``
+
+分析前確認兩個 GB10 training process 均已結束。所用 top-level reports、
+JSONL、logs、recovery 與 model checkpoints 已複製到本機 scratch；aux 61 files
+（179,967,112 bytes）、control 53 files（56,314,010 bytes），逐檔 SHA-256 與
+NAS source 相同。所有模型 metadata 均從本機 copy 讀取。
+
+共同 contract 與唯一主要 treatment
+----------------------------------
+
+兩臂使用相同：
+
+- effective seed ``5``；
+- initial PlayerRankedTopK checkpoint：
+  - file SHA-256
+    ``decc50ba2f781f243814bb0c984499bc6bf3ce66f5bcc9cbf22ae1acd3fd545a``；
+  - state-dict SHA-256
+    ``d88c96213f9064658760d598a563d43df5a847a228a313837f00982bc3151b0f``；
+- teacher file SHA-256
+  ``1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1``；
+- canonical dataset hash
+  ``2521bd12ae8b630e65f2645132bde4952fe8f60783ad0e87648ed2af688e558a``；
+- PPO lr ``3e-4``、gamma ``0.99``、lambda ``0.95``、entropy coef ``0.02``、
+  value coef ``0.5``、4 epochs、minibatch 512、8 episodes/update；
+- deterministic evaluation seeds ``3000--3029``、4200-step cap；
+- fixed update target ``10000``。
+
+Treatment：aux 在 PPO loss 上加入 frozen-alpha Phase-2 hybrid retention loss；
+control 沒有 retention loss。Aux calibration target gradient ratio 為 ``0.15``，
+得到固定 ``alpha = 0.38932983697041385``。
+
+兩個 run 都在中途由 source commit
+``cac31d5a5b197e3f06e7df685929d8dbcc02fffd`` transition 至
+``f3992027311d640cd44ca0bedca9775f5cd67650``，目的是加入每 200 updates 的
+Player model checkpoint。Owner 授權及 transition 已寫入各 run 的
+``code_provenance_transitions.jsonl``。Resume boundary 為 aux update 2200、
+control update 3107。這個 transition 改變 checkpoint emission，不宣稱改變
+PPO treatment，但它是本 long-run provenance 的一部分，不能省略。
+
+完成與 accounting
+-----------------
+
+兩臂 ``report.json`` 均為：
+
+``status = max_updates``、``completed_updates = 10000``、
+``total_episodes = 80000``、``stop_reason = max_updates``。
+
+Training-only accounting：
+
+=================  ==============  ==============
+Metric             Aux             Control
+=================  ==============  ==============
+updates            10,000          10,000
+episodes           80,000          80,000
+total frames       189,790,971     163,672,545
+optimizer steps    1,502,764       1,298,408
+=================  ==============  ==============
+
+Aux 比 control 多 ``26,118,426`` frames（``+15.96%``）及 ``204,356`` optimizer
+steps（``+15.74%``）。原因是固定 episodes/update 下，policy 生存較久會產生
+更多 frame samples/minibatches。故這是 update/episode-matched comparison，
+不是 environment-sample- 或 optimizer-step-matched comparison。Aux 的額外
+有效 training budget 是 treatment 影響 survival 後的中介結果；不能把長期
+差距全部解讀成 retention objective 在相同 sample budget 下的純效果。
+
+Aux 在 update 1 前使用同一批 8 rollouts 校準 alpha；這批 trajectories 只
+收集一次，隨後原樣重用作 update-1 PPO data。因此它們已包含在上述
+``80,000`` episodes 與 ``189,790,971`` frames，沒有額外遺漏的 rollout cost；
+calibration 的額外成本是 gradient measurement computation，而不是另一批
+環境互動。
+
+Fixed deterministic evaluation
+------------------------------
+
+兩臂共同的 update-0 baseline：
+
+``mean 36.2689 s / median 38.6000 s``，30 seeds，0 censor。
+
+Periodic model checkpoint code 在 resume transition 後才存在；因此最完整、
+規則且兩臂皆有的 matched 200-boundary window 是 update ``3200--10000``，
+共 35 個 checkpoints。每個 checkpoint 都使用相同 seeds ``3000--3029``、
+相同 cap，且每次均 ``0 / 30`` censor。
+
+Terminal checkpoints
+~~~~~~~~~~~~~~~~~~~~
+
+=================  ==============  ==============
+Metric             Aux u10000      Control u10000
+=================  ==============  ==============
+mean               36.3000 s       36.4822 s
+median             39.3250 s       37.8167 s
+population std     13.0774 s       14.6507 s
+=================  ==============  ==============
+
+相同 30 seeds 的 paired mean difference（aux - control）為 ``-0.1822 s``，
+approximate 95% t CI ``[-7.4568, +7.0923]``，13 / 17 / 0 wins/losses/ties。
+Terminal 結果沒有顯示可分辨的 arm 優勢，而且兩者都接近 update-0 mean。
+
+Post-hoc historical best
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Aux best：
+
+- update ``5000``；
+- mean ``43.9911 s``；
+- median ``48.5250 s``；
+- population std ``12.6083 s``；
+- 比 historical teacher mean ``43.42 s`` 高 ``0.5711 s``。
+
+Control best：
+
+- update ``5400``；
+- mean ``39.8144 s``；
+- median ``42.9083 s``；
+- population std ``10.4283 s``；
+- 比 historical teacher mean ``43.42 s`` 低 ``3.6056 s``。
+
+各自 best mean 相差 ``4.1767 s``，但兩者在不同 update，而且是看完曲線後
+選出的 maxima，不能當成預註冊 A/B estimator。
+
+在 aux best 的同一 update 5000：control mean 為 ``33.9522 s``，paired
+aux-control difference ``+10.0389 s``，approximate 95% t CI
+``[+2.3218, +17.7560]``，22 / 8 / 0 wins/losses/ties。這仍是 post-hoc 選中
+update 5000 後的 descriptive CI，沒有 multiple-look correction。
+
+在 control best 的同一 update 5400：aux mean 為 ``38.3256 s``，paired
+difference ``-1.4889 s``，95% CI ``[-8.8620, +5.8842]``，CI 含 0。
+
+整條 matched checkpoint curve
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Update ``3200--10000`` 的 35 個 matched checkpoints：
+
+============================  ==============  ==============
+Descriptive curve summary     Aux             Control
+============================  ==============  ==============
+mean of checkpoint means      39.2319 s       36.0761 s
+std of checkpoint means       2.2734 s        2.8737 s
+minimum checkpoint mean       35.4789 s       28.8283 s
+maximum checkpoint mean       43.9911 s       39.8144 s
+>= update-0 mean              33 / 35         19 / 35
+> teacher 43.42 s             3 / 35          0 / 35
+last 10 checkpoint average    39.6398 s       36.6182 s
+============================  ==============  ==============
+
+逐 update 差值的 descriptive summary：
+
+- aux mean 高於 control：``24 / 35`` checkpoints；
+- control 高於 aux：``11 / 35``；
+- mean(aux-control)：``+3.1558 s``；
+- median(aux-control)：``+2.5683 s``；
+- last-10 average difference：``+3.0216 s``。
+
+這 35 點共享 evaluation seeds，而且相鄰 checkpoints 來自同一條 stochastic
+training trajectory，並非 35 個獨立實驗 replication。因此不能把 checkpoint
+count 當成樣本數做 ordinary significance test。它只支持一個描述性結論：
+在可比較的後段曲線上，aux 通常高於 control、波動也略小，但優勢沒有穩定
+保留到 terminal checkpoint。
+
+Training-rollout diagnostics
+----------------------------
+
+10,000 updates 的 on-policy rollout mean 平均：
+
+- aux：``39.5398 s``；
+- control：``34.0984 s``；
+- descriptive difference：``+5.4413 s``。
+
+Last-1000 rollout mean：aux ``39.6031 s``，control ``36.6409 s``。
+
+Rollout 指標來自各自不斷改變的 sampled policy，會同時決定每 update 的 sample
+量，不是獨立 fixed benchmark。正式比較仍以上述 deterministic checkpoint
+curve 為主。
+
+Aux gradient-ratio behavior
+---------------------------
+
+固定 alpha 不代表 realized retention/PPO gradient ratio 永遠固定：
+
+=================  ==============  ==============
+Window             Mean ratio      Median ratio
+=================  ==============  ==============
+all 10k updates    0.1491          0.1413
+first 1000         0.1877          0.1776
+last 1000          0.1237          0.1180
+last 50            0.1163          0.1129
+=================  ==============  ==============
+
+全程平均仍接近 calibration target ``0.15``，但後段 realized ratio 明顯較低。
+這與 aux 後段未能穩定保留 u5000 peak 相容，但只是一個機制假說：沒有新的
+單因子實驗證明「ratio 下降造成 survival 回落」，不得因此事後調 alpha 並把
+結果稱為 confirmatory。
+
+Teacher-retention evidence 的時間範圍
+------------------------------------
+
+這次 periodic 400+ model checkpoint 設計只執行 deterministic survival eval，
+不執行 teacher diagnostics，也不把新 snapshot record 寫入 ``report.json``。
+因此：
+
+- aux 最後一個有 held teacher diagnostic 的 report snapshot 是 update 2200：
+  agreement ``0.72823``、teacher-to-student KL ``0.22110``；
+- control 最後一個有 held teacher diagnostic 的 report snapshot 是 update 3107：
+  agreement ``0.14645``、KL ``0.85213``；
+- update 10000 checkpoint 沒有 terminal held agreement/KL。
+
+``report.json`` 的 retention PASS/FAIL objects 因而只反映最後一個 full
+teacher-diagnostic snapshot，不是 terminal u10000 的 teacher-retention verdict。
+可以說 aux 至 u2200 仍 retention PASS、control 至 u3107 已嚴重 washout；不能
+由現有 artifacts 宣稱 aux 在 u5000 或 u10000 仍維持相同 agreement。
+
+Checkpoint identities
+---------------------
+
+Aux best u5000：
+
+- file SHA-256
+  ``4b4ef9b8a679444e61db7b042dcc8e624c2a857a242a846fa8c6432cfb12e35d``；
+- state-dict SHA-256
+  ``f8f645a72260bcbadb6123614e57b40901bf32d4cc864b984d94727e45e86daf``。
+
+Aux terminal u10000：
+
+- file SHA-256
+  ``19348edb15ce1ed61110cd5fe0a46af41519bf5795f9757c682bcfb31e614066``；
+- state-dict SHA-256
+  ``87dd910f76352521563dd93b083e3c037b90ee2532b737a7ef572c0477863d9e``。
+
+Control best u5400：
+
+- file SHA-256
+  ``97812fa051bf15cd52a9421b0a46a2244b8489435a2c8677a6409176f6b107fb``；
+- state-dict SHA-256
+  ``458fa3d134cce5ee19f0a71df119cf329e2524801a19d62c6cc7675b0ef8a3e0``。
+
+Control terminal u10000：
+
+- file SHA-256
+  ``80d5220515f4cb4541ae0eedf336d0c2c83bf74b533fad3944230a7b627bc29f``；
+- state-dict SHA-256
+  ``1a787e82d1d1632d8a0e41980d9d80e86e5f9ae12c64c08c27adc7e5d98af8c0``。
+
+結論
+----
+
+1. **Aux 改善整條後段 survival curve，而不只是單一 peak。** 在 35 個 matched
+   checkpoints 中 aux 有 24 個較高，checkpoint-mean 平均高 ``3.16 s``，
+   last-10 平均高 ``3.02 s``。這是目前最有力的 descriptive result。
+
+2. **Aux 提高可達到的 peak，但沒有形成穩定 terminal superiority。** Aux
+   u5000 達 ``43.99 s``，略高於 teacher historical mean；control 全程沒有
+   checkpoint 超過 teacher。但兩臂 terminal 幾乎相同，paired CI 很寬並含 0。
+
+3. **Retention 的因果代價不能只按 update 數比較。** Aux 因較長 trajectories
+   得到約 16% 更多 frames/optimizer steps；固定-update結果同時包含 retention
+   objective 與其引發的額外 sample exposure。若下一輪要問 equal-compute
+   efficiency，必須另做 frame-或optimizer-step-matched contract。
+
+4. **Teacher skill 的長期 retention 尚未被 terminal artifacts 證明。** 現有
+   held agreement 只到 aux u2200/control u3107；survival curve 不能代替 teacher
+   agreement。Aux u5000 是最佳 survival diagnostic artifact，不是已證明
+   retention/promotion 合格的 production checkpoint。
+
+5. **這仍是一個 PPO seed stream。** 曲線重複量測不能取代獨立 training-seed
+   replication。下一步若要建立穩健結論，應從同一 BC 起點做新的 preregistered
+   PPO-seed replication，或先做已另行提出的 critic-warmup 單因子實驗；不應
+   只延長這一條 10k trajectory 或用 post-hoc best 宣稱 promotion。
+
+Final classification：兩個 run 均 operationally complete；aux 在這條 long-run
+trajectory 上有實質但不穩定的 survival advantage，control 明顯 wash out 早期
+teacher agreement；沒有 promotion，沒有穩定超越 teacher 的結論。
