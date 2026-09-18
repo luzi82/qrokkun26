@@ -76,7 +76,7 @@ Made by Grok Bot. Tribute to 特訓99.
 `qrokkun_env/` is a Godot-free reimplementation of the playfield logic for training:
 
 ```bash
-python3 -m pytest qrokkun_env/tests -q
+python3 -m pytest qrokkun_env/tests qrokkun_ai/tests -q
 python3 -c "from qrokkun_env import Qrokkun26Env; e=Qrokkun26Env(seed=0); print(e.reset()); print(e.step(0))"
 ```
 
@@ -107,7 +107,7 @@ PYTHONPATH=. python3 -m qrokkun_env.sanity --policy flee --seeds 20 --compare
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements-train.txt
-PYTHONPATH=. .venv/bin/python -m qrokkun_env.train_player --episodes 800 --out dist/player_mlp.pt
+PYTHONPATH=. .venv/bin/python -m qrokkun_ai.train_player --episodes 800 --out dist/player_mlp.pt
 ```
 
-Checkpoint metrics: `qrokkun_env/checkpoints/player_mlp_cpu_metrics.json`.
+Checkpoint metrics: `qrokkun_ai/checkpoints/player_mlp_cpu_metrics.json`.

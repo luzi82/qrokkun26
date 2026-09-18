@@ -1,8 +1,10 @@
 # Player / Spawner / Train version map
 
+Agents, train, renderers, frozen-spawner eval, `reset_modes`, `eval_modes`, and corner-probe are canonical under `qrokkun_ai/`. Sanity stays `python -m qrokkun_env.sanity`.
+
 ## Agents (networks + obs/action)
 
-Canonical under `qrokkun_env/agents/`.
+Canonical under `qrokkun_ai/agents/`.
 
 | Ver | Player | Spawner |
 |-----|--------|---------|
@@ -14,7 +16,7 @@ Canonical under `qrokkun_env/agents/`.
 
 ## Training loops
 
-Canonical under `qrokkun_env/train/`. Top-level `train_*.py` files are **back-compat shims**.
+Canonical under `qrokkun_ai/train/`. Top-level `train_*.py` files are **back-compat shims**.
 
 | Ver | Train module | Old shim |
 |-----|--------------|----------|
@@ -38,7 +40,7 @@ temperature scaling.
 
 ## v4.3 evaluation modes + corner probe
 
-Eval modes (`sample_policy`, `rng_jitter`) — see `qrokkun_env/eval_modes.py`:
+Eval modes (`sample_policy`, `rng_jitter`) — see `qrokkun_ai/eval_modes.py`:
 
 | Mode tag | sample_policy | rng_jitter | Use |
 |----------|---------------|------------|-----|
@@ -53,9 +55,9 @@ Paired seeds: `PAIRED_EVAL_SEEDS` (3000..3029).
 **Corner probe** (independent diagnostic — do **not** mix into new×new mean):
 
 ```bash
-python -m qrokkun_env.corner_probe --spawner runs/both_v4_spawner.pt \
+python -m qrokkun_ai.corner_probe --spawner runs/both_v4_spawner.pt \
   --out runs/both_v4_corner_probe.json
-# or: python -m qrokkun_env.train.both_v4 --corner-probe
+# or: python -m qrokkun_ai.train.both_v4 --corner-probe
 ```
 
 Player is **locked** (idle + force `px,py` each frame) at 9 sites: center, 4 corners
@@ -108,7 +110,7 @@ Logged each update on jsonl (`ppo_p` / `ppo_s`) and on status when eval runs:
 | **best_spawner** | `runs/both_v4_spawner_best.pt` | metric **improves** (minimize flee survival) | primarily **flee×newS_det_stoch** |
 | snapshot | `runs/snapshots/{player,spawner}_update_N.pt` | `--snapshot-every N` (>0) | copy of latest |
 
-**Do not** use `new_vs_new_det_det` / `new×new` as the sole selector for either agent (known corner exploit; observation only). See `qrokkun_env/train/checkpoints_v4.py`.
+**Do not** use `new_vs_new_det_det` / `new×new` as the sole selector for either agent (known corner exploit; observation only). See `qrokkun_ai/train/checkpoints_v4.py`.
 
 CLI: `--out-player-best`, `--out-spawner-best`, `--snapshot-every`, `--snapshot-dir`.
 
@@ -117,13 +119,13 @@ CLI: `--out-player-best`, `--out-spawner-best`, `--snapshot-every`, `--snapshot-
 `--random-fraction` (float, default **0.0**) — CLI plumbing only. Opening
 `fraction > 0` as a new training baseline is **v4.8**, out of scope here.
 
-- `prepare_initial_state(env, ...)` (`qrokkun_env/reset_modes.py`): thin reset
+- `prepare_initial_state(env, ...)` (`qrokkun_ai/reset_modes.py`): thin reset
   reusing `env.reset()` (empty field, `pvx=pvy=0`, elapsed/spawn_acc/rng
   reset), then overrides only the Player position to a uniformly random point
   within a small radius (`RANDOM_PLAYER_RADIUS`, 40px) of the field center.
   Does **not** spawn bullets and does **not** run any dynamics burn-in
   (deferred to v5).
-- Explicit training modes (`qrokkun_env/reset_modes.py`): `self_normal`,
+- Explicit training modes (`qrokkun_ai/reset_modes.py`): `self_normal`,
   `self_random_player` (trains **Player only**; Spawner traj never packed),
   `p_vs_scripted_normal` / `p_vs_scripted_random`, `s_vs_flee_normal`
   (**always** normal reset regardless of `--random-fraction`).
@@ -142,13 +144,13 @@ CLI: `--out-player-best`, `--out-spawner-best`, `--snapshot-every`, `--snapshot-
   (`self, self, p_vs_scripted, s_vs_flee, self, s_vs_flee`, all normal reset) —
   no behavior change vs pre-v4.7.
 - `build_parser()` / `reject_non_unit_temp()` were extracted to
-  `qrokkun_env/train/both_v4_args.py` (argparse only, no torch import) so CLI
+  `qrokkun_ai/train/both_v4_args.py` (argparse only, no torch import) so CLI
   default/plumbing tests don't require torch to be installed; `both_v4.py`
   re-exports both names for backward compatibility.
 
 ## v4.8 fraction-only A/B experiment layer (diagnostic only)
 
-`qrokkun_env/train/ab_v48.py` — a standalone config/manifest generator built
+`qrokkun_ai/train/ab_v48.py` — a standalone config/manifest generator built
 **on top of** `--random-fraction` (v4.7); it does **not** touch
 `both_v4.py`/`both_v4_args.py`, so the trainer's normal one-command behavior
 and default (`--random-fraction 0.0`) are completely unchanged.
@@ -176,13 +178,13 @@ and default (`--random-fraction 0.0`) are completely unchanged.
   `n_s_normal`/`n_s_total`; new×new is observation only; promotion of a
   treatment run to the default baseline is forbidden by this script/tool).
   `write_paired_manifests` validates the pair **before** writing anything.
-- `python -m qrokkun_env.train.ab_v48 --seed S --hours H --treatment-fraction
+- `python -m qrokkun_ai.train.ab_v48 --seed S --hours H --treatment-fraction
   F --out-dir DIR [--extra-argv ...]` is the reproducible, explicit
   invocation layer: it validates + writes both manifests, then prints the
-  exact `python -m qrokkun_env.train.both_v4 ...` command line for each arm
+  exact `python -m qrokkun_ai.train.both_v4 ...` command line for each arm
   (identical flags except `--random-fraction` and output paths). It never
   launches training itself and never promotes/renames a checkpoint.
-- Tests: `qrokkun_env/tests/test_v48_ab_experiment.py` (argparse/json only,
+- Tests: `qrokkun_ai/tests/test_v48_ab_experiment.py` (argparse/json only,
   no torch required — mirrors the v4.7 parser test style).
 - v4.8 does not modify PPO, rewards, gamma/lambda, aim/birth geometry, the
   checkpoint selector, dynamics burn-in, or any default training mode; it is
