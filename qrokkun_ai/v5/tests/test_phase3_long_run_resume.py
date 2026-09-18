@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import json
+import signal
 import datetime as dt
 import argparse
 from pathlib import Path
@@ -73,14 +74,15 @@ def test_resume_contract_rejection_precedes_initial_evaluation(
     assert recovery_called is False
 
 
-def test_progress_journal_recovers_a_crash_after_fsync_without_duplicate_row(tmp_path: Path) -> None:
-    """A journal row durable before recovery is retried idempotently on resume."""
+def test_truncate_progress_journal_drops_stale_ahead_rows(tmp_path: Path) -> None:
+    """Recovery is source of truth: ahead jsonl rows are dropped, then a fresh row is appended."""
     progress = tmp_path / "ppo_updates.jsonl"
-    progress.write_text(json.dumps({"update": 1, "metric": 3}) + "\n")
+    progress.write_text("".join(json.dumps({"update": n}) + "\n" for n in range(1, 38)))
 
-    pending = control.reconcile_progress_journal(progress, completed_update=0)
-    assert pending == {1}
-    assert control.append_progress_row(progress, {"update": 1, "metric": 3}) is False
+    control.truncate_progress_journal_to(progress, 0)
+    assert progress.read_text() == ""
+    assert control.reconcile_progress_journal(progress, completed_update=0) == set()
+    assert control.append_progress_row(progress, {"update": 1, "metric": 3}) is True
     assert [json.loads(line)["update"] for line in progress.read_text().splitlines()] == [1]
 
 
@@ -88,16 +90,28 @@ def test_progress_journal_recovers_a_crash_after_fsync_without_duplicate_row(tmp
     (control, "ppo_updates.jsonl"),
     (aux, "ppo_aux_updates.jsonl"),
 ])
-def test_control_and_aux_progress_writers_are_idempotent_after_recovery_lag(
+def test_truncate_then_append_continues_from_recovered_completed(
     tmp_path: Path, module, filename: str,
 ) -> None:
-    """Both arms use the same append-only, recovery-aware progress protocol."""
     progress = tmp_path / filename
-    progress.write_text(json.dumps({"update": 1}) + "\n")
-    assert control.reconcile_progress_journal(progress, completed_update=0) == {1}
-    assert module.append_progress_row(progress, {"update": 1}) is False
-    assert module.append_progress_row(progress, {"update": 2}) is True
-    assert [json.loads(line)["update"] for line in progress.read_text().splitlines()] == [1, 2]
+    progress.write_text("".join(json.dumps({"update": n}) + "\n" for n in range(1, 68)))
+    control.truncate_progress_journal_to(progress, 50)
+    assert control.reconcile_progress_journal(progress, completed_update=50) == set(range(1, 51))
+    assert module.append_progress_row(progress, {"update": 51}) is True
+    assert [json.loads(line)["update"] for line in progress.read_text().splitlines()] == list(range(1, 52))
+
+
+def test_reconcile_progress_journal_accepts_zero_lag_prefix(tmp_path: Path) -> None:
+    progress = tmp_path / "ppo_updates.jsonl"
+    progress.write_text("".join(json.dumps({"update": n}) + "\n" for n in range(1, 51)))
+    assert control.reconcile_progress_journal(progress, completed_update=50) == set(range(1, 51))
+
+
+def test_reconcile_progress_journal_fails_closed_on_gap(tmp_path: Path) -> None:
+    progress = tmp_path / "ppo_updates.jsonl"
+    progress.write_text(json.dumps({"update": 1}) + "\n" + json.dumps({"update": 3}) + "\n")
+    with pytest.raises(control.RunStateError, match="contiguous"):
+        control.reconcile_progress_journal(progress, completed_update=3)
 
 
 @pytest.mark.parametrize("module", [control, aux])
@@ -362,9 +376,9 @@ def test_invalid_requested_stop_budget_fails_closed(tmp_path: Path, stop_args: d
     assert not (tmp_path / "stop_budget_amendments.jsonl").exists()
 
 
-@pytest.mark.parametrize('bad_version', [None, 0, 1, True, 1.0])
+@pytest.mark.parametrize('bad_version', [None, 0, 1, 2, True, 1.0])
 def test_resume_requires_exact_integer_current_schema_version(tmp_path: Path, bad_version: object) -> None:
-    """Versionless, old, unsupported, bool, and float runs are archival-only."""
+    """Versionless, v1, v2, unsupported, bool, and float runs are archival-only."""
     existing = {'tool': 'control', 'stop_args': {
         'end_time_hkt': '2026-09-15T06:45:00+08:00', 'max_updates': None,
     }}
@@ -684,12 +698,12 @@ def test_resume_from_update_parser_implies_resume_mode(module) -> None:
 
 
 @pytest.mark.parametrize("module", [control, aux])
-@pytest.mark.parametrize("n", [0, 199, 201])
+@pytest.mark.parametrize("n", [1, 25, 49, 199, 201])
 def test_resume_from_update_rejects_non_positive_200_multiples(module, n: int) -> None:
     args = module.build_parser().parse_args(
         _resume_from_update_argv("--resume-from-update", str(n), "--max-updates", "400"),
     )
-    with pytest.raises((ValueError, control.RunStateError), match="200"):
+    with pytest.raises((ValueError, control.RunStateError), match="50"):
         control.resolve_resume_from_stop_budget(args, n)
 
 
@@ -731,22 +745,214 @@ def test_resume_from_update_max_only_uses_far_future_end_time(module) -> None:
     assert deadline == control.FAR_FUTURE_END_TIME
 
 
-def test_new_control_contract_has_schema_version_2(tmp_path: Path) -> None:
+def test_new_control_contract_has_schema_version_3(tmp_path: Path) -> None:
     contract = _current_contract(tool="phase3_ranked_ppo_retention", stop_args={
         "effective_max_updates": 1, "effective_end_time_hkt": "2099-12-31T23:59:00+08:00",
     })
     control.create_or_validate_run_contract(tmp_path, contract, resume=False)
-    assert json.loads((tmp_path / "run.json").read_text())["schema_version"] == 2
-    assert control.CURRENT_RUN_SCHEMA_VERSION == 2
+    assert json.loads((tmp_path / "run.json").read_text())["schema_version"] == 3
+    assert control.CURRENT_RUN_SCHEMA_VERSION == 3
 
 
-def test_new_aux_contract_has_schema_version_2(tmp_path: Path) -> None:
+def test_new_aux_contract_has_schema_version_3(tmp_path: Path) -> None:
     contract = _current_contract(tool="phase3_ranked_ppo_retention_aux", arm="aux", stop_args={
         "effective_max_updates": 1, "effective_end_time_hkt": "2099-12-31T23:59:00+08:00",
     })
     control.create_or_validate_run_contract(tmp_path, contract, resume=False)
-    assert json.loads((tmp_path / "run.json").read_text())["schema_version"] == 2
-    assert aux.ret_mod.CURRENT_RUN_SCHEMA_VERSION == 2
+    assert json.loads((tmp_path / "run.json").read_text())["schema_version"] == 3
+    assert aux.ret_mod.CURRENT_RUN_SCHEMA_VERSION == 3
+
+
+def test_recovery_archives_every_50_including_zero_and_periodic_model_stays_200() -> None:
+    assert control.RECOVERY_ARCHIVE_INTERVAL == 50
+    assert control.PERIODIC_MODEL_CHECKPOINT_INTERVAL == 200
+
+
+@pytest.mark.parametrize("completed, force, due", [
+    (0, False, False),
+    (1, False, False),
+    (10, False, False),
+    (25, False, False),
+    (37, False, False),
+    (37, True, True),
+    (49, False, False),
+    (50, False, False),
+    (50, True, True),
+    (199, False, False),
+    (200, False, False),
+    (200, True, True),
+])
+def test_latest_recovery_due_cadence(completed: int, force: bool, due: bool) -> None:
+    assert control.latest_recovery_due(completed, force=force) is due
+
+
+@pytest.mark.parametrize("completed, due", [
+    (0, True),
+    (1, False),
+    (10, False),
+    (25, False),
+    (49, False),
+    (50, True),
+    (100, True),
+    (199, False),
+    (200, True),
+])
+def test_archived_recovery_due_every_50_including_zero(completed: int, due: bool) -> None:
+    assert control.archived_recovery_due(completed) is due
+
+
+def test_control_sparse_latest_recovery_and_archives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_control_loop(monkeypatch)
+    saves: list[tuple[str, int]] = []
+    real = control.atomic_save_recovery
+
+    def spy(path, state):
+        saves.append((Path(path).name, int(state["completed_update"])))
+        return real(path, state)
+
+    monkeypatch.setattr(control, "atomic_save_recovery", spy)
+    control.run_ppo_arm(
+        _tiny_ranked(), torch.device("cpu"), _arm_args(tmp_path, max_updates=50),
+        [0, 10, 25, 50, 100, 200], None, tmp_path,
+        parent_state_dict_sha256="p", parent_file_sha256="f", dataset_hash="d", ppo_knobs={},
+    )
+    latest = [n for name, n in saves if name == "recovery.pt"]
+    archives = [n for name, n in saves if name.startswith("update_")]
+    assert 0 not in latest
+    assert 1 not in latest
+    assert 10 not in latest
+    assert 25 not in latest
+    assert 49 not in latest
+    assert latest[-1] == 50
+    assert 0 in archives
+    assert 50 in archives
+    assert 10 not in archives
+    assert 25 not in archives
+    jsonl = [json.loads(line) for line in (tmp_path / "ppo_updates.jsonl").read_text().splitlines()]
+    assert jsonl[-1]["update"] == 50
+    for row in jsonl:
+        assert row["total_wall_s"] == row["collect_wall_s"] + row["ppo_wall_s"]
+        assert row["collect_wall_s"] >= 0.0
+        assert row["ppo_wall_s"] >= 0.0
+
+
+def test_control_terminal_force_saves_off_cadence_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_control_loop(monkeypatch)
+    control.run_ppo_arm(
+        _tiny_ranked(), torch.device("cpu"), _arm_args(tmp_path, max_updates=10),
+        [0, 10, 25, 50, 100, 200], None, tmp_path,
+        parent_state_dict_sha256="p", parent_file_sha256="f", dataset_hash="d", ppo_knobs={},
+    )
+    state = control.load_recovery(tmp_path / "recovery.pt", torch.device("cpu"))
+    assert state["completed_update"] == 10
+    assert (tmp_path / "recovery_archives" / "update_0.pt").is_file()
+    assert not (tmp_path / "recovery_archives" / "update_10.pt").exists()
+
+
+def test_unlink_latest_recovery_removes_only_an_existing_file(tmp_path: Path) -> None:
+    path = tmp_path / "recovery.pt"
+    control.unlink_latest_recovery(path)
+    path.write_bytes(b"leftover")
+    control.unlink_latest_recovery(path)
+    assert not path.exists()
+
+
+def test_recovery_pt_is_absent_during_training(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    present_during_collect: list[bool] = []
+    (tmp_path / "recovery.pt").write_bytes(b"stale-latest")
+
+    def fake_collect(net, device, seed, max_frames):
+        present_during_collect.append((tmp_path / "recovery.pt").is_file())
+        return _stub_rollout(seed)
+
+    _stub_control_loop(monkeypatch)
+    monkeypatch.setattr(control, "collect_rollout", fake_collect)
+    control.run_ppo_arm(
+        _tiny_ranked(), torch.device("cpu"), _arm_args(tmp_path, max_updates=3),
+        [], None, tmp_path,
+        parent_state_dict_sha256="p", parent_file_sha256="f", dataset_hash="d", ppo_knobs={},
+    )
+    assert present_during_collect
+    assert not any(present_during_collect)
+    assert (tmp_path / "recovery.pt").is_file()
+    assert control.load_recovery(tmp_path / "recovery.pt", torch.device("cpu"))["completed_update"] == 3
+
+
+def test_sigint_does_not_write_recovery_pt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[int, Any] = {}
+    real_signal = signal.signal
+
+    def capturing(sig, handler):
+        captured[sig] = handler
+        return real_signal(sig, handler)
+
+    monkeypatch.setattr(signal, "signal", capturing)
+    updates: list[int] = []
+
+    def fake_ppo(net, opt, rollouts, device):
+        updates.append(1)
+        if len(updates) == 2:
+            captured[signal.SIGINT](signal.SIGINT, None)
+        return {
+            "optimizer_steps": 1, "approx_kl": 0.0, "clip_fraction": 0.0,
+            "explained_variance": 0.0, "entropy": 0.0, "policy_loss": 0.0,
+            "value_loss": 0.0, "total_loss": 0.0, "n_samples": 1,
+        }
+
+    monkeypatch.setattr(control, "collect_rollout", lambda *a, **k: _stub_rollout(0))
+    monkeypatch.setattr(control, "ppo_update", fake_ppo)
+    monkeypatch.setattr(
+        control, "evaluate_deterministic",
+        lambda *a, **k: [{"seed": 0, "elapsed": 1.0, "censored": True}],
+    )
+    result = control.run_ppo_arm(
+        _tiny_ranked(), torch.device("cpu"), _arm_args(tmp_path, max_updates=10),
+        [], None, tmp_path,
+        parent_state_dict_sha256="p", parent_file_sha256="f", dataset_hash="d", ppo_knobs={},
+    )
+    assert result["stop_reason"] == "interrupted"
+    assert result["completed_updates"] == 2
+    assert not (tmp_path / "recovery.pt").exists()
+    assert (tmp_path / "recovery_archives" / "update_0.pt").is_file()
+    with pytest.raises(control.RunStateError, match="recovery.pt is missing"):
+        control.load_recovery(tmp_path / "recovery.pt", torch.device("cpu"))
+
+
+def test_aux_resume_reuses_cached_first_update_collect_wall(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_aux_loop(monkeypatch)
+    train = {
+        "player": torch.zeros(8, PLAYER_FEAT_V4),
+        "bullets": torch.zeros(8, MAX_BULLETS_V4, BULLET_FEAT_V4),
+        "pad": torch.ones(8, MAX_BULLETS_V4, dtype=torch.bool),
+        "teacher_logits": torch.zeros(8, 5),
+        "elapsed": torch.zeros(8),
+    }
+    aux.run_aux_arm(
+        _tiny_ranked(), torch.device("cpu"), _arm_args(tmp_path, max_updates=0),
+        [], train, None, tmp_path,
+        parent_state_dict_sha256="p", parent_file_sha256="f", dataset_hash="d", ppo_knobs={},
+        minibatch=4,
+    )
+    resumed = aux.run_aux_arm(
+        _tiny_ranked(), torch.device("cpu"), _arm_args(tmp_path, max_updates=1, resume=True),
+        [], train, None, tmp_path,
+        parent_state_dict_sha256="p", parent_file_sha256="f", dataset_hash="d", ppo_knobs={},
+        minibatch=4,
+    )
+    assert resumed["completed_updates"] == 1
+    row = json.loads((tmp_path / "ppo_aux_updates.jsonl").read_text().splitlines()[0])
+    assert row["collect_wall_s"] == 0.0
+    assert row["total_wall_s"] == row["collect_wall_s"] + row["ppo_wall_s"]
 
 
 def _stub_control_experiment_identity(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1116,12 +1322,12 @@ def test_rewind_missing_archive_raises_before_destructive_changes(tmp_path: Path
     assert (tmp_path / "recovery_archives" / "update_400.pt").is_file()
 
 
-@pytest.mark.parametrize("n", [0, 199])
+@pytest.mark.parametrize("n", [1, 199])
 def test_rewind_rejects_non_archive_n_before_destructive_changes(tmp_path: Path, n: int) -> None:
     _synthetic_v2_run_through_400(tmp_path)
     progress_before = (tmp_path / "ppo_updates.jsonl").read_text()
     recovery_before = (tmp_path / "recovery.pt").read_bytes()
-    with pytest.raises(control.RunStateError, match="200"):
+    with pytest.raises(control.RunStateError, match="50"):
         control.rewind_run_to_archived_recovery(
             tmp_path, n, progress_filename="ppo_updates.jsonl", device=torch.device("cpu"),
         )

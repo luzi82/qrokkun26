@@ -1418,3 +1418,48 @@ def test_quick_end_to_end_writes_report_with_alpha_and_no_promotion(tmp_path: Pa
     for snap in report["aux_arm"]["snapshots"]:
         ckpt = torch.load(snap["checkpoint"], map_location="cpu", weights_only=False)
         assert ckpt["experimental"] is True and ckpt["production_compatible"] is False
+
+
+def test_aux_progress_jsonl_records_update_wall_clocks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    train = _teacher_tensors(n=8)
+    monkeypatch.setattr(aux, "collect_rollout", lambda *_args, **_kwargs: _fake_rollout(1, n_frames=1))
+    monkeypatch.setattr(aux, "calibrate_alpha", lambda *_args, **_kwargs: {"alpha": 0.15})
+
+    def fake_aux_update(net, opt, rollouts, train_tensors, alpha, device, **kwargs):
+        return {
+            "optimizer_steps": 1, "approx_kl": 0.0, "clip_fraction": 0.0,
+            "explained_variance": 0.0, "entropy": 0.0, "ppo_policy_loss": 0.0,
+            "ppo_value_loss": 0.0, "total_loss": 0.0, "retention_hybrid_loss": 0.0,
+            "retention_hard_ce": 0.0, "retention_soft_kl": 0.0, "retention_soft_ce": 0.0,
+            "alpha": alpha, "g_ppo_norm": 1.0, "g_ret_norm": 1.0,
+            "g_ret_weighted_norm": 0.15, "grad_ratio": 0.15, "cosine_similarity": 0.0,
+            "grad_alignment": {
+                "g_ppo_norm": 1.0, "g_ret_norm": 1.0, "cosine_similarity": 0.0,
+                "grad_ratio": 0.15, "g_ret_weighted_norm": 0.15, "alpha": alpha,
+            },
+            "n_samples": 1, "n_retention_samples": 1,
+        }
+
+    monkeypatch.setattr(aux, "ppo_aux_update", fake_aux_update)
+    monkeypatch.setattr(
+        aux, "evaluate_deterministic",
+        lambda *_args, **_kwargs: [{"seed": 0, "elapsed": 1.0, "censored": False}],
+    )
+    args = argparse.Namespace(
+        updates=1, episodes_per_update=1, max_frames=1, eval_seeds=[0], eval_max_steps=1,
+        out_dir=tmp_path, max_updates=1, end_time=ret.FAR_FUTURE_END_TIME, seed=1,
+    )
+    result = aux.run_aux_arm(
+        _tiny_net(), torch.device("cpu"), args, [0], train, train, tmp_path,
+        parent_state_dict_sha256="parent-sd", parent_file_sha256="parent-file",
+        dataset_hash="dataset", ppo_knobs={}, minibatch=4,
+    )
+    rows = [json.loads(line) for line in (tmp_path / "ppo_aux_updates.jsonl").read_text().splitlines()]
+    assert len(rows) == 1
+    row = rows[0]
+    assert isinstance(row["collect_wall_s"], float) and row["collect_wall_s"] >= 0.0
+    assert isinstance(row["ppo_wall_s"], float) and row["ppo_wall_s"] >= 0.0
+    assert row["total_wall_s"] == row["collect_wall_s"] + row["ppo_wall_s"]
+    assert "collect_wall_s" not in result["snapshots"][0]

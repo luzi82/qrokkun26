@@ -23,6 +23,7 @@ import random
 import signal
 import statistics
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -56,9 +57,36 @@ _REPO_ROOT = next(
 _HKT = ZoneInfo("Asia/Hong_Kong")
 UNBOUNDED_MAX_UPDATES = 2_147_483_647
 FAR_FUTURE_END_TIME = dt.datetime(2099, 12, 31, 23, 59, tzinfo=_HKT)
-CURRENT_RUN_SCHEMA_VERSION = 2
-RECOVERY_ARCHIVE_INTERVAL = 200
+CURRENT_RUN_SCHEMA_VERSION = 3
+RECOVERY_ARCHIVE_INTERVAL = 50
+PERIODIC_MODEL_CHECKPOINT_INTERVAL = 200
 RECOVERY_ARCHIVE_DIRNAME = "recovery_archives"
+
+
+def latest_recovery_due(completed: int, *, force: bool = False) -> bool:
+    """Whether ``recovery.pt`` should be written: clean run terminal only.
+
+    Interrupt/SIGINT/SIGTERM never write latest recovery; those stops must
+    resume from ``recovery_archives``.
+    """
+    del completed
+    return bool(force)
+
+
+def unlink_latest_recovery(path: Path) -> None:
+    """Ensure ``recovery.pt`` is absent during training."""
+    if path.is_file():
+        path.unlink()
+
+
+def archived_recovery_due(completed: int) -> bool:
+    """Whether ``recovery_archives/update_<N>.pt`` should be written (0, 50, 100, …)."""
+    return (
+        not isinstance(completed, bool)
+        and isinstance(completed, int)
+        and completed >= 0
+        and completed % RECOVERY_ARCHIVE_INTERVAL == 0
+    )
 
 
 def _now_hkt() -> dt.datetime:
@@ -108,10 +136,10 @@ def resolve_resume_from_stop_budget(
     if (
         isinstance(selected_update, bool)
         or not isinstance(selected_update, int)
-        or selected_update <= 0
+        or selected_update < 0
         or selected_update % RECOVERY_ARCHIVE_INTERVAL != 0
     ):
-        raise ValueError("--resume-from-update must be a positive multiple of 200")
+        raise ValueError("--resume-from-update must be a non-negative multiple of 50")
     max_updates = getattr(args, "max_updates", None)
     end_time = getattr(args, "end_time", None)
     if max_updates is None and end_time is None:
@@ -152,16 +180,9 @@ def append_run_status(run_dir: Path, event: dict[str, Any]) -> None:
         os.fsync(f.fileno())
 
 
-def reconcile_progress_journal(path: Path, *, completed_update: int) -> set[int]:
-    """Validate durable progress against recovery, allowing one pending retry.
-
-    Progress is intentionally flushed before its recovery boundary.  A crash
-    in that narrow interval leaves one durable row whose model state must be
-    replayed from recovery.  The row is retained and the replay is made
-    idempotent; anything other than that single-row lag fails closed.
-    """
-    if completed_update < 0:
-        raise RunStateError("recovery completed_update is negative")
+def _read_progress_journal_updates(path: Path) -> tuple[list[dict[str, Any]], set[int]]:
+    """Parse a progress journal, failing closed on malformed/duplicate rows."""
+    rows: list[dict[str, Any]] = []
     updates: set[int] = set()
     if path.exists():
         try:
@@ -174,24 +195,63 @@ def reconcile_progress_journal(path: Path, *, completed_update: int) -> set[int]
                 if update in updates:
                     raise ValueError(f"duplicate update {update}")
                 updates.add(update)
+                rows.append(row)
         except (OSError, json.JSONDecodeError, AttributeError, ValueError) as exc:
             raise RunStateError("progress journal is malformed") from exc
     if updates != set(range(1, (max(updates) if updates else 0) + 1)):
         raise RunStateError("progress journal updates are not contiguous")
-    journal_completed = max(updates, default=0)
-    if journal_completed not in {completed_update, completed_update + 1}:
+    return rows, updates
+
+
+def reconcile_progress_journal(path: Path, *, completed_update: int) -> set[int]:
+    """Validate that durable progress is EXACTLY the completed prefix.
+
+    Recovery is always the source of truth: with sparse ``recovery.pt``
+    writes, a durable journal row describing an update beyond
+    ``completed_update`` is stale (from a crash before recovery caught up)
+    rather than a one-update lag to be replayed idempotently.  Any such row
+    must be dropped with :func:`truncate_progress_journal_to` before the
+    train loop continues; this helper enforces zero lag and fails closed on
+    gaps, duplicates, non-contiguous prefixes, or any lag at all.
+    """
+    if completed_update < 0:
+        raise RunStateError("recovery completed_update is negative")
+    _rows, updates = _read_progress_journal_updates(path)
+    if updates != set(range(1, completed_update + 1)):
         raise RunStateError("progress journal and recovery boundary disagree")
     return updates
 
 
+def truncate_progress_journal_to(path: Path, completed_update: int) -> None:
+    """Drop journal rows describing updates beyond ``completed_update``.
+
+    Recovery is the source of truth on resume.  Rows durable ahead of the
+    recovery boundary (e.g. a crash between an update's jsonl fsync and its
+    atomic recovery replacement) are stale and are discarded here so the
+    train loop continues by appending fresh rows from
+    ``completed_update + 1``.  The remaining prefix must itself be
+    contiguous 1..N with no gaps or duplicates; otherwise this fails closed.
+    """
+    if completed_update < 0:
+        raise RunStateError("recovery completed_update is negative")
+    if not path.exists():
+        return
+    rows, _updates = _read_progress_journal_updates(path)
+    kept = [row for row in rows if row["update"] <= completed_update]
+    _atomic_rewrite_jsonl(path, kept)
+
+
 def append_progress_row(path: Path, row: dict[str, Any]) -> bool:
-    """Durably append one update row, unless a recovery replay already has it."""
+    """Durably append one update row.
+
+    The journal must already be truncated to ``completed_update`` (via
+    :func:`truncate_progress_journal_to` on resume) before any update is
+    appended -- there is no skip-append/idempotent-replay contract here.
+    """
     update = row.get("update")
     if isinstance(update, bool) or not isinstance(update, int) or update < 1:
         raise RunStateError("progress row has invalid update")
     existing = reconcile_progress_journal(path, completed_update=update - 1)
-    if update in existing:
-        return False
     if existing != set(range(1, update)):
         raise RunStateError("progress row is out of order")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -232,7 +292,7 @@ def archived_recovery_path(run_dir: Path, update: int) -> Path:
 
 def save_archived_recovery_if_due(run_dir: Path, state: dict[str, Any]) -> None:
     update = state["completed_update"]
-    if update > 0 and update % RECOVERY_ARCHIVE_INTERVAL == 0:
+    if archived_recovery_due(update):
         atomic_save_recovery(archived_recovery_path(run_dir, update), state)
 
 
@@ -241,10 +301,10 @@ def load_archived_recovery(run_dir: Path, update: int, device: torch.device) -> 
     if (
         isinstance(update, bool)
         or not isinstance(update, int)
-        or update <= 0
+        or update < 0
         or update % RECOVERY_ARCHIVE_INTERVAL != 0
     ):
-        raise RunStateError("--resume-from-update must be a positive multiple of 200")
+        raise RunStateError("--resume-from-update must be a non-negative multiple of 50")
     path = archived_recovery_path(run_dir, update)
     if not path.is_file():
         raise RunStateError("selected recovery archive is missing")
@@ -1286,9 +1346,9 @@ def run_ppo_arm(
         )
 
     def _save_periodic_model_checkpoint(update: int) -> None:
-        if update <= 0 or update % RECOVERY_ARCHIVE_INTERVAL != 0:
+        if update <= 0 or update % PERIODIC_MODEL_CHECKPOINT_INTERVAL != 0:
             return
-        if update in snapshot_updates and update <= RECOVERY_ARCHIVE_INTERVAL:
+        if update in snapshot_updates and update <= PERIODIC_MODEL_CHECKPOINT_INTERVAL:
             return
         evaluation = summarize_evaluation(
             evaluate_deterministic(net, device, args.eval_seeds, args.eval_max_steps)
@@ -1322,23 +1382,29 @@ def run_ppo_arm(
     elif 0 in snapshot_updates:
         _snapshot(0)
 
-    # A durable journal may be one update ahead when a crash landed between
-    # its fsync and the atomic recovery replacement.  That update is replayed
-    # from recovery without adding a second history row.
-    reconcile_progress_journal(jsonl_path, completed_update=completed)
+    if getattr(args, "resume", False):
+        # Recovery is the source of truth: any journal row describing an
+        # update beyond ``completed`` is stale (from a crash before recovery
+        # caught up) and is dropped here, before the loop continues by
+        # appending fresh rows from ``completed + 1``.
+        truncate_progress_journal_to(jsonl_path, completed)
+    else:
+        reconcile_progress_journal(jsonl_path, completed_update=completed)
 
-    def _save_boundary() -> None:
+    def _save_boundary(force: bool = False) -> None:
         state = {
             "format": 1, "arm": "control", "model": net.state_dict(),
             "optimizer": opt.state_dict(), "completed_update": completed,
             "total_frames": total_frames, "optimizer_steps": optimizer_steps,
             "snapshots": snapshots, "rng": capture_rng_state(),
         }
-        atomic_save_recovery(recovery_path, state)
+        if latest_recovery_due(completed, force=force):
+            atomic_save_recovery(recovery_path, state)
         save_archived_recovery_if_due(out_dir, state)
 
     if not getattr(args, "resume", False):
         _save_boundary()
+    unlink_latest_recovery(recovery_path)
     stop = StopRequest()
     old_handlers = {s: signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM)}
     for s in old_handlers:
@@ -1360,14 +1426,21 @@ def run_ppo_arm(
                     break
                 seeds = rollout_seed_schedule(update - 1, episodes_per_update=args.episodes_per_update)
                 rollout_seed_window = seeds
+                collect_start = time.perf_counter()
                 rollouts = [collect_rollout(net, device, seed, max_frames=args.max_frames) for seed in seeds]
+                collect_wall_s = time.perf_counter() - collect_start
+                ppo_start = time.perf_counter()
                 metrics = ppo_update(net, opt, rollouts, device)
+                ppo_wall_s = time.perf_counter() - ppo_start
                 optimizer_steps += int(metrics["optimizer_steps"])
                 total_frames += sum(len(r.actions) for r in rollouts)
                 row = dict(metrics)
                 row["update"] = update
                 row["scripted_survival_mean"] = statistics.mean([r.elapsed for r in rollouts])
                 row["rollout_censoring"] = rollout_censor_stats(rollouts)
+                row["collect_wall_s"] = collect_wall_s
+                row["ppo_wall_s"] = ppo_wall_s
+                row["total_wall_s"] = collect_wall_s + ppo_wall_s
                 append_progress_row(jsonl_path, row)
                 completed = update
                 _save_boundary()
@@ -1375,12 +1448,13 @@ def run_ppo_arm(
                     "event": "update_complete", "update": update, "total_frames": total_frames,
                     "effective_max_updates": max_updates, "effective_end_time_hkt": end_time.isoformat(),
                 })
-                if update in snapshot_updates and update <= RECOVERY_ARCHIVE_INTERVAL:
+                if update in snapshot_updates and update <= PERIODIC_MODEL_CHECKPOINT_INTERVAL:
                     _snapshot(update)
                     _save_boundary()
                 _save_periodic_model_checkpoint(update)
                 if stop.requested:
                     stop_reason = "interrupted"
+                    unlink_latest_recovery(recovery_path)
                     break
                 requested_reason = boundary_stop_reason(
                     completed=completed, configured_updates=args.updates,
@@ -1406,10 +1480,16 @@ def run_ppo_arm(
     if (
         completed
         and not any(item["update"] == completed for item in snapshots)
-        and not (completed > RECOVERY_ARCHIVE_INTERVAL and completed % RECOVERY_ARCHIVE_INTERVAL == 0)
+        and not (
+            completed > PERIODIC_MODEL_CHECKPOINT_INTERVAL
+            and completed % PERIODIC_MODEL_CHECKPOINT_INTERVAL == 0
+        )
     ):
         _snapshot(completed)
-        _save_boundary()
+    if stop_reason == "interrupted":
+        unlink_latest_recovery(recovery_path)
+    else:
+        _save_boundary(force=True)
 
     final_eval_summary = summarize_evaluation(evaluate_deterministic(net, device, args.eval_seeds, args.eval_max_steps))
     final_path = out_dir / "ppo_final.pt"
@@ -1449,7 +1529,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--resume", action="store_true", help="resume only from a matching recovery boundary")
     ap.add_argument(
         "--resume-from-update", type=int, metavar="N",
-        help="resume exactly from archived full recovery update N (positive multiple of 200)",
+        help="resume exactly from archived full recovery update N (non-negative multiple of 50)",
     )
     ap.add_argument("--seed", type=int, help="optional explicit RNG seed")
     ap.add_argument("--device", default="cpu")

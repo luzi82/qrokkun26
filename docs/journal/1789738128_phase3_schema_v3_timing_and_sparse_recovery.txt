@@ -1,0 +1,62 @@
+Phase 3 schema v3 — per-update wall-clock and sparse recovery
+==============================================================
+狀態：落地紀錄。不改寫 ``docs/journal/1789431027_phase3_long_run_resume.md``。
+該檔描述 schema v2（每個 completed update 寫 ``recovery.pt``、archives 每 200）。
+新 run 使用 schema v3；v2 / v1 / versionless ``run.json`` 只讀、不可 resume。
+
+Reviewed source parent：``fbf64ec``（versioned ``qrokkun_ai`` packages）。
+範圍：``qrokkun_ai.v5`` Phase 3 control + aux only。
+CPU pytest：``test_phase3_long_run_resume.py``、
+``test_phase3_ranked_ppo_retention.py``、
+``test_phase3_ranked_ppo_retention_aux.py`` → 208 passed, 1 skipped。
+無 promotion。無 GB10 訓練。
+
+Entry
+-----
+
+::
+
+    PYTHONPATH=. python -m qrokkun_ai.v5.tools.phase3_ranked_ppo_retention \
+      --init-checkpoint INIT.pt --teacher TEACHER.pt \
+      --run-dir RUN --device cuda --max-updates N
+
+    PYTHONPATH=. python -m qrokkun_ai.v5.tools.phase3_ranked_ppo_retention_aux \
+      --init-checkpoint INIT.pt --teacher TEACHER.pt \
+      --run-dir RUN --device cuda --end-time YYYYMMDD-HHMM
+
+Per-update timing
+-----------------
+每個 completed update 在 ``ppo_updates.jsonl`` / ``ppo_aux_updates.jsonl``
+寫三個 float 秒：``collect_wall_s``、``ppo_wall_s``、``total_wall_s``。
+``total_wall_s`` 是前兩欄之和。只包 collect 與 PPO；不含 snapshot、eval、
+jsonl、recovery I/O。Aux update 1 使用 pre-loop collect 時間；resume 重用
+recovered ``first_update_rollouts`` 時 ``collect_wall_s = 0.0``。
+
+``recovery.pt``
+---------------
+訓練進行中 **不得存在** ``recovery.pt``：載入 resume 狀態／寫完 u=0 archive
+之後立刻 unlink。loop 內不寫 latest recovery。
+
+SIGINT / SIGTERM 在 completed-update boundary 停，**不**寫 ``recovery.pt``，
+並再次確保檔案不存在。普通 ``--resume`` 因此 fail-closed
+（``recovery.pt is missing``）。必須用 ``--resume-from-update`` 從 archive 回復。
+
+只有 **clean terminal**（max-updates / deadline，非 interrupted）才在終點
+force-write ``recovery.pt``。
+
+``recovery_archives``
+---------------------
+完整 exact-resume payload 寫在 ``recovery_archives/update_<N>.pt``，
+N = 0, 50, 100, …（含 0）。``--resume-from-update N`` 必須是 50 的非負整數倍
+（含 0）。Player periodic model checkpoint（``ppo_update_<N>.pt`` /
+``ppo_aux_update_<N>.pt``）與 diagnostic snapshot horizon 仍是每 200，
+與 archive cadence 分開。
+
+Resume journal
+--------------
+Recovery 是權重來源。resume 時 truncate jsonl，丟掉 ``update > completed``
+的列，然後從 ``completed + 1`` 寫新列。不再保留舊的「journal 超前 1 列、
+skip-append replay」契約。
+
+Diagnostic snapshots 仍是 0 / 10 / 25 / 50 / 100 / 200。PPO / retention knobs
+不變。所有 PPO artifact 仍是 experimental、non-production-compatible。

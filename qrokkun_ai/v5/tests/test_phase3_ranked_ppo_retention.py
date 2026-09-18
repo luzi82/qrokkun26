@@ -832,3 +832,36 @@ def test_teacher_frames_are_never_used_as_ppo_rollouts() -> None:
     assert "teacher" not in ppo_section.lower()
     collect_section = src[src.index("def collect_rollout") : src.index("def collect_rollout") + 3000]
     assert "teacher" not in collect_section.lower()
+
+
+def test_control_progress_jsonl_records_update_wall_clocks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ret, "collect_rollout", lambda *_args, **_kwargs: _fake_rollout([0.0], [True], [0.0]))
+    monkeypatch.setattr(ret, "ppo_update", lambda *_args, **_kwargs: {
+        "optimizer_steps": 1, "approx_kl": 0.0, "clip_fraction": 0.0,
+        "explained_variance": 0.0, "entropy": 0.0, "policy_loss": 0.0,
+        "value_loss": 0.0, "total_loss": 0.0, "n_samples": 1,
+    })
+    monkeypatch.setattr(
+        ret, "evaluate_deterministic",
+        lambda *_args, **_kwargs: [{"seed": 0, "elapsed": 1.0, "censored": False}],
+    )
+    args = argparse.Namespace(
+        updates=1, episodes_per_update=1, max_frames=1, eval_seeds=[0], eval_max_steps=1,
+        out_dir=tmp_path, max_updates=1, end_time=ret.FAR_FUTURE_END_TIME, seed=1,
+    )
+    result = ret.run_ppo_arm(
+        _tiny_net(), torch.device("cpu"), args, [0], None, tmp_path,
+        parent_state_dict_sha256="parent-sd", parent_file_sha256="parent-file",
+        dataset_hash="dataset", ppo_knobs={},
+    )
+    rows = [json.loads(line) for line in (tmp_path / "ppo_updates.jsonl").read_text().splitlines()]
+    assert len(rows) == 1
+    row = rows[0]
+    assert isinstance(row["collect_wall_s"], float) and row["collect_wall_s"] >= 0.0
+    assert isinstance(row["ppo_wall_s"], float) and row["ppo_wall_s"] >= 0.0
+    assert row["total_wall_s"] == row["collect_wall_s"] + row["ppo_wall_s"]
+    extra = result["snapshots"][0]
+    assert "collect_wall_s" not in extra
+    assert "collect_wall_s" not in extra["evaluation"]

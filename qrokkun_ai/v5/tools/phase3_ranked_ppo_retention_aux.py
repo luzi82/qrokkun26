@@ -24,6 +24,7 @@ import json
 import os
 import signal
 import statistics
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -96,10 +97,13 @@ from qrokkun_ai.v5.tools.phase3_ranked_ppo_retention import (
     ppo_hyperparameters,
 )
 
-# Both arms share the same crash boundary: a durable journal entry can be one
-# update ahead of recovery and must be replayed without a duplicate row.
+# Both arms share the same recovery-is-source-of-truth progress protocol:
+# on resume, any journal row ahead of the recovery boundary is stale and is
+# dropped by ``truncate_progress_journal_to`` before the train loop appends
+# fresh rows.
 append_progress_row = ret_mod.append_progress_row
 reconcile_progress_journal = ret_mod.reconcile_progress_journal
+truncate_progress_journal_to = ret_mod.truncate_progress_journal_to
 
 # --------------------------------------------------------------------------- #
 # the ONLY new knob: pre-registered target ratio between the weighted
@@ -701,10 +705,15 @@ def run_aux_arm(
         except (KeyError, TypeError, ValueError, RuntimeError) as exc:
             raise ret_mod.RunStateError("resume auxiliary recovery state is malformed") from exc
         ret_mod.append_run_status(out_dir, {"event": "resumed", "completed_update": completed})
+        # The update-1 window was collected by an earlier process; resuming
+        # this process performs no fresh collection for it.
+        pre_loop_collect_wall_s = 0.0
     else:
+        pre_loop_collect_start = time.perf_counter()
         calib_rollouts, first_update_rollouts = calibration_and_first_update_rollouts(
             net, device, episodes_per_update=args.episodes_per_update, max_frames=args.max_frames,
         )
+        pre_loop_collect_wall_s = time.perf_counter() - pre_loop_collect_start
         calib_seeds = [r.seed for r in calib_rollouts]
         calibration = calibrate_alpha(net, calib_rollouts, train_tensors, device, minibatch=minibatch, generator=calib_gen)
         calibration["rollout_seed_window"] = calib_seeds
@@ -782,9 +791,9 @@ def run_aux_arm(
         )
 
     def _save_periodic_model_checkpoint(update: int) -> None:
-        if update <= 0 or update % ret_mod.RECOVERY_ARCHIVE_INTERVAL != 0:
+        if update <= 0 or update % ret_mod.PERIODIC_MODEL_CHECKPOINT_INTERVAL != 0:
             return
-        if update in snapshot_updates and update <= ret_mod.RECOVERY_ARCHIVE_INTERVAL:
+        if update in snapshot_updates and update <= ret_mod.PERIODIC_MODEL_CHECKPOINT_INTERVAL:
             return
         evaluation = summarize_evaluation(
             evaluate_deterministic(net, device, args.eval_seeds, args.eval_max_steps)
@@ -811,9 +820,14 @@ def run_aux_arm(
         # collects again and never samples an action.
         _snapshot(0, calib_rollouts)
 
-    reconcile_progress_journal(jsonl_path, completed_update=completed)
+    if getattr(args, "resume", False):
+        # Recovery is the source of truth: drop any stale ahead-rows before
+        # the loop continues by appending fresh rows from completed + 1.
+        truncate_progress_journal_to(jsonl_path, completed)
+    else:
+        reconcile_progress_journal(jsonl_path, completed_update=completed)
 
-    def _save_boundary() -> None:
+    def _save_boundary(force: bool = False) -> None:
         state = {
             "format": 1, "arm": "aux", "model": net.state_dict(), "optimizer": opt.state_dict(),
             "completed_update": completed, "total_episodes": total_episodes, "total_frames": total_frames,
@@ -826,11 +840,13 @@ def run_aux_arm(
             "calibration_generator_state": calib_gen.get_state(),
             "diagnostic_generator_state": diag_gen.get_state(), "rng": ret_mod.capture_rng_state(),
         }
-        ret_mod.atomic_save_recovery(recovery_path, state)
+        if ret_mod.latest_recovery_due(completed, force=force):
+            ret_mod.atomic_save_recovery(recovery_path, state)
         ret_mod.save_archived_recovery_if_due(out_dir, state)
 
     if not getattr(args, "resume", False):
         _save_boundary()
+    ret_mod.unlink_latest_recovery(recovery_path)
     stop = ret_mod.StopRequest()
     old_handlers = {s: signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM)}
     for s in old_handlers:
@@ -851,18 +867,23 @@ def run_aux_arm(
                 if update == 1:
                     rollouts = first_update_rollouts
                     seeds = calib_seeds
+                    collect_wall_s = pre_loop_collect_wall_s
                 else:
                     seeds = rollout_seed_schedule(
                         update - 1, episodes_per_update=args.episodes_per_update
                     )
+                    collect_start = time.perf_counter()
                     rollouts = collect_rollout_window(
                         net, device, seeds, max_frames=args.max_frames
                     )
+                    collect_wall_s = time.perf_counter() - collect_start
                 rollout_seed_window = seeds
+                ppo_start = time.perf_counter()
                 metrics = ppo_aux_update(
                     net, opt, rollouts, train_tensors, alpha, device,
                     generator=generator, diagnostics_generator=diag_gen, minibatch=minibatch,
                 )
+                ppo_wall_s = time.perf_counter() - ppo_start
                 optimizer_steps += int(metrics["optimizer_steps"])
                 metrics["grad_alignment"]["measured_before_update"] = update
                 total_episodes += len(rollouts)
@@ -871,6 +892,9 @@ def run_aux_arm(
                 row["update"] = update
                 row["scripted_survival_mean"] = statistics.mean([r.elapsed for r in rollouts])
                 row["rollout_censoring"] = rollout_censor_stats(rollouts)
+                row["collect_wall_s"] = collect_wall_s
+                row["ppo_wall_s"] = ppo_wall_s
+                row["total_wall_s"] = collect_wall_s + ppo_wall_s
                 append_progress_row(jsonl_path, row)
                 completed = update
                 # The post-update weights must be reported with the probe
@@ -884,12 +908,13 @@ def run_aux_arm(
                     "event": "update_complete", "update": update, "total_frames": total_frames,
                     "effective_max_updates": max_updates, "effective_end_time_hkt": end_time.isoformat(),
                 })
-                if update in snapshot_updates and update <= ret_mod.RECOVERY_ARCHIVE_INTERVAL:
+                if update in snapshot_updates and update <= ret_mod.PERIODIC_MODEL_CHECKPOINT_INTERVAL:
                     _snapshot(update, rollouts, alignment=metrics["grad_alignment"])
                     _save_boundary()
                 _save_periodic_model_checkpoint(update)
                 if stop.requested:
                     stop_reason = "interrupted"
+                    ret_mod.unlink_latest_recovery(recovery_path)
                     break
                 requested_reason = ret_mod.boundary_stop_reason(
                     completed=completed, configured_updates=args.updates,
@@ -916,14 +941,17 @@ def run_aux_arm(
         completed
         and not any(item["update"] == completed for item in snapshots)
         and not (
-            completed > ret_mod.RECOVERY_ARCHIVE_INTERVAL
-            and completed % ret_mod.RECOVERY_ARCHIVE_INTERVAL == 0
+            completed > ret_mod.PERIODIC_MODEL_CHECKPOINT_INTERVAL
+            and completed % ret_mod.PERIODIC_MODEL_CHECKPOINT_INTERVAL == 0
         )
     ):
         if last_update_rollouts is None or last_grad_alignment is None:
             raise ret_mod.RunStateError("missing final update diagnostic state")
         _snapshot(completed, last_update_rollouts, alignment=last_grad_alignment)
-        _save_boundary()
+    if stop_reason == "interrupted":
+        ret_mod.unlink_latest_recovery(recovery_path)
+    else:
+        _save_boundary(force=True)
 
     final_eval_summary = summarize_evaluation(
         evaluate_deterministic(net, device, args.eval_seeds, args.eval_max_steps)
@@ -972,7 +1000,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--resume", action="store_true", help="resume only from a matching recovery boundary")
     ap.add_argument(
         "--resume-from-update", type=int, metavar="N",
-        help="resume exactly from archived full recovery update N (positive multiple of 200)",
+        help="resume exactly from archived full recovery update N (non-negative multiple of 50)",
     )
     ap.add_argument("--seed", type=int, help="optional explicit RNG seed")
     ap.add_argument("--device", default="cpu")
