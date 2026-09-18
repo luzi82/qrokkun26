@@ -1,0 +1,28 @@
+"""Runtime regressions from agents wiring."""
+
+from __future__ import annotations
+
+import torch
+
+from qrokkun_env.env import Qrokkun26Env
+from qrokkun_ai.v1.train.player_v1 import ActorCritic, bc_pretrain, shaped_reward
+from qrokkun_ai.v1.train.spawner_v1 import PlayerAC, player_act
+
+
+def test_train_player_gpu_helpers_exist() -> None:
+    env = Qrokkun26Env(seed=1)
+    env.reset(seed=1)
+    r = shaped_reward(env, 0.1, done=False)
+    assert isinstance(r, float)
+    net = ActorCritic(hidden=32)
+    loss = bc_pretrain(net, torch.device("cpu"), steps=1, batch=2, lr=1e-3)
+    assert loss >= 0.0
+
+
+def test_spawner_player_act_unpacks_tuple() -> None:
+    env = Qrokkun26Env(seed=2)
+    env.reset(seed=2)
+    player = PlayerAC(hidden=32)
+    a = player_act(player, env, torch.device("cpu"))
+    assert isinstance(a, int)
+    assert 0 <= a < 9
