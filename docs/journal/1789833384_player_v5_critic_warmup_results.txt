@@ -1,0 +1,129 @@
+PlayerV5 critic-warmup 單因子 PPO — 結果
+========================================
+
+狀態
+----
+
+completed. 預先登記 mechanism PASS、primary PASS。promotion: false。
+沒有 checkpoint 被 promote。這仍是一條 seed-6 BC + PPO torch seed 0 的
+雙臂對照，不是多 seed replication。
+
+Preregistration: docs/journal/1789830562_player_v5_critic_warmup_preregistration.txt
+
+假說（已預先登記）
+------------------
+
+同一 seed-6 BC：warmup 臂 freeze body/policy、只訓 value 10 updates 後，
+兩臂以相同 PPO RNG 跑 10 次未正則化 scripted PPO。
+
+- Mechanism：PPO entry 時 warmup held EV > direct held EV 且 warmup held EV > 0。
+- Primary：mechanism 成立，且 PPO update 10 held teacher agreement warmup > direct。
+- Survival 不進 gate。缺 agreement fail closed。永遠 promotion=false。
+
+Verdict：mechanism PASS；primary PASS；promotion false。
+
+Artifact
+--------
+
+唯讀 NAS 副本（分析用；訓練寫入在 GB10 本機／``88_minion_rw``）：
+
+- warmup：``/mnt/luzi82/88_minion_ro/projects/qrokkun26/runs/20260919-2330-v5-warmup``
+- direct：``/mnt/luzi82/88_minion_ro/projects/qrokkun26/runs/20260919-2336-v5-direct``
+- 比較：direct 目錄 ``compare_arms.json``
+
+執行
+----
+
+- device cuda；``run.json`` torch 2.11.0+cu128；dirty=false
+- checkout ``6285a6e14984cf4bebd157c17bdf9809644dfd06``（schema v4 critic-warmup harness）
+- 兩臂 ``schema_version: 4``、``updates: 10``、``warmup_updates: 10``、
+  ``effective_seed: 0``、``no_promotion: true``
+- warmup started 2026-09-19 23:31 HKT，completed 23:36（PPO 10 updates；
+  warmup 本身 wall 62.2 s）
+- direct started 23:37 HKT，completed 23:40
+- launcher：兩臂皆 ``status=completed``、``arm_ran=true``、``promotion=false``
+- 未使用 ``--quick``
+
+Provenance（與 prereg 相符）
+----------------------------
+
+- teacher file ``1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1``
+- seed-6 BC file ``844e029a74fce418e1d97041e66cf5422a25d8f500628d1ff5526640a7a36ad9``
+- seed-6 state-dict ``a6f95c4621015c15f0e857d1ca0b5a9f561c3e50462472c553d5db7f960064e7``
+- dataset identity ``2521bd12ae8b630e65f2645132bde4952fe8f60783ad0e87648ed2af688e558a``
+  （240 ep / 211 train 146688 frames / 29 held 20300 frames）
+- architecture ``player_ranked_topk``
+
+Warmup 不變性
+-------------
+
+warmup 臂：``actor_unchanged=true``、``held_policy_unchanged=true``、
+80 episodes、164774 frames、1316 optimizer steps、
+``n_dropped_censored=0``、seeds 40000–40079。
+direct 臂 warmup 記帳全 0。
+
+Gates
+-----
+
+Initial gate：兩臂 PASS。Update 0（seeds 3000–3029、0 censor）：
+
+- mean 34.0906 s、median 36.7917 s（seed-6 基準）
+- held agreement 0.6999、teacher-to-student KL 0.1772
+
+``compare_arms.json``：
+
+====================  ========  ========
+Metric                Warmup    Direct
+====================  ========  ========
+PPO-entry held EV     0.0731    −3.8611
+u10 held agreement    0.5511    0.5286
+mechanism_pass        true      —
+primary_pass          true      —
+promotion             false     false
+====================  ========  ========
+
+Direct u10 agreement 0.5286 與歷史未正則化 control 在 update 10 的 0.5286
+相符；這條 direct 對照可信。
+
+觀察（非 gate）
+--------------
+
+P×scripted deterministic eval、30 seeds、0 censor：
+
+====================  ========  ========
+Snapshot              Warmup    Direct
+====================  ========  ========
+u0 mean / median      34.09 / 36.79    同（同一 BC）
+u10 mean / median     34.58 / 37.60    30.01 / 30.38
+u10 KL                0.219     0.254
+PPO frames            156875    146825
+PPO optimizer steps   1248      1168
+====================  ========  ========
+
+解讀
+----
+
+1. Mechanism 字面成立：frozen BC body 上訓 linear value head，比沒訓的
+   critic 好，且 EV 略大於 0。但 0.073 幾乎貼零，不是一個很準的 value
+   function。
+
+2. Primary 字面成立，效應很小：u10 agreement 只差 +0.022。兩邊都從 0.70
+   掉到 ~0.53–0.55。value-head-only warmup **沒有阻止 early washout**，
+   只是崩得稍慢。
+
+3. 依 ``1789656611``：這只推翻「在 frozen BC body 上訓 linear value head
+   已足夠留住 BC 技能」；不能排除更廣義的 critic/body mismatch，也不能
+   據此調 warmup 長度或改 PPO knobs。
+
+4. 這仍是單一 PPO seed stream。字面 PASS 不是普遍進步的證據，也不授權
+   多 seed 事後加跑來把 +0.022 說成穩健。下一項必須是新的、預先登記的
+   單因子，不可與本 round 混合。
+
+5. Promote nothing。experimental checkpoints 不得作 production 初始化。
+
+Decision
+--------
+
+記錄本 round 為預先登記 mechanism/primary PASS、科學上 value-head-only
+不足。promotion false。不延長本 run、不 resume schema v3、不混 aux／
+entropy／gamma／Spawner／self-play。
