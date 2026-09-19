@@ -1,0 +1,120 @@
+PlayerV5 critic-warmup 單因子 PPO：預先登記
+==========================================
+
+狀態
+----
+
+planned／not started。本文件是下一次 GB10 執行前的鎖定契約，不是結果報告；
+未曾以本 preregistration 啟動訓練、收集資料或產生 checkpoint。所有執行主機
+路徑、主機名稱、GPU 型號、runtime／wall-clock、Python／PyTorch／CUDA 版本及
+實際輸出目錄均為「啟動時記錄」欄位，在啟動前未知，絕不在此虛構。HEAD SHA
+於啟動前核對（本文件寫入時執行 HEAD 尚未存在）。
+
+身份、範圍與來源
+------------------
+
+- 架構身份固定為 PlayerV5：code class ``PlayerRankedTopK``，checkpoint
+  architecture key ``player_ranked_topk``（top_k=8、hidden=472）。Player
+  checkpoint pack 仍是 ``CKPT_SCHEMA_VERSION = 1``，不得改成 4。
+- promotion status：candidate，並非 main training default。此實驗所有
+  snapshot 及 final checkpoint 一律 ``experimental=true``、
+  ``production_compatible=false``、``promotion=false``。
+- 唯一 treatment：PPO 開局前 freeze ``body``／``policy``，只訓 ``value``。
+  正式 PPO 兩臂都是未正則化 scripted PPO（沒有 retention aux）。
+- 對手固定為 scripted Spawner。不上 GB10 訓練（本文件只授權未來啟動）。
+- 科學來源：``docs/journal/1789633301_player_v5_bad_critic.txt``、
+  ``docs/journal/1789656611_player_v5_bad_critic_review.txt``。陰性結果只推翻
+  「frozen BC body 上的 linear value head 已足夠」，不排除更廣義
+  critic/body mismatch。
+
+Schema v4
+---------
+
+本 checkout 把共用 ``CURRENT_RUN_SCHEMA_VERSION`` 從 3 推到 4
+（``qrokkun_ai.v5.tools.phase3_ranked_ppo_retention``）。aux 與 critic-warmup
+reuse 同一常數。新 control／aux／critic-warmup 的 ``run.json`` 寫精確整數 4。
+``--resume`` 拒絕 v3、v2、v1、缺欄位、bool、float。無 migration。已完成的
+10k artifacts 仍可當檔案讀，不可 resume。
+
+工具
+----
+
+::
+
+    PYTHONPATH=. python -m qrokkun_ai.v5.tools.phase3_ranked_ppo_critic_warmup \
+      --arm warmup --init-checkpoint "${INIT_CHECKPOINT}" \
+      --teacher "${TEACHER}" --run-dir "${OUT_DIR}" --device cuda
+
+    PYTHONPATH=. python -m qrokkun_ai.v5.tools.phase3_ranked_ppo_critic_warmup \
+      --arm direct --init-checkpoint "${INIT_CHECKPOINT}" \
+      --teacher "${TEACHER}" --run-dir "${OUT_DIR}" --device cuda
+
+``--arm`` 為 ``direct`` 或 ``warmup``。路徑是啟動時才填的本機副本，不得填
+NAS path，不可 ``--quick``。比較用 ``compare_arms(warmup_report, direct_report)``，
+不以 survival 選臂。
+
+啟動前必備本機檔案與雜湊
+--------------------------
+
+NAS 僅唯讀來源。禁止 NAS-direct 讀寫、評估或訓練。
+
+- PlayerV1 teacher：檔案 SHA-256
+  ``1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1``。
+- seed-6 PlayerV5 BC：檔案 SHA-256
+  ``844e029a74fce418e1d97041e66cf5422a25d8f500628d1ff5526640a7a36ad9``；
+  state-dict SHA-256
+  ``a6f95c4621015c15f0e857d1ca0b5a9f561c3e50462472c553d5db7f960064e7``。
+- canonical teacher dataset identity 必須為
+  ``2521bd12ae8b630e65f2645132bde4952fe8f60783ad0e87648ed2af688e558a``。
+
+可否證假說
+----------
+
+從同一 seed-6 BC 出發，warmup 臂在 freeze actor 下以固定 10 updates × 8
+episodes 訓 value（Monte Carlo return、gamma=0.99、丟棄整條 truncated
+episode），然後兩臂以相同 PPO RNG（torch seed 0）與 rollout seeds
+50000–50079 跑 10 次未正則化 PPO。
+
+- Mechanism：PPO entry 時 warmup held EV > direct held EV **且** warmup
+  held EV > 0。Held EV 在 BC occupancy pack（seeds 41000–41029）上量，
+  不是 PPO jsonl 的 GAE-EV。
+- Primary：mechanism 成立，且 PPO update 10 的 held teacher agreement
+  warmup > direct。
+- Survival、是否超過 teacher、是否仍需 aux／較長 gamma：只報告，不進 gate。
+- 缺 held agreement fail closed。永遠 ``promotion=false``。不以 survival
+  選 warmup 長度、checkpoint 或勝出臂。
+
+固定 knobs
+----------
+
+PPO 複製 control：Adam lr=3e-4、eps=1e-8、gamma=0.99、lambda=0.95、clip=0.2、
+entropy=0.02、value coef=0.5、4 epochs、minibatch=512、max grad norm=1.0、
+truncation-as-terminal、無 value bootstrap。唯一例外：正式 PPO updates=10，
+snapshots 0 與 10。
+
+Warmup：10 updates × 8 episodes；env seeds 40000–40079；Adam 只收
+``value.parameters()``；獨立 ``torch.Generator`` seed 4242。PPO 開局前
+Python／NumPy／Torch CPU／CUDA 重設為 ``PPO_TORCH_SEED=0``。eval seeds
+3000–3029。Held value-fit generator seed 4343。
+
+CPU 驗證（本文件寫入前）
+------------------------
+
+``qrokkun_ai/v5/tests/test_phase3_ranked_ppo_critic_warmup.py`` 與
+``test_phase3_long_run_resume.py``：138 passed。Bugbot 對 uncommitted
+diff：no bugs。無 GB10 訓練、無 promotion。
+
+明確禁止
+--------
+
+禁止改 control/aux PPO knobs、延長／resume 舊 10k、混 aux／entropy／gamma／
+learned Spawner／self-play／DAgger、事後調 warmup budget、把 Player
+checkpoint schema 或 Frozen-S manifest 改成 4、提供 v3→v4 migration。
+
+依據
+----
+
+``qrokkun_ai/v5/tools/phase3_ranked_ppo_critic_warmup.py``、
+``qrokkun_ai/v5/tools/phase3_ranked_ppo_retention.py``、
+``docs/journal/1789656611_player_v5_bad_critic_review.txt``、
+``docs/journal/1789229713_player_v5_corrected_aux_round1_preregistration.txt``。

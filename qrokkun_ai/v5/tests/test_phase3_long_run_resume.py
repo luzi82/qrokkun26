@@ -376,9 +376,9 @@ def test_invalid_requested_stop_budget_fails_closed(tmp_path: Path, stop_args: d
     assert not (tmp_path / "stop_budget_amendments.jsonl").exists()
 
 
-@pytest.mark.parametrize('bad_version', [None, 0, 1, 2, True, 1.0])
+@pytest.mark.parametrize('bad_version', [None, 0, 1, 2, 3, True, 1.0])
 def test_resume_requires_exact_integer_current_schema_version(tmp_path: Path, bad_version: object) -> None:
-    """Versionless, v1, v2, unsupported, bool, and float runs are archival-only."""
+    """Versionless, v1, v2, v3, unsupported, bool, and float runs are archival-only."""
     existing = {'tool': 'control', 'stop_args': {
         'end_time_hkt': '2026-09-15T06:45:00+08:00', 'max_updates': None,
     }}
@@ -745,22 +745,22 @@ def test_resume_from_update_max_only_uses_far_future_end_time(module) -> None:
     assert deadline == control.FAR_FUTURE_END_TIME
 
 
-def test_new_control_contract_has_schema_version_3(tmp_path: Path) -> None:
+def test_new_control_contract_has_schema_version_4(tmp_path: Path) -> None:
     contract = _current_contract(tool="phase3_ranked_ppo_retention", stop_args={
         "effective_max_updates": 1, "effective_end_time_hkt": "2099-12-31T23:59:00+08:00",
     })
     control.create_or_validate_run_contract(tmp_path, contract, resume=False)
-    assert json.loads((tmp_path / "run.json").read_text())["schema_version"] == 3
-    assert control.CURRENT_RUN_SCHEMA_VERSION == 3
+    assert json.loads((tmp_path / "run.json").read_text())["schema_version"] == 4
+    assert control.CURRENT_RUN_SCHEMA_VERSION == 4
 
 
-def test_new_aux_contract_has_schema_version_3(tmp_path: Path) -> None:
+def test_new_aux_contract_has_schema_version_4(tmp_path: Path) -> None:
     contract = _current_contract(tool="phase3_ranked_ppo_retention_aux", arm="aux", stop_args={
         "effective_max_updates": 1, "effective_end_time_hkt": "2099-12-31T23:59:00+08:00",
     })
     control.create_or_validate_run_contract(tmp_path, contract, resume=False)
-    assert json.loads((tmp_path / "run.json").read_text())["schema_version"] == 3
-    assert aux.ret_mod.CURRENT_RUN_SCHEMA_VERSION == 3
+    assert json.loads((tmp_path / "run.json").read_text())["schema_version"] == 4
+    assert aux.ret_mod.CURRENT_RUN_SCHEMA_VERSION == 4
 
 
 def test_recovery_archives_every_50_including_zero_and_periodic_model_stays_200() -> None:
