@@ -185,7 +185,10 @@ Schema v4 與禁止 resume
       --terminal-teacher-diagnostics
 
 禁止 ``--quick``、禁止 ``--resume``、禁止 ``--resume-from-update``、禁止
-``--end-time``、禁止 NAS path 當 ``--run-dir``／checkpoint／teacher。
+``--end-time``。正式 ``--run-dir`` 必須落在
+``/mnt/minion/88_minion_rw/projects/qrokkun26/runs/yyyyMMdd-HHmm-<topic>/``
+之下，aux 與 control 分屬獨立子目錄（啟動時填入精確路徑；本文件不虛構
+時間戳）。``88_minion_ro`` 維持唯讀，不得當 run-dir、不得寫入。
 ``--out-dir`` 可省略；有 ``--run-dir`` 時 run 目錄就是 ``--run-dir``。
 
 並行啟動契約
@@ -248,11 +251,12 @@ survival、agreement、KL、cosine 或中途曲線重調 alpha。三條 retentio
 RNG 維持 ``12345``／``22345``／``32345``，與 PPO minibatch permutation
 分離。
 
-啟動前必備本機檔案與雜湊
---------------------------
+啟動前必備檔案與雜湊
+--------------------
 
-NAS 僅唯讀來源。禁止 NAS-direct 讀寫、評估或訓練。路徑在啟動主機重算
-SHA 後記入報告。
+正式訓練／評估寫入進 ``88_minion_rw`` 的上述 run 目錄（aux／control
+分屬獨立子目錄）。``88_minion_ro`` 僅唯讀來源，維持唯讀、禁止寫入。
+路徑在啟動主機重算 SHA 後記入報告。
 
 必須與歷史 10k 相同的 seed-5 BC 與 teacher file identity：
 
@@ -368,7 +372,9 @@ Preflight（另一次授權啟動之前；本文件不執行）
   ``--rollout-seed-start 130000``、``--terminal-teacher-diagnostics``、
   ``--device cuda``；不含 ``--quick``／``--resume``／
   ``--resume-from-update``／``--end-time``。
-- 兩個 run-dir 為空且本機可寫；輸入為本機副本；teacher／init file 與
+- 兩個 run-dir 為空且可寫，落在
+  ``/mnt/minion/88_minion_rw/projects/qrokkun26/runs/yyyyMMdd-HHmm-<topic>/``
+  的獨立 aux／control 子目錄；teacher／init file 與
   init state-dict SHA-256 重算後與上文鎖定值一致。
 - 確認 CLI overlap check 接受 130000（不與 3000–3029、20000–20239
   重疊）。
@@ -412,7 +418,7 @@ update-0 為 mean ``36.268888888888036`` s／median
 完成後必記錄的欄位（啟動時／跑完才填未知值）
 --------------------------------------------
 
-兩臂：本機 run-dir；完整 argv；host／device／torch／python／cuda；
+兩臂：正式 ``88_minion_rw`` run-dir；完整 argv；host／device／torch／python／cuda；
 開始／結束 HKT；clean／dirty；git SHA；``run.json`` 與 ``report.json``
 路徑與 SHA-256；``status.jsonl``；progress jsonl
 （``ppo_aux_updates.jsonl``／``ppo_updates.jsonl``）；
