@@ -111,9 +111,13 @@ PPO optimizer steps   1248      1168
    掉到 ~0.53–0.55。value-head-only warmup **沒有阻止 early washout**，
    只是崩得稍慢。
 
-3. 依 ``1789656611``：這只推翻「在 frozen BC body 上訓 linear value head
-   已足夠留住 BC 技能」；不能排除更廣義的 critic/body mismatch，也不能
-   據此調 warmup 長度或改 PPO knobs。
+3. 依 ``1789656611``：預先登記 mechanism 與 primary 皆 PASS。held agreement
+   從約 0.70 掉到 0.55 是非 gate 證據：這一條 10-update、單 seed、只訓
+   value head 的 warmup 沒有阻止實質 early washout。這不足以證明只訓
+   value head 就能留住 BC 技能；但因為相對 gate 已過，這不是
+   「value-head-only 一般不足」的正式否證。不能排除更廣義的
+   critic/body mismatch，也不能據此調 warmup 長度或改 PPO knobs，
+   更不能超出這一顆 seed 作普遍宣稱。
 
 4. 這仍是單一 PPO seed stream。字面 PASS 不是普遍進步的證據，也不授權
    多 seed 事後加跑來把 +0.022 說成穩健。下一項必須是新的、預先登記的
@@ -124,6 +128,18 @@ PPO optimizer steps   1248      1168
 Decision
 --------
 
-記錄本 round 為預先登記 mechanism/primary PASS、科學上 value-head-only
-不足。promotion false。不延長本 run、不 resume schema v3、不混 aux／
-entropy／gamma／Spawner／self-play。
+記錄本 round 為預先登記 mechanism/primary PASS。非 gate 的 agreement
+下降（約 0.70→0.55）顯示本條 10-update、單 seed 的 value-head-only
+warmup 沒有阻止實質 early washout，不足以證明只訓 value head 就能留住
+BC 技能；但相對 gate 已過，故不是「value-head-only 一般不足」的正式
+否證。promotion false。不延長本 run、不 resume schema v3、不混 aux／
+entropy／gamma／Spawner／self-play。不可調 alpha／knobs，不可超出
+這一顆 seed。
+
+Remark（保留舊判斷）
+--------------------
+
+以下保留先前、非 gate 的歷史判斷；已被上方較窄的措辭取代，不是預先登記
+的 verdict。原文照錄：
+
+> value-head-only warmup 沒有阻止 early washout，只是崩得稍慢；在 frozen BC body 上訓 linear value head 不足以留住 BC 技能。
