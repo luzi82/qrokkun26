@@ -1,0 +1,96 @@
+PlayerV5 Frozen-S eval-only — 結果
+=================================
+
+狀態
+----
+
+completed. 分類-only；沒有 hard pass/fail gate。promotion: false。
+training: false。self_play: false。沒有 checkpoint 被 promote。
+這不是 PPO、不是 seed-4/5 queue、也不是 retention 裁決。
+
+Preregistration: docs/journal/1789263159_player_v5_frozen_spawner_eval_preregistration.txt
+Erratum: docs/journal/1789313691_frozen_spawner_formal_identity_erratum.txt
+Locked manifest: docs/journal/1789362887_frozen_spawner_locked_manifest.json
+
+契約
+----
+
+- contract_id ``player_v5_frozen_spawner_eval_v1``
+- report schema ``frozen_spawner_eval_report.v1``
+- Player ``det_det``、learned Spawner ``stoch_stoch``
+- env / Spawner seeds 3000–3029（30）、cap 4200 frames
+- 對：``v1_teacher`` vs ``v5_bc_seed6``，然後 ``v5_bc_seed6`` vs ``v5_aux_u200``
+- 分類規則：paired mean-diff 95% t CI；``lower>0`` → higher，``upper<0`` → lower，否則 indistinguishable
+
+Artifact
+--------
+
+``/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20260920-0118-v5-frozen-s/report.json``
+
+report SHA-256 ``dd75e34a6c910eac490147f5e65a51ab3bf24d2a26df2de486e7f559c9521926``
+
+執行
+----
+
+- Host: GB10B（NVIDIA GB10），device cuda
+- Checkout: clean HEAD ``00461264beb71b5efcbfb119099357697fee7605``
+- torch 2.11.0+cu128
+- PID 488461；約 2026-09-20 01:18–01:19 HKT
+- CLI（不是 ``qrokkun_env.frozen_spawner_eval_cli``）::
+
+    PYTHONPATH=. python -m qrokkun_ai.v5.frozen_spawner_eval_cli \
+      --manifest docs/journal/1789362887_frozen_spawner_locked_manifest.json \
+      --out-report /mnt/minion/88_minion_rw/projects/qrokkun26/runs/20260920-0118-v5-frozen-s/report.json \
+      --device cuda
+
+鎖定 manifest 路徑當時不存在；由既有本地 ``$HOME/projects/qrokkun26/scratch_*``
+artifact 以 ``ln -f`` 還原。確切來源路徑與 ``ln`` 指令未保留在本結果紀錄中；
+還原後，執行 CLI 在 episode 前核對了 manifest 鎖定的 file/state 身份。
+沒有改 journal manifest，沒有 ``prepare_main``。
+
+Provenance（file SHA-256）
+-------------------------
+
+- v1_teacher ``1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1``
+- v5_bc_seed6 ``844e029a74fce418e1d97041e66cf5422a25d8f500628d1ff5526640a7a36ad9``
+- v5_aux_u200 ``7c8bc2a932a4f6bf4269fcfd92a4f4234305ec92b59b9c104ca8522d88c40080``
+- learned_spawner ``b10c718dd3207e7526384459ea2635392dd99ef1640df801a694ebc5955bf3a9``
+
+Restricted survival（n=30、0 censor、hit_rate 1.0）
+-------------------------------------------------
+
+early_death：elapsed < 5.0 s。
+
+================  ========  ========  ======
+Arm               mean s    median s  early_death
+================  ========  ========  ======
+v1_teacher        31.7133   32.7167   0.0000
+v5_bc_seed6       28.2172   27.4917   0.0333
+v5_aux_u200       31.6900   33.4333   0.0000
+================  ========  ========  ======
+
+Paired comparisons
+------------------
+
+delta = b − a。
+
+1. ``v1_teacher`` vs ``v5_bc_seed6``：mean_diff −3.4961 s，median_diff −6.5250 s，
+   95% CI [−9.2549, +2.2627]，10 / 20 / 0 improve/worsen/unchanged。
+   direction ``no_clear_direction``；classification **indistinguishable**。
+
+2. ``v5_bc_seed6`` vs ``v5_aux_u200``：mean_diff +3.4728 s，median_diff +4.3333 s，
+   95% CI [−2.8847, +9.8303]，17 / 13 / 0。
+   direction ``no_clear_direction``；classification **indistinguishable**。
+
+解讀
+----
+
+兩對在鎖定 CI 下都分不出方向。不能說 Frozen-S 上 BC 比 V1 teacher 差或
+aux-u200 比 BC 好。這不是 promotion 證據，也不授權 PPO / replication /
+seed-4/5。下一步必須另寫 preregistration。
+
+Decision
+--------
+
+記錄分類：兩對皆 indistinguishable。promotion false。不延長、不 resume、
+不混 aux／entropy／gamma／self-play。
