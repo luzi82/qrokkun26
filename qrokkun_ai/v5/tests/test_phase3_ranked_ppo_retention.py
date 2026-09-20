@@ -887,6 +887,86 @@ def _control_replication_argv(tmp_path: Path, *extra: str) -> list[str]:
     ]
 
 
+def test_rollout_seed_start_overlapping_eval_window_is_rejected(tmp_path: Path) -> None:
+    args = ret.build_parser().parse_args(
+        _control_replication_argv(tmp_path, "--rollout-seed-start", "3000")
+    )
+    with pytest.raises(ValueError, match="overlaps evaluation"):
+        ret.apply_mode_defaults(args)
+
+
+def test_rollout_seed_start_3001_overlaps_eval_via_actual_schedule_zero(
+    tmp_path: Path,
+) -> None:
+    """Quick mode: start 3001 is rejected because loop update 1 uses ``schedule(0)``.
+
+    Both trainers collect update 1 with ``rollout_seed_schedule(0)`` and the
+    final update with ``schedule(effective_max_updates - 1)``. For quick
+    ``updates=2`` / ``episodes_per_update=2``, start 3001 yields
+    ``schedule(0) == [3001, 3002]`` which hits eval ``3000..3002``. The final
+    consumed window is ``schedule(1) == [3003, 3004]`` and does not overlap.
+    """
+    start = 3001
+    epu = 2
+    effective_max_updates = 2
+    assert ret.rollout_seed_schedule(0, episodes_per_update=epu, rollout_seed_start=start) == [
+        3001,
+        3002,
+    ]
+    assert ret.rollout_seed_schedule(
+        effective_max_updates - 1, episodes_per_update=epu, rollout_seed_start=start,
+    ) == [3003, 3004]
+    args = ret.build_parser().parse_args(
+        _control_replication_argv(tmp_path, "--rollout-seed-start", "3001")
+    )
+    with pytest.raises(ValueError, match="overlaps evaluation"):
+        ret.apply_mode_defaults(args)
+
+
+def test_rollout_seed_start_2995_actual_windows_do_not_overlap_eval(
+    tmp_path: Path,
+) -> None:
+    """Quick mode: start 2995 is accepted because actual consumed windows miss eval.
+
+    Loop update 1 uses ``schedule(0) == [2995, 2996]``; the final update uses
+    ``schedule(effective_max_updates - 1) == schedule(1) == [2997, 2998]``.
+    Neither intersects quick eval ``3000..3002``.
+    """
+    start = 2995
+    epu = 2
+    effective_max_updates = 2
+    assert ret.rollout_seed_schedule(0, episodes_per_update=epu, rollout_seed_start=start) == [
+        2995,
+        2996,
+    ]
+    assert ret.rollout_seed_schedule(
+        effective_max_updates - 1, episodes_per_update=epu, rollout_seed_start=start,
+    ) == [2997, 2998]
+    eval_seeds = set(ret.eval_seed_list()[:3])
+    consumed = set(
+        ret.rollout_seed_schedule(0, episodes_per_update=epu, rollout_seed_start=start)
+        + ret.rollout_seed_schedule(
+            effective_max_updates - 1, episodes_per_update=epu, rollout_seed_start=start,
+        )
+    )
+    assert consumed.isdisjoint(eval_seeds)
+    args = ret.build_parser().parse_args(
+        _control_replication_argv(tmp_path, "--rollout-seed-start", "2995")
+    )
+    applied = ret.apply_mode_defaults(args)
+    assert applied.rollout_seed_start == 2995
+
+
+def test_rollout_seed_start_overlapping_dataset_collection_window_is_rejected(
+    tmp_path: Path,
+) -> None:
+    args = ret.build_parser().parse_args(
+        _control_replication_argv(tmp_path, "--rollout-seed-start", "20000")
+    )
+    with pytest.raises(ValueError, match="overlaps dataset collection"):
+        ret.apply_mode_defaults(args)
+
+
 def _stub_control_train_loop(monkeypatch: pytest.MonkeyPatch, collected: list[int]) -> None:
     def fake_collect(_net: Any, _device: Any, seed: int, max_frames: int = 1) -> Any:
         collected.append(int(seed))

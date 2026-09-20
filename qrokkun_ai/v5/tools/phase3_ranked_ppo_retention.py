@@ -1578,11 +1578,20 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
-def apply_mode_defaults(args: argparse.Namespace) -> argparse.Namespace:
+def apply_mode_defaults(
+    args: argparse.Namespace,
+) -> argparse.Namespace:
     """Fill in the update budget / seed windows / gate thresholds. Non-quick
     runs use the pre-registered production defaults (200 updates etc); quick
     mode shrinks every knob so a control can be smoke-tested fast, and
-    relaxes the initial gate (never the retention math itself)."""
+    relaxes the initial gate (never the retention math itself).
+
+    Overlap checks cover the actual consumed rollout schedule shared by both
+    trainers: loop update 1 uses ``rollout_seed_schedule(0)``, and when
+    ``effective_max_updates > 0`` the final update uses
+    ``schedule(effective_max_updates - 1)``. A zero-update budget is an empty
+    interval.
+    """
     if getattr(args, "quick", False):
         args.updates = 2
         args.episodes_per_update = 2
@@ -1629,6 +1638,36 @@ def apply_mode_defaults(args: argparse.Namespace) -> argparse.Namespace:
     args.effective_seed = PPO_TORCH_SEED if seed is None else configure_seed(seed)
     if getattr(args, "rollout_seed_start", None) is None:
         args.rollout_seed_start = PPO_ROLLOUT_SEED_START
+    args.rollout_seed_start = int(args.rollout_seed_start)
+    if args.rollout_seed_start < 0:
+        raise ValueError("--rollout-seed-start must be non-negative")
+    episodes_per_update = int(args.episodes_per_update)
+    max_updates = int(args.effective_max_updates)
+    if max_updates > 0:
+        rollout_lo = rollout_seed_schedule(
+            0,
+            episodes_per_update=episodes_per_update,
+            rollout_seed_start=args.rollout_seed_start,
+        )[0]
+        rollout_end = (
+            rollout_seed_schedule(
+                max_updates - 1,
+                episodes_per_update=episodes_per_update,
+                rollout_seed_start=args.rollout_seed_start,
+            )[-1]
+            + 1
+        )
+    else:
+        rollout_lo = args.rollout_seed_start
+        rollout_end = args.rollout_seed_start
+    eval_lo = min(args.eval_seeds)
+    eval_hi = max(args.eval_seeds) + 1
+    if rollout_lo < eval_hi and eval_lo < rollout_end:
+        raise ValueError("--rollout-seed-start overlaps evaluation seeds")
+    collect_lo = COLLECT_SEED_START
+    collect_hi = COLLECT_SEED_START + int(args.data_episodes)
+    if rollout_lo < collect_hi and collect_lo < rollout_end:
+        raise ValueError("--rollout-seed-start overlaps dataset collection seeds")
     args.terminal_teacher_diagnostics = bool(
         getattr(args, "terminal_teacher_diagnostics", False)
     )

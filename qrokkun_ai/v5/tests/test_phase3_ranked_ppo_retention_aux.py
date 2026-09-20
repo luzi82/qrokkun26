@@ -1488,6 +1488,67 @@ def _aux_replication_argv(tmp_path: Path, *extra: str) -> list[str]:
     ]
 
 
+def test_aux_rollout_seed_start_update0_overlapping_quick_eval_is_rejected(
+    tmp_path: Path,
+) -> None:
+    """Quick eval is 3000..3002. Loop update 1 uses ``rollout_seed_schedule(0)``.
+
+    ``--rollout-seed-start 3001`` makes the first consumed window
+    ``schedule(0) == [3001, 3002]`` overlap eval. The final update uses
+    ``schedule(effective_max_updates - 1)`` (quick: ``schedule(1) == [3003, 3004]``),
+    which does not overlap.
+    """
+    start = 3001
+    epu = 2
+    effective_max_updates = 2
+    assert aux.rollout_seed_schedule(0, episodes_per_update=epu, rollout_seed_start=start) == [
+        3001,
+        3002,
+    ]
+    assert aux.rollout_seed_schedule(
+        effective_max_updates - 1, episodes_per_update=epu, rollout_seed_start=start,
+    ) == [3003, 3004]
+    assert aux.eval_seed_list()[:3] == [3000, 3001, 3002]
+    args = aux.build_parser().parse_args(
+        _aux_replication_argv(tmp_path, "--rollout-seed-start", "3001")
+    )
+    with pytest.raises(ValueError, match="overlaps evaluation"):
+        aux.apply_mode_defaults(args)
+
+
+def test_aux_rollout_seed_start_2995_actual_windows_do_not_overlap_eval(
+    tmp_path: Path,
+) -> None:
+    """Quick mode: start 2995 is accepted because actual consumed windows miss eval.
+
+    Aux collects the same windows as control: ``schedule(0)`` for loop update 1
+    and ``schedule(effective_max_updates - 1)`` for the final update.
+    """
+    start = 2995
+    epu = 2
+    effective_max_updates = 2
+    assert aux.rollout_seed_schedule(0, episodes_per_update=epu, rollout_seed_start=start) == [
+        2995,
+        2996,
+    ]
+    assert aux.rollout_seed_schedule(
+        effective_max_updates - 1, episodes_per_update=epu, rollout_seed_start=start,
+    ) == [2997, 2998]
+    eval_seeds = set(aux.eval_seed_list()[:3])
+    consumed = set(
+        aux.rollout_seed_schedule(0, episodes_per_update=epu, rollout_seed_start=start)
+        + aux.rollout_seed_schedule(
+            effective_max_updates - 1, episodes_per_update=epu, rollout_seed_start=start,
+        )
+    )
+    assert consumed.isdisjoint(eval_seeds)
+    args = aux.build_parser().parse_args(
+        _aux_replication_argv(tmp_path, "--rollout-seed-start", "2995")
+    )
+    applied = aux.apply_mode_defaults(args)
+    assert applied.rollout_seed_start == 2995
+
+
 def _stub_aux_train_loop(monkeypatch: pytest.MonkeyPatch, collected: list[int]) -> None:
     def fake_collect(_net, _device, seed, max_frames=1):
         collected.append(int(seed))

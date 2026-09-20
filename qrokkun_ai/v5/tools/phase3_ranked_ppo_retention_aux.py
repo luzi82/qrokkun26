@@ -1053,7 +1053,8 @@ def apply_mode_defaults(args: argparse.Namespace) -> argparse.Namespace:
     """Fill in the update budget / seed windows / gate thresholds, exactly as
     the phase3 control does. Quick mode shrinks the budget for smoke tests and
     relaxes the initial gate only -- it never changes the alpha formula or the
-    retention math."""
+    retention math.
+    """
     return ret_mod.apply_mode_defaults(args)
 
 
