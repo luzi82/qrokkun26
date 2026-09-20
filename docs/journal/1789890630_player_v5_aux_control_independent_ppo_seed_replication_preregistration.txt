@@ -7,9 +7,10 @@ PlayerV5 Phase-3 aux/control：獨立 PPO seed 的 10k 配對複製 — 預先�
 planned／not started。本文件是 canonical preregistration，鎖定一次「全新、
 並行、fresh schema-v4、exact 10000 updates」的 aux 對 control 複製實驗。它
 不是結果報告，也不授權從本文件啟動訓練、評估、resume、render 或 promotion。
-所有執行主機路徑、主機名稱、GPU 型號、runtime／wall-clock、Python／PyTorch／
-CUDA 版本及實際輸出目錄均為「啟動時記錄」欄位，在另一次明確授權啟動前未知，
-絕不在此虛構。
+正式 ``INIT_CHECKPOINT`` 已鎖定為下方 NAS ``88_minion_ro`` 唯讀資產絕對
+路徑，不是啟動時再選的未知輸入。其餘執行主機路徑、主機名稱、GPU 型號、
+runtime／wall-clock、Python／PyTorch／CUDA 版本及實際 ``88_minion_rw``
+輸出目錄均為「啟動時記錄」欄位，在另一次明確授權啟動前未知，絕不在此虛構。
 
 本文件寫入時，鎖定的實驗程式碼完整 SHA 為
 
@@ -57,7 +58,8 @@ rollout window 的 confirmatory 契約上。歷史數字只作背景與契約核
   ``decc50ba2f781f243814bb0c984499bc6bf3ce66f5bcc9cbf22ae1acd3fd545a``；
   state-dict SHA-256
   ``d88c96213f9064658760d598a563d43df5a847a228a313837f00982bc3151b0f``；
-  architecture ``player_ranked_topk``。
+  architecture ``player_ranked_topk``。該 identity 即本輪鎖定的 NAS RO
+  ``INIT_CHECKPOINT``（絕對路徑見下方必備檔案）。
 - 兩臂 teacher：``run.json`` 只記錄 file SHA-256
   ``1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1``。
   原始 10k ``run.json`` **沒有** teacher state-dict SHA-256，本文件不把它
@@ -159,13 +161,21 @@ Schema v4 與禁止 resume
 ``--end-time`` only 把 max-updates 變成 ``2147483647``；不得省略
 ``--max-updates`` 而落到預設 200。
 
-工具與預期命令（啟動時填路徑；本文件不啟動）
---------------------------------------------
+工具與預期命令（啟動時填 teacher／run-dir；INIT_CHECKPOINT 已鎖定；本文件不啟動）
+-------------------------------------------------------------------------------
+
+兩臂 ``--init-checkpoint`` **必須**為下列 NAS 唯讀資產，不得改用 GB10
+scratch、本機副本或其他 seed-5 檔：
+
+``/mnt/minion/88_minion_ro/projects/qrokkun26/assets/20260911-scratch_ranked_multiseed_full/seed5/seed5.pt``
+
+``${TEACHER}``、``${AUX_RUN_DIR}``、``${CONTROL_RUN_DIR}`` 在啟動時填入並
+記錄；本文件不虛構 teacher 絕對路徑或 run 時間戳。
 
 ::
 
     PYTHONPATH=. python -m qrokkun_ai.v5.tools.phase3_ranked_ppo_retention_aux \
-      --init-checkpoint "${INIT_CHECKPOINT}" \
+      --init-checkpoint /mnt/minion/88_minion_ro/projects/qrokkun26/assets/20260911-scratch_ranked_multiseed_full/seed5/seed5.pt \
       --teacher "${TEACHER}" \
       --run-dir "${AUX_RUN_DIR}" \
       --device cuda \
@@ -175,7 +185,7 @@ Schema v4 與禁止 resume
       --terminal-teacher-diagnostics
 
     PYTHONPATH=. python -m qrokkun_ai.v5.tools.phase3_ranked_ppo_retention \
-      --init-checkpoint "${INIT_CHECKPOINT}" \
+      --init-checkpoint /mnt/minion/88_minion_ro/projects/qrokkun26/assets/20260911-scratch_ranked_multiseed_full/seed5/seed5.pt \
       --teacher "${TEACHER}" \
       --run-dir "${CONTROL_RUN_DIR}" \
       --device cuda \
@@ -188,15 +198,17 @@ Schema v4 與禁止 resume
 ``--end-time``。正式 ``--run-dir`` 必須落在
 ``/mnt/minion/88_minion_rw/projects/qrokkun26/runs/yyyyMMdd-HHmm-<topic>/``
 之下，aux 與 control 分屬獨立子目錄（啟動時填入精確路徑；本文件不虛構
-時間戳）。``88_minion_ro`` 維持唯讀，不得當 run-dir、不得寫入。
-``--out-dir`` 可省略；有 ``--run-dir`` 時 run 目錄就是 ``--run-dir``。
+時間戳）。``88_minion_ro`` 維持唯讀：它是 ``INIT_CHECKPOINT`` 的來源，
+不得當 run-dir、不得寫入。``--out-dir`` 可省略；有 ``--run-dir`` 時 run
+目錄就是 ``--run-dir``。
 
 並行啟動契約
 ------------
 
 兩臂必須在 **同一個 clean commit**
 ``bd7443cd7fbbd72fcb6243afc66dc0bf59025c01`` 上 **並行成對啟動**（同一授權
-窗口、同一套本機輸入副本）。任一臂 fail closed、interrupted、deadline、
+窗口、同一份 NAS ``88_minion_ro`` ``INIT_CHECKPOINT``、同一 teacher
+identity）。任一臂 fail closed、interrupted、deadline、
 dirty tree、錯誤 SHA、錯誤 seed／window、缺 terminal teacher diagnostics、
 或未滿 10000 updates，**整對推論作廢**：不得用單臂曲線宣稱 aux 優於／
 劣於 control，不得補跑另一 seed 冒充原配對。失敗必須完整保留，另立新
@@ -255,20 +267,26 @@ RNG 維持 ``12345``／``22345``／``32345``，與 PPO minibatch permutation
 --------------------
 
 正式訓練／評估寫入進 ``88_minion_rw`` 的上述 run 目錄（aux／control
-分屬獨立子目錄）。``88_minion_ro`` 僅唯讀來源，維持唯讀、禁止寫入。
-路徑在啟動主機重算 SHA 後記入報告。
+分屬獨立子目錄）。``88_minion_ro`` 僅唯讀來源（含鎖定的
+``INIT_CHECKPOINT``），維持唯讀、禁止寫入。啟動主機必須對該 RO 檔與
+teacher 重算 SHA 後記入報告；不得改寫 RO 資產。
 
 必須與歷史 10k 相同的 seed-5 BC 與 teacher file identity：
 
-- seed-5 PlayerV5 BC：file SHA-256
+- seed-5 PlayerV5 BC（**正式 ``INIT_CHECKPOINT``，owner 指定且已核對**）：
+  ``/mnt/minion/88_minion_ro/projects/qrokkun26/assets/20260911-scratch_ranked_multiseed_full/seed5/seed5.pt``；
+  file SHA-256
   ``decc50ba2f781f243814bb0c984499bc6bf3ce66f5bcc9cbf22ae1acd3fd545a``；
   state-dict SHA-256
   ``d88c96213f9064658760d598a563d43df5a847a228a313837f00982bc3151b0f``。
-  先前 GB10B 核對（``docs/journal/1789362887_player_v5_gb10_seed45_queue_preregistration.txt``）
-  曾見本機路徑
-  ``/home/ovm-hms-bot/scratch_ranked_multiseed_full/seed5/seed5.pt``、
-  metadata ``seed=5``、``architecture_version=1``；該路徑是否仍存在屬
-  啟動時核對，本文件不假設它可用。
+  啟動 argv 必須使用此絕對路徑；重算 file／state SHA 必須與上列鎖定值
+  一致，否則 fail closed。先前 GB10B 核對
+  （``docs/journal/1789362887_player_v5_gb10_seed45_queue_preregistration.txt``）
+  曾在 scratch 路徑
+  ``/home/ovm-hms-bot/scratch_ranked_multiseed_full/seed5/seed5.pt``
+  測得同一 file／state SHA 與 metadata ``seed=5``、
+  ``architecture_version=1``；該 GB10 路徑只作歷史 provenance，**不是**
+  本輪正式輸入，也不得當作 ``INIT_CHECKPOINT`` 的替代來源。
 - PlayerV1 teacher：file SHA-256
   ``1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1``。
   同一 GB10B 核對對**同一 file hash** 另測得 teacher state-dict SHA-256
@@ -374,8 +392,14 @@ Preflight（另一次授權啟動之前；本文件不執行）
   ``--resume-from-update``／``--end-time``。
 - 兩個 run-dir 為空且可寫，落在
   ``/mnt/minion/88_minion_rw/projects/qrokkun26/runs/yyyyMMdd-HHmm-<topic>/``
-  的獨立 aux／control 子目錄；teacher／init file 與
-  init state-dict SHA-256 重算後與上文鎖定值一致。
+  的獨立 aux／control 子目錄；不得把 ``88_minion_ro`` 當 run-dir。
+- ``--init-checkpoint`` 精確為
+  ``/mnt/minion/88_minion_ro/projects/qrokkun26/assets/20260911-scratch_ranked_multiseed_full/seed5/seed5.pt``
+  （RO 可讀、不可寫）；對該檔重算 file SHA-256
+  ``decc50ba2f781f243814bb0c984499bc6bf3ce66f5bcc9cbf22ae1acd3fd545a``
+  與 state-dict SHA-256
+  ``d88c96213f9064658760d598a563d43df5a847a228a313837f00982bc3151b0f``。
+  teacher file SHA-256 重算後與上文鎖定值一致。
 - 確認 CLI overlap check 接受 130000（不與 3000–3029、20000–20239
   重疊）。
 - 確認 Player checkpoint schema 仍為 1。
@@ -395,7 +419,8 @@ Acceptance／stop
 - ``knobs.terminal_teacher_diagnostics === true``；
 - ``stop_args.effective_max_updates === 10000``；
 - ``provenance.git_commit`` 為鎖定 SHA、``dirty === false``；
-- init／teacher file hashes 與上文一致；
+- ``INIT_CHECKPOINT`` 為鎖定的 NAS RO 絕對路徑，且 init／teacher
+  file hashes 與上文一致；
 - ``dataset.hash`` 為鎖定 canonical identity；
 - 完成 ``completed_updates === 10000``、名義 ``total_episodes === 80000``、
   ``stop_reason === max_updates``（aux 頂層 ``status`` 與 control 臂
@@ -418,7 +443,8 @@ update-0 為 mean ``36.268888888888036`` s／median
 完成後必記錄的欄位（啟動時／跑完才填未知值）
 --------------------------------------------
 
-兩臂：正式 ``88_minion_rw`` run-dir；完整 argv；host／device／torch／python／cuda；
+兩臂：鎖定的 NAS RO ``INIT_CHECKPOINT`` 絕對路徑與啟動時重算 SHA；正式
+``88_minion_rw`` run-dir；完整 argv；host／device／torch／python／cuda；
 開始／結束 HKT；clean／dirty；git SHA；``run.json`` 與 ``report.json``
 路徑與 SHA-256；``status.jsonl``；progress jsonl
 （``ppo_aux_updates.jsonl``／``ppo_updates.jsonl``）；
