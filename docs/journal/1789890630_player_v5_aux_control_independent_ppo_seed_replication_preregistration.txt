@@ -1,0 +1,450 @@
+PlayerV5 Phase-3 aux/control：獨立 PPO seed 的 10k 配對複製 — 預先登記
+======================================================================
+
+狀態
+----
+
+planned／not started。本文件是 canonical preregistration，鎖定一次「全新、
+並行、fresh schema-v4、exact 10000 updates」的 aux 對 control 複製實驗。它
+不是結果報告，也不授權從本文件啟動訓練、評估、resume、render 或 promotion。
+所有執行主機路徑、主機名稱、GPU 型號、runtime／wall-clock、Python／PyTorch／
+CUDA 版本及實際輸出目錄均為「啟動時記錄」欄位，在另一次明確授權啟動前未知，
+絕不在此虛構。
+
+本文件寫入時，鎖定的實驗程式碼完整 SHA 為
+
+``bd7443cd7fbbd72fcb6243afc66dc0bf59025c01``
+
+（``fix: reject reserved Phase-3 rollout seeds``）。啟動前必須在 clean
+checkout 核對 HEAD 精確等於此 SHA。本文件本身若稍後被 commit，那個文件
+commit 不得改實驗程式碼；執行身份永遠是上述 parent／code identity。
+
+科學來源與歷史核對（只讀）
+--------------------------
+
+歷史 exploratory 比較：
+``docs/journal/1789696064_player_v5_aux_control_10k_comparison.txt``。
+
+該文聲明自己不是事前鎖定的 promotion gate，且「35 個 matched checkpoints
+不是 35 個獨立 replication」。本複製實驗正是為了把那條單一 PPO seed
+stream 的描述性 aux 優勢，放到一個預先登記、獨立 PPO RNG／獨立 env
+rollout window 的 confirmatory 契約上。歷史數字只作背景與契約核對，不是
+本輪結果，也不得事後選 checkpoint 改寫本文件的 primary endpoint。
+
+本文件寫入時對原始 ``run.json``／``report.json`` 的獨立核對（不是轉抄
+比較文的四捨五入）：
+
+- NAS 訓練根（比較文記載的 artifact roots）：
+  - aux：``/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20260915-2115-aux``
+  - control：``/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20260915-2208-control``
+- 本機分析 copy（與 NAS ``run.json`` SHA-256 相同）：
+  - ``/storage/hermes/home/dev_gpt_1/qrokkun26-longrun-comparison/20260915-2115-aux``
+  - ``/storage/hermes/home/dev_gpt_1/qrokkun26-longrun-comparison/20260915-2208-control``
+- ``run.json`` SHA-256（本機 copy 與 NAS rw 根相同）：
+  - aux：``8c9e92cccee8cb1fef734aaaaf80675e613a4001e64848cf23aca21e637baf1d``
+  - control：``57d819591802da9a80503546594f1e3b1f330685f194797c27b4c45a96a0058f``
+
+從上述 ``run.json`` 讀到、且本文件採信的歷史契約：
+
+- 兩臂 ``schema_version`` 皆為整數 ``2``（不是 4）；``format`` 1；
+  ``no_promotion`` true；``effective_seed`` 皆為 ``5``。
+- 兩臂 ``knobs.rollout_seed_start`` 皆為 ``50000``；``knobs.torch_seed``
+  皆為 ``0``（此欄是 ``ppo_hyperparameters()`` 的常數，與
+  ``effective_seed`` 分開）。
+- 兩臂 ``knobs.updates`` 皆為 ``200``（CLI 預設填入；真正 stop 在
+  ``stop_args``／後來的 amendment）。
+- 兩臂 init checkpoint：file SHA-256
+  ``decc50ba2f781f243814bb0c984499bc6bf3ce66f5bcc9cbf22ae1acd3fd545a``；
+  state-dict SHA-256
+  ``d88c96213f9064658760d598a563d43df5a847a228a313837f00982bc3151b0f``；
+  architecture ``player_ranked_topk``。
+- 兩臂 teacher：``run.json`` 只記錄 file SHA-256
+  ``1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1``。
+  原始 10k ``run.json`` **沒有** teacher state-dict SHA-256，本文件不把它
+  寫成該 run 已記錄的值。
+- 兩臂 eval seeds 皆為 ``3000``–``3029``；``eval_max_steps`` 與
+  ``max_frames_per_episode``、``data_max_steps`` 皆為 ``4200``；
+  ``data_episodes`` 240、``data_frames_cap`` 700。
+- PPO knobs（兩臂相同，aux 另加 retention 欄）：Adam ``lr=0.0003``、
+  ``adam_eps=1e-08``、``gamma=0.99``、``lam=0.95``、``clip=0.2``、
+  ``entropy_coef=0.02``、``value_coef=0.5``、``ppo_epochs=4``、
+  ``minibatch=512``、``max_grad_norm=1.0``、``advantage_normalization=true``、
+  ``value_bootstrap=false``、``truncation_treated_as_terminal=true``、
+  ``episodes_per_update=8``。
+- aux 獨有：``target_retention_grad_ratio=0.15``、
+  ``retention_objective=phase2_ranked_multiseed.hybrid_loss``、
+  hard/soft weight 0.5、temperature 1.0、calibration samples 8、
+  retention sampler/calibration/diagnostic seeds ``12345``／``22345``／
+  ``32345``。
+- aux ``stop_args`` 原始為
+  ``effective_max_updates=2147483647``、
+  ``effective_end_time_hkt=2026-09-15T22:00:00+08:00``；
+  ``stop_budget_amendments.jsonl`` 在 completed_update 263 改為
+  ``effective_max_updates=10000``、
+  ``effective_end_time_hkt=2099-12-31T23:59:00+08:00``。
+- control ``stop_args`` 已是 ``effective_max_updates=10000``、
+  far-future ``2099-12-31T23:59:00+08:00``。
+- 兩臂 ``code_provenance_transitions.jsonl``：
+  ``cac31d5a5b197e3f06e7df685929d8dbcc02fffd`` →
+  ``f3992027311d640cd44ca0bedca9775f5cd67650``（加入每 200 updates 的
+  Player model checkpoint）。比較文記載 resume boundary 為 aux update
+  2200、control update 3107。這是歷史 provenance，不是本輪契約。
+- 最終 ``report.json``：兩臂 ``status``／``stop_reason`` 皆
+  ``max_updates``；aux ``completed_updates=10000``、
+  ``total_episodes=80000``、``total_frames=189790971``、
+  ``optimizer_steps=1502764``；control PPO 臂
+  ``completed_updates=10000``、``total_episodes=80000``、
+  ``total_frames=163672545``、``optimizer_steps=1298408``。
+- dataset identity（兩臂 ``report.json``）：
+  ``2521bd12ae8b630e65f2645132bde4952fe8f60783ad0e87648ed2af688e558a``；
+  240 episodes、211 train／146688 frames、29 held／20300 frames。
+- aux alpha（update-1 一次性校準，凍結）：``0.38932983697041385``；
+  校準 window ``50000``–``50007``。這是**舊 window／舊 effective_seed**
+  的衍生係數，**不得**複製到本輪當固定 alpha。
+- 共同 update-0 deterministic eval：mean
+  ``36.268888888888036`` s、median ``38.59999999999909`` s、30 seeds、
+  0 censor。
+- 最後一個含 held teacher diagnostic 的 report snapshot：
+  aux update 2200 agreement ``0.7282266020774841``、KL
+  ``0.22110426425933838``；control update 3107 agreement
+  ``0.14645320177078247``、KL ``0.8521270751953125``。
+  兩臂 u10000 **沒有** terminal held agreement／KL。aux
+  ``retention.retention_pass=true`` 與 control
+  ``retention_pass=false`` 因此只反映最後一個 full teacher-diagnostic
+  snapshot，不是 terminal u10000 的 retention 判決。不得用歷史
+  PASS/FAIL 物件宣稱長期 teacher retention。
+
+歷史 rollout 消耗：``rollout_seed_start=50000``、10000 updates、每
+update 8 episodes → 實際 env seeds ``50000``–``129999``。比較文的
+「effective seed 5」與這段 window 綁在同一條 trajectory 上。
+
+身份、範圍與唯一 treatment
+--------------------------
+
+- 架構身份固定為 PlayerV5：code class ``PlayerRankedTopK``，checkpoint
+  architecture key ``player_ranked_topk``（``DEFAULT_TOP_K=8``、
+  ``DEFAULT_HIDDEN=472``、``ARCHITECTURE_VERSION=1``）。Player
+  checkpoint pack 仍是 ``CKPT_SCHEMA_VERSION = 1``，不得改成 4。
+- promotion status：candidate。所有 snapshot、periodic checkpoint、
+  final checkpoint 一律 ``experimental=true``、
+  ``production_compatible=false``、``promotion=false``。
+- 對手固定為 scripted Spawner。不上 self-play、learned Spawner、DAgger、
+  critic-warmup、entropy／gamma／horizon 改動。
+- **唯一 treatment**：aux 臂在鎖定 PPO objective 上加入 frozen-alpha
+  Phase-2 hybrid BC-retention loss（target gradient ratio ``0.15``）；
+  control 臂沒有 retention loss。其餘起點、資料、PPO knobs、eval
+  seeds／cap、update budget 相同。
+- 這是 **update／episode-matched** 比較（兩臂皆 10000 updates × 8
+  episodes／update = 80000 episodes），**不是** equal-frame 或
+  equal-optimizer-step 比較。較長 survival 會中介出更多 frames 與
+  minibatches；該中介必須記帳，不得事後解讀成相同 sample budget 下的
+  純 retention 效果。
+
+Schema v4 與禁止 resume
+-----------------------
+
+目前 CLI（鎖定 commit）``CURRENT_RUN_SCHEMA_VERSION = 4``。兩臂
+``run.json`` 必須寫精確整數 ``4``。``--resume``／``--resume-from-update``
+拒絕 v3、v2、v1、缺欄位、bool、float；無 migration。歷史 10k artifacts
+只可當檔案讀，不可 resume、不可在其目錄續跑。
+
+本輪必須使用 **兩個全新、空的 schema-v4 目錄**。目錄內事先不得有
+``run.json``。禁止 ``--resume``、禁止 ``--resume-from-update``、禁止
+把舊 v2 目錄當 run-dir。
+
+若只給 ``--max-updates 10000``、不給 ``--end-time``，CLI 會把
+``stop_args.effective_max_updates`` 設為 ``10000``、
+``effective_end_time_hkt`` 設為 ``2099-12-31T23:59:00+08:00``
+（``FAR_FUTURE_END_TIME``）。本契約要求精確這個 stop pair：不得用
+``--end-time`` only 把 max-updates 變成 ``2147483647``；不得省略
+``--max-updates`` 而落到預設 200。
+
+工具與預期命令（啟動時填路徑；本文件不啟動）
+--------------------------------------------
+
+::
+
+    PYTHONPATH=. python -m qrokkun_ai.v5.tools.phase3_ranked_ppo_retention_aux \
+      --init-checkpoint "${INIT_CHECKPOINT}" \
+      --teacher "${TEACHER}" \
+      --run-dir "${AUX_RUN_DIR}" \
+      --device cuda \
+      --max-updates 10000 \
+      --seed 11 \
+      --rollout-seed-start 130000 \
+      --terminal-teacher-diagnostics
+
+    PYTHONPATH=. python -m qrokkun_ai.v5.tools.phase3_ranked_ppo_retention \
+      --init-checkpoint "${INIT_CHECKPOINT}" \
+      --teacher "${TEACHER}" \
+      --run-dir "${CONTROL_RUN_DIR}" \
+      --device cuda \
+      --max-updates 10000 \
+      --seed 11 \
+      --rollout-seed-start 130000 \
+      --terminal-teacher-diagnostics
+
+禁止 ``--quick``、禁止 ``--resume``、禁止 ``--resume-from-update``、禁止
+``--end-time``、禁止 NAS path 當 ``--run-dir``／checkpoint／teacher。
+``--out-dir`` 可省略；有 ``--run-dir`` 時 run 目錄就是 ``--run-dir``。
+
+並行啟動契約
+------------
+
+兩臂必須在 **同一個 clean commit**
+``bd7443cd7fbbd72fcb6243afc66dc0bf59025c01`` 上 **並行成對啟動**（同一授權
+窗口、同一套本機輸入副本）。任一臂 fail closed、interrupted、deadline、
+dirty tree、錯誤 SHA、錯誤 seed／window、缺 terminal teacher diagnostics、
+或未滿 10000 updates，**整對推論作廢**：不得用單臂曲線宣稱 aux 優於／
+劣於 control，不得補跑另一 seed 冒充原配對。失敗必須完整保留，另立新
+preregistration 才能再跑。
+
+本文件不啟動、不排隊、不指定 GPU 分配。
+
+相對歷史 run 刻意改變的 RNG（不是 treatment）
+----------------------------------------------
+
+歷史有效組合：``effective_seed=5`` 且 rollout window 自 ``50000`` 起
+（消耗 ``50000``–``129999``）。
+
+本輪兩臂皆：
+
+- ``--seed 11`` → ``run.json``／report 的 ``effective_seed`` 必須為
+  ``11``。CLI 在顯式 ``--seed`` 時於組網前呼叫 ``configure_seed``，
+  設定 Python ``random``、NumPy、Torch CPU／CUDA。``knobs.torch_seed``
+  仍會寫入常數 ``0``（``PPO_TORCH_SEED``）；核對契約時以
+  ``effective_seed`` 與啟動 argv 為準，不得因 ``knobs.torch_seed==0``
+  誤判未設 seed 11。
+- ``--rollout-seed-start 130000`` → ``knobs.rollout_seed_start`` 必須為
+  ``130000``。``rollout_seed_schedule``：update 1 使用
+  ``130000``–``130007``；update 10000 使用 ``209992``–``209999``。
+  實際消耗 env seeds **``130000``–``209999``**（80000 個，不重複）。
+
+這同時改變 **global PPO RNG** 與 **on-policy 環境 seed window**。這不是
+第二個 treatment；這是「獨立 PPO-seed replication」相對於舊
+effective_seed=5／window 50000 的預先聲明偏離。不得在分析時把差異歸因於
+「只換了 torch seed」或「只換了 env window」。鎖定 commit 會拒絕與 eval
+seeds ``3000``–``3029`` 或 dataset 收集 seeds ``20000``–``20239`` 重疊的
+rollout window；``130000`` 通過該檢查。CLI **不會**自動保留舊 10k 的
+``50000``–``129999``；避開舊 window 是本契約的科學選擇。
+
+Aux alpha 校準
+--------------
+
+Aux 必須在任何 optimizer step 前，用 update-1 的 on-policy rollouts
+（seeds ``130000``–``130007``）校準 **一次** 並凍結 alpha。
+``calibration_and_first_update_rollouts`` 只收集一次、同一 list 回傳兩次；
+校準與 update-1 PPO **重用同一批 trajectories**，不得丟棄或重收集。額外
+成本只允許是 gradient measurement，不是第二批環境互動。這 8 條 episode
+計入 80000 名義 episodes／對應 frames。
+
+公式鎖定於程式碼，不是 CLI 旗標：
+
+``alpha = 0.15 * mean(||g_ppo||) / (mean(||g_ret||) + 1e-8)``，
+8 個 matched minibatch pairs，共同樣本數
+``min(512, PPO frames, TRAIN frames)``。歷史 alpha
+``0.38932983697041385`` 不得預填、不得凍結進本輪。不得按 eval、
+survival、agreement、KL、cosine 或中途曲線重調 alpha。三條 retention
+RNG 維持 ``12345``／``22345``／``32345``，與 PPO minibatch permutation
+分離。
+
+啟動前必備本機檔案與雜湊
+--------------------------
+
+NAS 僅唯讀來源。禁止 NAS-direct 讀寫、評估或訓練。路徑在啟動主機重算
+SHA 後記入報告。
+
+必須與歷史 10k 相同的 seed-5 BC 與 teacher file identity：
+
+- seed-5 PlayerV5 BC：file SHA-256
+  ``decc50ba2f781f243814bb0c984499bc6bf3ce66f5bcc9cbf22ae1acd3fd545a``；
+  state-dict SHA-256
+  ``d88c96213f9064658760d598a563d43df5a847a228a313837f00982bc3151b0f``。
+  先前 GB10B 核對（``docs/journal/1789362887_player_v5_gb10_seed45_queue_preregistration.txt``）
+  曾見本機路徑
+  ``/home/ovm-hms-bot/scratch_ranked_multiseed_full/seed5/seed5.pt``、
+  metadata ``seed=5``、``architecture_version=1``；該路徑是否仍存在屬
+  啟動時核對，本文件不假設它可用。
+- PlayerV1 teacher：file SHA-256
+  ``1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1``。
+  同一 GB10B 核對對**同一 file hash** 另測得 teacher state-dict SHA-256
+  ``39a6bdfc83f827c2c59a6bb0a46b730506b8aff7966e0072b7441cd6cc5a0a2f``；
+  這不是原始 10k ``run.json`` 欄位。若啟動時 loader 可重算 state-dict
+  hash，必須與此先前核對一致；原始 run 未寫的值不得回填進歷史
+  ``run.json`` 引用。
+- 收集後 canonical dataset identity 必須為
+  ``2521bd12ae8b630e65f2645132bde4952fe8f60783ad0e87648ed2af688e558a``
+  （``DATA_SEED=4``、環境 seed ``20000``–``20239``、240 episodes、
+  4200-step cap、even-stride 每集最多 700 frames、held-out fraction
+  0.12 → 211／29 episodes、146688／20300 frames）。不符 fail closed。
+  Dataset 不是預先存放的檔案；現有 trainer 在 optimizer 前不比對期望
+  hash，post-run 必須比對。
+
+可否證假說與 primary endpoint
+------------------------------
+
+假說（confirmatory）：從同一 seed-5 BC 出發，在獨立 PPO seed 11 與
+rollout window ``130000``–``209999`` 下，aux retention 相對於無 aux 的
+control，在預先聲明的後段 matched survival 上顯示正的配對優勢。
+
+**不得**把 35 個時間相關 checkpoint 當成 35 個獨立實驗。相鄰
+checkpoints 來自同一條訓練軌跡，且共享 30 個 evaluation seeds。
+
+Primary estimator（預先鎖定）：
+
+1. 定義 matched 200-update 集合
+   ``U = {3200, 3400, …, 10000}``，共 35 點。選 ``3200`` 起是為了與
+   歷史比較文「periodic checkpoint 在 resume 後才存在、最完整對齊窗
+   為 3200–10000」對齊，而不是因為本輪 code 從 u200 才開始寫
+   checkpoint（本輪 fresh schema-v4 會從 200 起寫 periodic files，但
+   **primary 仍只用 U**）。
+2. 對每個固定 eval seed ``s ∈ {3000,…,3029}``，令
+   ``d_s = (1/35) * Σ_{u∈U} (elapsed_aux(u,s) − elapsed_control(u,s))``，
+   其中 elapsed 是該 checkpoint 已寫入的 deterministic eval（秒）。
+3. Primary 點估計為 ``d̄ = mean_s d_s``。推斷用 **n=30** 的 paired
+   Student t、雙尾 95% CI：
+   ``d̄ ± t_{0.975, 29} * s_{d} / sqrt(30)``，
+   ``s_d`` 為 30 個 ``d_s`` 的樣本標準差（分母 n−1）。分位數在分析時
+   用同一 Student t 公式計算，不在此手寫近似常數。
+4. 分類（只針對 primary CI，且僅在整對 operationally complete 之後）：
+   - **support**：CI 下界 > 0（aux 在 seed-averaged 後段 elapsed 更高）；
+   - **contrary**：CI 上界 < 0；
+   - **indeterminate**：CI 含 0。
+5. 缺任一 ``u∈U`` 的任一種子 elapsed、兩臂 checkpoint 對不齊、任一臂
+   未完成、或 eval seed 集合不是精確的 3000–3029：整對 **invalid**，
+   不作 support／contrary／indeterminate。禁止刪種子、禁止改 U、禁止
+   改用 checkpoint-mean 的 n=35 檢定。
+
+Elapsed 使用各 checkpoint 已記錄的 per-seed 值（含 cap 處的 censored
+elapsed）。必須另報每點 censor 數；歷史 10k 在 3200–10000 為 0／30
+censor，本輪不得預先宣稱。Censor 不改 primary 公式，但若兩臂 censor
+結構明顯不同，support 不得被說成「未截尾生存優勢」。
+
+資料來源優先序：control ``ppo_update_{u}.pt``、aux
+``ppo_aux_update_{u}.pt`` 內 packed ``eval_summary.per_seed``（periodic
+檔的 ``checkpoint_kind=periodic_model_only`` 仍含 deterministic eval、
+**不含** teacher diagnostics）。u10000 在
+``--terminal-teacher-diagnostics`` 下應是 full snapshot（含 teacher
+diagnostics），其 evaluation 同時進入 ``report.json`` snapshots。若
+extra 缺 per-seed elapsed，fail closed；不得用 on-policy jsonl
+rollout mean 代替。允許事後用同一權重、同一 3000–3029／4200 cap
+重跑 eval 作一致性核對；若與 packed extra 衝突，以 packed extra 為
+primary，核對差異必須寫入報告且不得 silently 改 estimator。
+
+Secondary outcomes（不是 primary，也不能單獨當 retention 證據）
+--------------------------------------------------------------
+
+必須報告、但 **禁止** 僅憑 survival 宣稱 retention：
+
+- Terminal u10000 30-seed deterministic survival：兩臂 mean／median／
+  pstdev／censor、以及 per-seed (aux−control) 的 paired 95% t CI。
+  這是單一 checkpoint，不是 primary。
+- Terminal u10000 **held** teacher agreement 與 teacher-to-student KL
+  （兩臂 ``report.json`` 必須有 ``update==10000`` 的
+  ``teacher_diagnostics``，agreement／KL 皆非 null）。缺值 = 該
+  secondary 失敗閉合，且 **禁止** 用 survival 或歷史 u2200／u3107
+  數字填補。
+- 全程 frames 與 optimizer steps（update-matched 的中介暴露）。
+- Aux 凍結 alpha、realized grad_ratio 的全程／首 1000／末 1000
+  描述（機制假說，不進 primary）。
+- Diagnostic snapshots 0／10／25／50／100／200 的 held agreement
+  曲線（描述）。
+
+歷史比較文的 post-hoc best（aux u5000、control u5400）**禁止**作為
+本輪 endpoint 或 promotion 候選。
+
+現行 CLI 在 10000 updates 時仍會寫 0／10／25／50／100／200 的 full
+diagnostic snapshots，以及 200 的倍數 periodic model files；primary
+忽略 200–3000。``report.json`` 的舊 retention PASS/FAIL 物件若仍用
+某個非 u10000 的 last full snapshot，**不得**當本輪 terminal
+retention 判決；本輪 terminal teacher 證據以 u10000 snapshot 為準。
+
+Preflight（另一次授權啟動之前；本文件不執行）
+----------------------------------------------
+
+- ``git status --porcelain`` 空；``git rev-parse HEAD`` 精確為
+  ``bd7443cd7fbbd72fcb6243afc66dc0bf59025c01``。
+- 兩臂 argv 含 ``--max-updates 10000``、``--seed 11``、
+  ``--rollout-seed-start 130000``、``--terminal-teacher-diagnostics``、
+  ``--device cuda``；不含 ``--quick``／``--resume``／
+  ``--resume-from-update``／``--end-time``。
+- 兩個 run-dir 為空且本機可寫；輸入為本機副本；teacher／init file 與
+  init state-dict SHA-256 重算後與上文鎖定值一致。
+- 確認 CLI overlap check 接受 130000（不與 3000–3029、20000–20239
+  重疊）。
+- 確認 Player checkpoint schema 仍為 1。
+- 本文件不要求、也不記錄一次「現在跑完整 suite」的結果；啟動授權時
+  再記錄當時實際 pytest 輸出。不得用 targeted smoke 代替啟動時的
+  完整性核對政策（由啟動授權決定），但 **本 preregistration 自身不
+  啟動測試**。
+
+Acceptance／stop
+----------------
+
+每臂必須：
+
+- ``run.json.schema_version === 4``（精確整數）；
+- ``effective_seed === 11``；
+- ``knobs.rollout_seed_start === 130000``；
+- ``knobs.terminal_teacher_diagnostics === true``；
+- ``stop_args.effective_max_updates === 10000``；
+- ``provenance.git_commit`` 為鎖定 SHA、``dirty === false``；
+- init／teacher file hashes 與上文一致；
+- ``dataset.hash`` 為鎖定 canonical identity；
+- 完成 ``completed_updates === 10000``、名義 ``total_episodes === 80000``、
+  ``stop_reason === max_updates``（aux 頂層 ``status`` 與 control 臂
+  欄位名稱依現有 report schema）；
+- 存在 U 內全部 35 個 Player checkpoints（aux
+  ``ppo_aux_update_{u}.pt``、control ``ppo_update_{u}.pt``），且
+  u10000 snapshot 含非空 teacher diagnostics；
+- ``promotion === false``。
+
+Stop／作廢：interrupted、deadline、initial gate fail closed 且因此
+``arm_ran=false``、hash mismatch、schema≠4、seed／window 不符、缺
+terminal diagnostics、只完成一臂、中途改 knobs、resume、或從本文件
+未授權的 host／dirty tree 啟動。作廢配對不得補成 primary 分類。
+
+Initial gate 仍執行現有程式（mean／median ≥ 25.0 s）；seed-5 歷史
+update-0 為 mean ``36.268888888888036`` s／median
+``38.59999999999909`` s，這是待核對基準而非本輪結果。Gate 失敗則該
+臂不訓練，整對 invalid。
+
+完成後必記錄的欄位（啟動時／跑完才填未知值）
+--------------------------------------------
+
+兩臂：本機 run-dir；完整 argv；host／device／torch／python／cuda；
+開始／結束 HKT；clean／dirty；git SHA；``run.json`` 與 ``report.json``
+路徑與 SHA-256；``status.jsonl``；progress jsonl
+（``ppo_aux_updates.jsonl``／``ppo_updates.jsonl``）；
+``recovery_archives`` 實際寫入的 N（現行 code 為每 50 的
+``update_<N>.pt``，與 periodic model 的 200 分開）；u∈U 每個
+checkpoint 的 file SHA-256、state-dict SHA-256、packed eval per-seed
+elapsed 與 censor；u10000 teacher agreement／KL；alpha 校準全文
+（八 pair、norms、cosine、alpha、target 0.15、rollout_seed_window
+必須為 130000–130007）；每 update 的 losses／KL／clip／entropy／EV／
+optimizer steps／rollout survival／frames／censor／seed window；
+總 frames 與 optimizer steps。Primary：30 個 ``d_s``、``d̄``、
+``s_d``、t 分位數、95% CI、分類。Secondary 全文。永遠
+``promotion=false``。
+
+明確禁止
+--------
+
+禁止 promotion；禁止 self-play／learned Spawner／DAgger／critic-warmup
+混入；禁止改 PPO knobs、horizon、eval seeds、dataset、retention
+ratio、三條 retention RNG；禁止把歷史 alpha 當本輪 alpha；禁止
+resume 舊 10k 或任何非空目錄；禁止 ``--quick``；禁止把 35 個
+checkpoint 當獨立樣本；禁止 post-hoc 選 best update；禁止
+survival-only retention 宣稱；禁止 equal-frame 重詮釋本契約；禁止
+單臂失敗後仍做配對推論；禁止從本文件啟動。
+
+依據
+----
+
+``qrokkun_ai/v5/tools/phase3_ranked_ppo_retention.py``、
+``qrokkun_ai/v5/tools/phase3_ranked_ppo_retention_aux.py``
+（commit ``bd7443cd7fbbd72fcb6243afc66dc0bf59025c01``）、
+``docs/journal/1789696064_player_v5_aux_control_10k_comparison.txt``、
+原始 aux／control ``run.json`` 與 ``report.json``（路徑與 SHA 見上）、
+``docs/journal/1789362887_player_v5_gb10_seed45_queue_preregistration.txt``
+（僅 teacher state-dict 的先前核對）。
