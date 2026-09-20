@@ -44,6 +44,7 @@ Contract under specification
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import re
 import statistics
@@ -865,3 +866,217 @@ def test_control_progress_jsonl_records_update_wall_clocks(
     extra = result["snapshots"][0]
     assert "collect_wall_s" not in extra
     assert "collect_wall_s" not in extra["evaluation"]
+
+
+# --------------------------------------------------------------------------- #
+# 12. Phase-3 replication CLI: rollout seed start + terminal teacher diagnostics
+# --------------------------------------------------------------------------- #
+def _control_replication_argv(tmp_path: Path, *extra: str) -> list[str]:
+    ckpt, _net = _write_ranked_ckpt(tmp_path)
+    teacher = tmp_path / "teacher.pt"
+    teacher.write_bytes(b"teacher")
+    return [
+        "--init-checkpoint",
+        str(ckpt),
+        "--teacher",
+        str(teacher),
+        "--out-dir",
+        str(tmp_path / "out"),
+        "--quick",
+        *extra,
+    ]
+
+
+def _stub_control_train_loop(monkeypatch: pytest.MonkeyPatch, collected: list[int]) -> None:
+    def fake_collect(_net: Any, _device: Any, seed: int, max_frames: int = 1) -> Any:
+        collected.append(int(seed))
+        return _fake_rollout([0.0], [True], [0.0])
+
+    monkeypatch.setattr(ret, "collect_rollout", fake_collect)
+    monkeypatch.setattr(
+        ret,
+        "ppo_update",
+        lambda *_args, **_kwargs: {
+            "optimizer_steps": 1,
+            "approx_kl": 0.0,
+            "clip_fraction": 0.0,
+            "explained_variance": 0.0,
+            "entropy": 0.0,
+            "policy_loss": 0.0,
+            "value_loss": 0.0,
+            "total_loss": 0.0,
+            "n_samples": 1,
+        },
+    )
+    monkeypatch.setattr(
+        ret,
+        "evaluate_deterministic",
+        lambda *_args, **_kwargs: [{"seed": 0, "elapsed": 1.0, "censored": False}],
+    )
+    monkeypatch.setattr(ret, "teacher_diagnostics", lambda *_args, **_kwargs: {"agreement": 1.0})
+    monkeypatch.setattr(ret, "load_teacher", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(
+        ret,
+        "collect_canonical_dataset",
+        lambda *_args, **_kwargs: {
+            "hash": "dataset-hash",
+            "n_episodes": 1,
+            "n_held_episodes": 1,
+            "n_train_episodes": 0,
+            "n_held_frames": 1,
+            "n_train_frames": 0,
+            "held_tensors": {"held": torch.zeros(1)},
+            "teacher_file_sha256": "teacher-hash",
+        },
+    )
+
+
+def test_rollout_seed_start_cli_persists_into_live_knobs_and_shared_schedule(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    args = ret.apply_mode_defaults(
+        ret.build_parser().parse_args(
+            _control_replication_argv(tmp_path, "--rollout-seed-start", "130000")
+        )
+    )
+    assert args.rollout_seed_start == 130000
+    assert "rollout_seed_start" in inspect.signature(ret.rollout_seed_schedule).parameters
+    assert ret.rollout_seed_schedule(
+        0, episodes_per_update=args.episodes_per_update, rollout_seed_start=130000,
+    ) == list(range(130000, 130000 + args.episodes_per_update))
+    assert ret.PPO_ROLLOUT_SEED_START == 50000
+
+    collected: list[int] = []
+    _stub_control_train_loop(monkeypatch, collected)
+    report = ret.run_experiment(args, torch.device("cpu"))
+    assert report["knobs"]["rollout_seed_start"] == 130000
+    contract = json.loads((Path(args.out_dir) / "run.json").read_text())
+    assert contract["knobs"]["rollout_seed_start"] == 130000
+    assert collected[: args.episodes_per_update] == list(
+        range(130000, 130000 + args.episodes_per_update)
+    )
+
+
+def test_terminal_teacher_diagnostics_cli_is_persisted_in_immutable_knobs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    collected: list[int] = []
+    _stub_control_train_loop(monkeypatch, collected)
+    args = ret.apply_mode_defaults(
+        ret.build_parser().parse_args(
+            _control_replication_argv(tmp_path, "--terminal-teacher-diagnostics")
+        )
+    )
+    assert args.terminal_teacher_diagnostics is True
+    report = ret.run_experiment(args, torch.device("cpu"))
+    assert report["knobs"]["terminal_teacher_diagnostics"] is True
+    contract = json.loads((Path(args.out_dir) / "run.json").read_text())
+    assert contract["knobs"]["terminal_teacher_diagnostics"] is True
+
+    default_args = ret.apply_mode_defaults(
+        ret.build_parser().parse_args(_control_replication_argv(tmp_path / "default"))
+    )
+    assert default_args.terminal_teacher_diagnostics is False
+    default_report = ret.run_experiment(default_args, torch.device("cpu"))
+    assert default_report["knobs"]["terminal_teacher_diagnostics"] is False
+
+
+def test_terminal_teacher_diagnostics_max_updates_path_writes_one_full_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ret, "collect_rollout", lambda *_args, **_kwargs: _fake_rollout([0.0], [True], [0.0]))
+    monkeypatch.setattr(
+        ret,
+        "ppo_update",
+        lambda *_args, **_kwargs: {
+            "optimizer_steps": 1, "approx_kl": 0.0, "clip_fraction": 0.0,
+            "explained_variance": 0.0, "entropy": 0.0, "policy_loss": 0.0,
+            "value_loss": 0.0, "total_loss": 0.0, "n_samples": 1,
+        },
+    )
+    monkeypatch.setattr(
+        ret,
+        "evaluate_deterministic",
+        lambda *_args, **_kwargs: [{"seed": 0, "elapsed": 1.0, "censored": False}],
+    )
+    monkeypatch.setattr(ret, "teacher_diagnostics", lambda *_args, **_kwargs: {"agreement": 1.0})
+
+    def _arm_args(out_dir: Path, **kwargs: Any) -> argparse.Namespace:
+        return argparse.Namespace(
+            updates=400, episodes_per_update=1, max_frames=1, eval_seeds=[0], eval_max_steps=1,
+            out_dir=out_dir, max_updates=400, end_time=ret.FAR_FUTURE_END_TIME, seed=1, **kwargs,
+        )
+
+    result = ret.run_ppo_arm(
+        _tiny_net(), torch.device("cpu"), _arm_args(tmp_path / "opt_in", terminal_teacher_diagnostics=True),
+        ret.snapshot_schedule(400), {"held": torch.zeros(1)}, tmp_path / "opt_in",
+        parent_state_dict_sha256="parent-sd", parent_file_sha256="parent-file",
+        dataset_hash="dataset", ppo_knobs={"lr": ret.PPO_LR},
+    )
+    assert result["stop_reason"] == "max_updates"
+    terminals = [snap for snap in result["snapshots"] if snap["update"] == 400]
+    assert len(terminals) == 1
+    assert terminals[0]["teacher_diagnostics"]["agreement"] is not None
+
+    default_result = ret.run_ppo_arm(
+        _tiny_net(), torch.device("cpu"), _arm_args(tmp_path / "default_arm"),
+        ret.snapshot_schedule(400), {"held": torch.zeros(1)}, tmp_path / "default_arm",
+        parent_state_dict_sha256="parent-sd", parent_file_sha256="parent-file",
+        dataset_hash="dataset", ppo_knobs={"lr": ret.PPO_LR},
+    )
+    assert all(snap["update"] != 400 for snap in default_result["snapshots"])
+
+
+def test_terminal_teacher_diagnostics_deadline_after_last_update_skips_full_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Opt-in terminal diagnostics must not fire when deadline wins after update 400."""
+    monkeypatch.setattr(ret, "collect_rollout", lambda *_args, **_kwargs: _fake_rollout([0.0], [True], [0.0]))
+    monkeypatch.setattr(
+        ret,
+        "ppo_update",
+        lambda *_args, **_kwargs: {
+            "optimizer_steps": 1, "approx_kl": 0.0, "clip_fraction": 0.0,
+            "explained_variance": 0.0, "entropy": 0.0, "policy_loss": 0.0,
+            "value_loss": 0.0, "total_loss": 0.0, "n_samples": 1,
+        },
+    )
+    monkeypatch.setattr(
+        ret,
+        "evaluate_deterministic",
+        lambda *_args, **_kwargs: [{"seed": 0, "elapsed": 1.0, "censored": False}],
+    )
+    teacher_calls: list[int] = []
+    monkeypatch.setattr(
+        ret,
+        "teacher_diagnostics",
+        lambda *_args, **_kwargs: teacher_calls.append(1) or {"agreement": 1.0},
+    )
+    real_boundary = ret.boundary_stop_reason
+
+    def deadline_after_last_update(**kwargs: Any) -> str | None:
+        if int(kwargs["completed"]) >= 400:
+            kwargs = dict(kwargs)
+            kwargs["now"] = kwargs["end_time"]
+        return real_boundary(**kwargs)
+
+    monkeypatch.setattr(ret, "boundary_stop_reason", deadline_after_last_update)
+
+    out_dir = tmp_path / "deadline_after_400"
+    args = argparse.Namespace(
+        updates=400, episodes_per_update=1, max_frames=1, eval_seeds=[0], eval_max_steps=1,
+        out_dir=out_dir, max_updates=400, end_time=ret.FAR_FUTURE_END_TIME, seed=1,
+        terminal_teacher_diagnostics=True,
+    )
+    result = ret.run_ppo_arm(
+        _tiny_net(), torch.device("cpu"), args, ret.snapshot_schedule(400),
+        {"held": torch.zeros(1)}, out_dir,
+        parent_state_dict_sha256="parent-sd", parent_file_sha256="parent-file",
+        dataset_hash="dataset", ppo_knobs={"lr": ret.PPO_LR},
+    )
+    assert result["completed_updates"] == 400
+    assert result["stop_reason"] == "deadline"
+    terminals = [snap for snap in result["snapshots"] if snap["update"] == 400]
+    assert terminals == []
+    scheduled_full = [u for u in ret.snapshot_schedule(400) if u <= ret.PERIODIC_MODEL_CHECKPOINT_INTERVAL]
+    assert len(teacher_calls) == len(scheduled_full)

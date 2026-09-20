@@ -34,6 +34,7 @@ import json
 import math
 import sys
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -1203,6 +1204,8 @@ def test_parser_exposes_only_the_allowed_flags() -> None:
         "--seed",
         "--device",
         "--quick",
+        "--rollout-seed-start",
+        "--terminal-teacher-diagnostics",
     }
     help_text = parser.format_help()
     for banned in ("--alpha", "--entropy", "--gamma", "--lr", "--clip", "--lam",
@@ -1463,3 +1466,272 @@ def test_aux_progress_jsonl_records_update_wall_clocks(
     assert isinstance(row["ppo_wall_s"], float) and row["ppo_wall_s"] >= 0.0
     assert row["total_wall_s"] == row["collect_wall_s"] + row["ppo_wall_s"]
     assert "collect_wall_s" not in result["snapshots"][0]
+
+
+# --------------------------------------------------------------------------- #
+# 12. Phase-3 replication CLI: rollout seed start + terminal teacher diagnostics
+# --------------------------------------------------------------------------- #
+def _aux_replication_argv(tmp_path: Path, *extra: str) -> list[str]:
+    init_path = tmp_path / "init.pt"
+    save_player_checkpoint(_tiny_net(seed=3), init_path, source_tool="tests")
+    teacher = tmp_path / "teacher.pt"
+    teacher.write_bytes(b"teacher")
+    return [
+        "--init-checkpoint",
+        str(init_path),
+        "--teacher",
+        str(teacher),
+        "--out-dir",
+        str(tmp_path / "out"),
+        "--quick",
+        *extra,
+    ]
+
+
+def _stub_aux_train_loop(monkeypatch: pytest.MonkeyPatch, collected: list[int]) -> None:
+    def fake_collect(_net, _device, seed, max_frames=1):
+        collected.append(int(seed))
+        return _fake_rollout(int(seed), n_frames=1)
+
+    def fake_aux_update(net, opt, rollouts, train_tensors, alpha, device, **kwargs):
+        return {
+            "optimizer_steps": 1,
+            "approx_kl": 0.0,
+            "clip_fraction": 0.0,
+            "explained_variance": 0.0,
+            "entropy": 0.0,
+            "ppo_policy_loss": 0.0,
+            "ppo_value_loss": 0.0,
+            "total_loss": 0.0,
+            "retention_hybrid_loss": 0.0,
+            "retention_hard_ce": 0.0,
+            "retention_soft_kl": 0.0,
+            "retention_soft_ce": 0.0,
+            "alpha": alpha,
+            "g_ppo_norm": 1.0,
+            "g_ret_norm": 1.0,
+            "g_ret_weighted_norm": 0.15,
+            "grad_ratio": 0.15,
+            "cosine_similarity": 0.0,
+            "grad_alignment": {
+                "g_ppo_norm": 1.0,
+                "g_ret_norm": 1.0,
+                "cosine_similarity": 0.0,
+                "grad_ratio": 0.15,
+                "g_ret_weighted_norm": 0.15,
+                "alpha": alpha,
+                "measurement": "pre_update_on_policy",
+            },
+            "n_samples": 1,
+            "n_retention_samples": 1,
+        }
+
+    train = _teacher_tensors(n=8)
+    monkeypatch.setattr(aux, "collect_rollout", fake_collect)
+    monkeypatch.setattr(aux, "ppo_aux_update", fake_aux_update)
+    monkeypatch.setattr(aux, "calibrate_alpha", lambda *_args, **_kwargs: {"alpha": 0.15})
+    monkeypatch.setattr(
+        aux,
+        "evaluate_deterministic",
+        lambda *_args, **_kwargs: [{"seed": 0, "elapsed": 1.0, "censored": False}],
+    )
+    monkeypatch.setattr(aux, "teacher_diagnostics", lambda *_args, **_kwargs: {"agreement": 1.0})
+    monkeypatch.setattr(aux, "load_teacher", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(
+        aux,
+        "grad_alignment",
+        lambda *_args, **_kwargs: {"g_ppo_norm": 1.0, "g_ret_norm": 1.0, "cosine_similarity": 0.0},
+    )
+    monkeypatch.setattr(
+        aux,
+        "collect_aux_dataset",
+        lambda *_args, **_kwargs: {
+            "hash": "dataset-hash",
+            "n_episodes": 2,
+            "n_held_episodes": 1,
+            "n_train_episodes": 1,
+            "n_held_frames": 8,
+            "n_train_frames": 8,
+            "train_tensors": train,
+            "held_tensors": train,
+            "teacher_file_sha256": "teacher-hash",
+        },
+    )
+
+
+def test_aux_rollout_seed_start_cli_persists_into_live_knobs_and_shared_schedule(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    args = aux.apply_mode_defaults(
+        aux.build_parser().parse_args(
+            _aux_replication_argv(tmp_path, "--rollout-seed-start", "130000")
+        )
+    )
+    assert args.rollout_seed_start == 130000
+    assert "rollout_seed_start" in inspect.signature(aux.rollout_seed_schedule).parameters
+    assert aux.rollout_seed_schedule(
+        0, episodes_per_update=args.episodes_per_update, rollout_seed_start=130000,
+    ) == list(range(130000, 130000 + args.episodes_per_update))
+    assert aux.PPO_ROLLOUT_SEED_START == 50000
+
+    collected: list[int] = []
+    _stub_aux_train_loop(monkeypatch, collected)
+    report = aux.run_experiment(args, torch.device("cpu"))
+    assert report["knobs"]["rollout_seed_start"] == 130000
+    contract = json.loads((Path(args.out_dir) / "run.json").read_text())
+    assert contract["knobs"]["rollout_seed_start"] == 130000
+    assert collected[: args.episodes_per_update] == list(
+        range(130000, 130000 + args.episodes_per_update)
+    )
+
+
+def test_aux_terminal_teacher_diagnostics_cli_is_persisted_in_immutable_knobs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    collected: list[int] = []
+    _stub_aux_train_loop(monkeypatch, collected)
+    args = aux.apply_mode_defaults(
+        aux.build_parser().parse_args(
+            _aux_replication_argv(tmp_path, "--terminal-teacher-diagnostics")
+        )
+    )
+    assert args.terminal_teacher_diagnostics is True
+    report = aux.run_experiment(args, torch.device("cpu"))
+    assert report["knobs"]["terminal_teacher_diagnostics"] is True
+    contract = json.loads((Path(args.out_dir) / "run.json").read_text())
+    assert contract["knobs"]["terminal_teacher_diagnostics"] is True
+
+    default_args = aux.apply_mode_defaults(
+        aux.build_parser().parse_args(_aux_replication_argv(tmp_path / "default"))
+    )
+    assert default_args.terminal_teacher_diagnostics is False
+    default_report = aux.run_experiment(default_args, torch.device("cpu"))
+    assert default_report["knobs"]["terminal_teacher_diagnostics"] is False
+
+
+def test_aux_terminal_teacher_diagnostics_max_updates_path_writes_one_full_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    train = _teacher_tensors(n=8)
+    monkeypatch.setattr(aux, "collect_rollout", lambda *_args, **_kwargs: _fake_rollout(1, n_frames=1))
+    monkeypatch.setattr(aux, "calibrate_alpha", lambda *_args, **_kwargs: {"alpha": 0.15})
+
+    def fake_aux_update(net, opt, rollouts, train_tensors, alpha, device, **kwargs):
+        return {
+            "optimizer_steps": 1, "approx_kl": 0.0, "clip_fraction": 0.0,
+            "explained_variance": 0.0, "entropy": 0.0, "ppo_policy_loss": 0.0,
+            "ppo_value_loss": 0.0, "total_loss": 0.0, "retention_hybrid_loss": 0.0,
+            "retention_hard_ce": 0.0, "retention_soft_kl": 0.0, "retention_soft_ce": 0.0,
+            "alpha": alpha, "g_ppo_norm": 1.0, "g_ret_norm": 1.0,
+            "g_ret_weighted_norm": 0.15, "grad_ratio": 0.15, "cosine_similarity": 0.0,
+            "grad_alignment": {
+                "g_ppo_norm": 1.0, "g_ret_norm": 1.0, "cosine_similarity": 0.0,
+                "grad_ratio": 0.15, "g_ret_weighted_norm": 0.15, "alpha": alpha,
+                "measurement": "pre_update_on_policy",
+            },
+            "n_samples": 1, "n_retention_samples": 1,
+        }
+
+    monkeypatch.setattr(aux, "ppo_aux_update", fake_aux_update)
+    monkeypatch.setattr(
+        aux, "evaluate_deterministic",
+        lambda *_args, **_kwargs: [{"seed": 0, "elapsed": 1.0, "censored": False}],
+    )
+    monkeypatch.setattr(aux, "teacher_diagnostics", lambda *_args, **_kwargs: {"agreement": 1.0})
+    monkeypatch.setattr(
+        aux, "grad_alignment",
+        lambda *_args, **_kwargs: {"g_ppo_norm": 1.0, "g_ret_norm": 1.0, "cosine_similarity": 0.0},
+    )
+
+    def _arm_args(out_dir: Path, **kwargs: Any) -> argparse.Namespace:
+        return argparse.Namespace(
+            updates=400, episodes_per_update=1, max_frames=1, eval_seeds=[0], eval_max_steps=1,
+            out_dir=out_dir, max_updates=400, end_time=ret.FAR_FUTURE_END_TIME, seed=1, **kwargs,
+        )
+
+    result = aux.run_aux_arm(
+        _tiny_net(), torch.device("cpu"), _arm_args(tmp_path / "opt_in", terminal_teacher_diagnostics=True),
+        aux.snapshot_schedule(400), train, train, tmp_path / "opt_in",
+        parent_state_dict_sha256="parent-sd", parent_file_sha256="parent-file",
+        dataset_hash="dataset", ppo_knobs={"lr": aux.PPO_LR}, minibatch=4,
+    )
+    assert result["stop_reason"] == "max_updates"
+    terminals = [snap for snap in result["snapshots"] if snap["update"] == 400]
+    assert len(terminals) == 1
+    assert terminals[0]["teacher_diagnostics"]["agreement"] is not None
+
+    default_result = aux.run_aux_arm(
+        _tiny_net(), torch.device("cpu"), _arm_args(tmp_path / "default_arm"),
+        aux.snapshot_schedule(400), train, train, tmp_path / "default_arm",
+        parent_state_dict_sha256="parent-sd", parent_file_sha256="parent-file",
+        dataset_hash="dataset", ppo_knobs={"lr": aux.PPO_LR}, minibatch=4,
+    )
+    assert all(snap["update"] != 400 for snap in default_result["snapshots"])
+
+
+def test_aux_terminal_teacher_diagnostics_deadline_after_last_update_skips_full_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Opt-in terminal diagnostics must not fire when deadline wins after update 400."""
+    train = _teacher_tensors(n=8)
+    monkeypatch.setattr(aux, "collect_rollout", lambda *_args, **_kwargs: _fake_rollout(1, n_frames=1))
+    monkeypatch.setattr(aux, "calibrate_alpha", lambda *_args, **_kwargs: {"alpha": 0.15})
+
+    def fake_aux_update(net, opt, rollouts, train_tensors, alpha, device, **kwargs):
+        return {
+            "optimizer_steps": 1, "approx_kl": 0.0, "clip_fraction": 0.0,
+            "explained_variance": 0.0, "entropy": 0.0, "ppo_policy_loss": 0.0,
+            "ppo_value_loss": 0.0, "total_loss": 0.0, "retention_hybrid_loss": 0.0,
+            "retention_hard_ce": 0.0, "retention_soft_kl": 0.0, "retention_soft_ce": 0.0,
+            "alpha": alpha, "g_ppo_norm": 1.0, "g_ret_norm": 1.0,
+            "g_ret_weighted_norm": 0.15, "grad_ratio": 0.15, "cosine_similarity": 0.0,
+            "grad_alignment": {
+                "g_ppo_norm": 1.0, "g_ret_norm": 1.0, "cosine_similarity": 0.0,
+                "grad_ratio": 0.15, "g_ret_weighted_norm": 0.15, "alpha": alpha,
+                "measurement": "pre_update_on_policy",
+            },
+            "n_samples": 1, "n_retention_samples": 1,
+        }
+
+    monkeypatch.setattr(aux, "ppo_aux_update", fake_aux_update)
+    monkeypatch.setattr(
+        aux, "evaluate_deterministic",
+        lambda *_args, **_kwargs: [{"seed": 0, "elapsed": 1.0, "censored": False}],
+    )
+    teacher_calls: list[int] = []
+    monkeypatch.setattr(
+        aux, "teacher_diagnostics",
+        lambda *_args, **_kwargs: teacher_calls.append(1) or {"agreement": 1.0},
+    )
+    monkeypatch.setattr(
+        aux, "grad_alignment",
+        lambda *_args, **_kwargs: {"g_ppo_norm": 1.0, "g_ret_norm": 1.0, "cosine_similarity": 0.0},
+    )
+    real_boundary = ret.boundary_stop_reason
+
+    def deadline_after_last_update(**kwargs: Any) -> str | None:
+        if int(kwargs["completed"]) >= 400:
+            kwargs = dict(kwargs)
+            kwargs["now"] = kwargs["end_time"]
+        return real_boundary(**kwargs)
+
+    monkeypatch.setattr(ret, "boundary_stop_reason", deadline_after_last_update)
+
+    out_dir = tmp_path / "deadline_after_400"
+    args = argparse.Namespace(
+        updates=400, episodes_per_update=1, max_frames=1, eval_seeds=[0], eval_max_steps=1,
+        out_dir=out_dir, max_updates=400, end_time=ret.FAR_FUTURE_END_TIME, seed=1,
+        terminal_teacher_diagnostics=True,
+    )
+    result = aux.run_aux_arm(
+        _tiny_net(), torch.device("cpu"), args, aux.snapshot_schedule(400),
+        train, train, out_dir,
+        parent_state_dict_sha256="parent-sd", parent_file_sha256="parent-file",
+        dataset_hash="dataset", ppo_knobs={"lr": aux.PPO_LR}, minibatch=4,
+    )
+    assert result["completed_updates"] == 400
+    assert result["stop_reason"] == "deadline"
+    terminals = [snap for snap in result["snapshots"] if snap["update"] == 400]
+    assert terminals == []
+    scheduled_full = [u for u in aux.snapshot_schedule(400) if u <= ret.PERIODIC_MODEL_CHECKPOINT_INTERVAL]
+    assert len(teacher_calls) == len(scheduled_full)

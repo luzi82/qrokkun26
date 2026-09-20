@@ -596,6 +596,7 @@ def calibration_and_first_update_rollouts(
     *,
     episodes_per_update: int = EPISODES_PER_UPDATE,
     max_frames: int = PPO_MAX_FRAMES,
+    rollout_seed_start: int = PPO_ROLLOUT_SEED_START,
 ) -> tuple[list, list]:
     """Collect the update-1 rollout window EXACTLY ONCE and return it twice.
 
@@ -605,7 +606,9 @@ def calibration_and_first_update_rollouts(
     on different actions than the ones alpha was calibrated on) and pay for
     the same env seeds twice. The returned objects are the same list.
     """
-    seeds = rollout_seed_schedule(0, episodes_per_update=episodes_per_update)
+    seeds = rollout_seed_schedule(
+        0, episodes_per_update=episodes_per_update, rollout_seed_start=rollout_seed_start,
+    )
     rollouts = collect_rollout_window(net, device, seeds, max_frames=max_frames)
     return rollouts, rollouts
 
@@ -712,6 +715,7 @@ def run_aux_arm(
         pre_loop_collect_start = time.perf_counter()
         calib_rollouts, first_update_rollouts = calibration_and_first_update_rollouts(
             net, device, episodes_per_update=args.episodes_per_update, max_frames=args.max_frames,
+            rollout_seed_start=int(getattr(args, "rollout_seed_start", PPO_ROLLOUT_SEED_START)),
         )
         pre_loop_collect_wall_s = time.perf_counter() - pre_loop_collect_start
         calib_seeds = [r.seed for r in calib_rollouts]
@@ -793,6 +797,8 @@ def run_aux_arm(
     def _save_periodic_model_checkpoint(update: int) -> None:
         if update <= 0 or update % ret_mod.PERIODIC_MODEL_CHECKPOINT_INTERVAL != 0:
             return
+        if any(item["update"] == update for item in snapshots):
+            return
         if update in snapshot_updates and update <= ret_mod.PERIODIC_MODEL_CHECKPOINT_INTERVAL:
             return
         evaluation = summarize_evaluation(
@@ -870,7 +876,11 @@ def run_aux_arm(
                     collect_wall_s = pre_loop_collect_wall_s
                 else:
                     seeds = rollout_seed_schedule(
-                        update - 1, episodes_per_update=args.episodes_per_update
+                        update - 1,
+                        episodes_per_update=args.episodes_per_update,
+                        rollout_seed_start=int(
+                            getattr(args, "rollout_seed_start", PPO_ROLLOUT_SEED_START)
+                        ),
                     )
                     collect_start = time.perf_counter()
                     rollouts = collect_rollout_window(
@@ -908,13 +918,25 @@ def run_aux_arm(
                     "event": "update_complete", "update": update, "total_frames": total_frames,
                     "effective_max_updates": max_updates, "effective_end_time_hkt": end_time.isoformat(),
                 })
-                if update in snapshot_updates and update <= ret_mod.PERIODIC_MODEL_CHECKPOINT_INTERVAL:
+                if (
+                    update in snapshot_updates
+                    and update <= ret_mod.PERIODIC_MODEL_CHECKPOINT_INTERVAL
+                ):
                     _snapshot(update, rollouts, alignment=metrics["grad_alignment"])
                     _save_boundary()
-                _save_periodic_model_checkpoint(update)
+                maybe_terminal_full = (
+                    getattr(args, "terminal_teacher_diagnostics", False)
+                    and max_updates_explicit
+                    and update == max_updates
+                    and not any(item["update"] == update for item in snapshots)
+                )
+                if not maybe_terminal_full:
+                    _save_periodic_model_checkpoint(update)
                 if stop.requested:
                     stop_reason = "interrupted"
                     ret_mod.unlink_latest_recovery(recovery_path)
+                    if maybe_terminal_full:
+                        _save_periodic_model_checkpoint(update)
                     break
                 requested_reason = ret_mod.boundary_stop_reason(
                     completed=completed, configured_updates=args.updates,
@@ -923,6 +945,8 @@ def run_aux_arm(
                 )
                 if requested_reason is not None:
                     stop_reason = requested_reason
+                    if maybe_terminal_full and stop_reason != "max_updates":
+                        _save_periodic_model_checkpoint(update)
                     break
     finally:
         for s, previous in old_handlers.items():
@@ -940,9 +964,15 @@ def run_aux_arm(
     if (
         completed
         and not any(item["update"] == completed for item in snapshots)
-        and not (
-            completed > ret_mod.PERIODIC_MODEL_CHECKPOINT_INTERVAL
-            and completed % ret_mod.PERIODIC_MODEL_CHECKPOINT_INTERVAL == 0
+        and (
+            (
+                getattr(args, "terminal_teacher_diagnostics", False)
+                and stop_reason == "max_updates"
+            )
+            or not (
+                completed > ret_mod.PERIODIC_MODEL_CHECKPOINT_INTERVAL
+                and completed % ret_mod.PERIODIC_MODEL_CHECKPOINT_INTERVAL == 0
+            )
         )
     ):
         if last_update_rollouts is None or last_grad_alignment is None:
@@ -1005,6 +1035,17 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--seed", type=int, help="optional explicit RNG seed")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--quick", action="store_true")
+    ap.add_argument(
+        "--rollout-seed-start",
+        type=int,
+        default=PPO_ROLLOUT_SEED_START,
+        help="first env seed of the per-run PPO rollout schedule",
+    )
+    ap.add_argument(
+        "--terminal-teacher-diagnostics",
+        action="store_true",
+        help="on max-updates completion, write one full terminal snapshot with teacher diagnostics",
+    )
     return ap
 
 
@@ -1058,6 +1099,10 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
     knobs["retention_calibration_seed"] = RETENTION_CALIBRATION_SEED
     knobs["retention_diagnostic_seed"] = RETENTION_DIAGNOSTIC_SEED
     knobs["calibration_grad_samples"] = CALIBRATION_GRAD_SAMPLES
+    if getattr(args, "rollout_seed_start", None) is not None:
+        knobs["rollout_seed_start"] = int(args.rollout_seed_start)
+    if hasattr(args, "terminal_teacher_diagnostics"):
+        knobs["terminal_teacher_diagnostics"] = bool(args.terminal_teacher_diagnostics)
 
     contract = {
         "format": 1,

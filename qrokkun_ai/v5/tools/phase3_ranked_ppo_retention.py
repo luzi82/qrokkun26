@@ -659,7 +659,11 @@ def ppo_hyperparameters() -> dict[str, Any]:
     }
 
 
-def rollout_seed_schedule(update: int, episodes_per_update: int = EPISODES_PER_UPDATE) -> list[int]:
+def rollout_seed_schedule(
+    update: int,
+    episodes_per_update: int = EPISODES_PER_UPDATE,
+    rollout_seed_start: int = PPO_ROLLOUT_SEED_START,
+) -> list[int]:
     """Fixed, declared, deterministic per-update rollout seeds.
 
     Seeds never repeat across updates and never overlap the evaluation seed
@@ -669,7 +673,7 @@ def rollout_seed_schedule(update: int, episodes_per_update: int = EPISODES_PER_U
     inline, so an actual (e.g. quick-mode) ``episodes_per_update`` always
     stays consistent with the seeds actually used.
     """
-    start = PPO_ROLLOUT_SEED_START + update * episodes_per_update
+    start = int(rollout_seed_start) + update * episodes_per_update
     return list(range(start, start + episodes_per_update))
 
 
@@ -1303,9 +1307,12 @@ def run_ppo_arm(
     snapshots: list[dict[str, Any]] = []
     total_frames = 0
     optimizer_steps = 0
+    rollout_seed_start = int(getattr(args, "rollout_seed_start", PPO_ROLLOUT_SEED_START))
     # Seed window for the rollout that produced (or is about to produce, for
     # the update-0 snapshot) the current net weights.
-    rollout_seed_window = rollout_seed_schedule(0, episodes_per_update=args.episodes_per_update)
+    rollout_seed_window = rollout_seed_schedule(
+        0, episodes_per_update=args.episodes_per_update, rollout_seed_start=rollout_seed_start,
+    )
 
     def _pack_extra(update: int, eval_summary: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -1347,6 +1354,8 @@ def run_ppo_arm(
 
     def _save_periodic_model_checkpoint(update: int) -> None:
         if update <= 0 or update % PERIODIC_MODEL_CHECKPOINT_INTERVAL != 0:
+            return
+        if any(item["update"] == update for item in snapshots):
             return
         if update in snapshot_updates and update <= PERIODIC_MODEL_CHECKPOINT_INTERVAL:
             return
@@ -1424,7 +1433,11 @@ def run_ppo_arm(
                 if requested_reason is not None:
                     stop_reason = requested_reason
                     break
-                seeds = rollout_seed_schedule(update - 1, episodes_per_update=args.episodes_per_update)
+                seeds = rollout_seed_schedule(
+                    update - 1,
+                    episodes_per_update=args.episodes_per_update,
+                    rollout_seed_start=rollout_seed_start,
+                )
                 rollout_seed_window = seeds
                 collect_start = time.perf_counter()
                 rollouts = [collect_rollout(net, device, seed, max_frames=args.max_frames) for seed in seeds]
@@ -1451,10 +1464,19 @@ def run_ppo_arm(
                 if update in snapshot_updates and update <= PERIODIC_MODEL_CHECKPOINT_INTERVAL:
                     _snapshot(update)
                     _save_boundary()
-                _save_periodic_model_checkpoint(update)
+                maybe_terminal_full = (
+                    getattr(args, "terminal_teacher_diagnostics", False)
+                    and max_updates_explicit
+                    and update == max_updates
+                    and not any(item["update"] == update for item in snapshots)
+                )
+                if not maybe_terminal_full:
+                    _save_periodic_model_checkpoint(update)
                 if stop.requested:
                     stop_reason = "interrupted"
                     unlink_latest_recovery(recovery_path)
+                    if maybe_terminal_full:
+                        _save_periodic_model_checkpoint(update)
                     break
                 requested_reason = boundary_stop_reason(
                     completed=completed, configured_updates=args.updates,
@@ -1463,6 +1485,8 @@ def run_ppo_arm(
                 )
                 if requested_reason is not None:
                     stop_reason = requested_reason
+                    if maybe_terminal_full and stop_reason != "max_updates":
+                        _save_periodic_model_checkpoint(update)
                     break
     finally:
         for s, previous in old_handlers.items():
@@ -1480,9 +1504,15 @@ def run_ppo_arm(
     if (
         completed
         and not any(item["update"] == completed for item in snapshots)
-        and not (
-            completed > PERIODIC_MODEL_CHECKPOINT_INTERVAL
-            and completed % PERIODIC_MODEL_CHECKPOINT_INTERVAL == 0
+        and (
+            (
+                getattr(args, "terminal_teacher_diagnostics", False)
+                and stop_reason == "max_updates"
+            )
+            or not (
+                completed > PERIODIC_MODEL_CHECKPOINT_INTERVAL
+                and completed % PERIODIC_MODEL_CHECKPOINT_INTERVAL == 0
+            )
         )
     ):
         _snapshot(completed)
@@ -1534,6 +1564,17 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--seed", type=int, help="optional explicit RNG seed")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--quick", action="store_true")
+    ap.add_argument(
+        "--rollout-seed-start",
+        type=int,
+        default=PPO_ROLLOUT_SEED_START,
+        help="first env seed of the per-run PPO rollout schedule",
+    )
+    ap.add_argument(
+        "--terminal-teacher-diagnostics",
+        action="store_true",
+        help="on max-updates completion, write one full terminal snapshot with teacher diagnostics",
+    )
     return ap
 
 
@@ -1586,6 +1627,11 @@ def apply_mode_defaults(args: argparse.Namespace) -> argparse.Namespace:
     # With no --seed, retain the historical arm-local torch seeding timing.
     # Explicit seeds intentionally apply before any network construction.
     args.effective_seed = PPO_TORCH_SEED if seed is None else configure_seed(seed)
+    if getattr(args, "rollout_seed_start", None) is None:
+        args.rollout_seed_start = PPO_ROLLOUT_SEED_START
+    args.terminal_teacher_diagnostics = bool(
+        getattr(args, "terminal_teacher_diagnostics", False)
+    )
     return args
 
 
@@ -1642,6 +1688,10 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
     knobs["data_episodes"] = args.data_episodes
     knobs["data_max_steps"] = args.data_max_steps
     knobs["data_frames_cap"] = args.data_frames_cap
+    if getattr(args, "rollout_seed_start", None) is not None:
+        knobs["rollout_seed_start"] = int(args.rollout_seed_start)
+    if hasattr(args, "terminal_teacher_diagnostics"):
+        knobs["terminal_teacher_diagnostics"] = bool(args.terminal_teacher_diagnostics)
 
     contract = {
         "format": 1, "schema_version": CURRENT_RUN_SCHEMA_VERSION,
