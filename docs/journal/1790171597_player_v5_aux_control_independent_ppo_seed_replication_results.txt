@@ -1,0 +1,299 @@
+PlayerV5 Phase-3 aux/control：獨立 PPO seed 的 10k 配對複製 — 結果
+==================================================================
+
+狀態
+----
+
+completed. 預先登記配對 operationally complete。primary 分類 **support**。
+terminal survival secondary **indeterminate**。promotion: false。沒有
+checkpoint 被 promote。
+
+本文件是 canonical results journal。它只記錄已完成 artifacts 與獨立
+review，沒有啟動訓練、評估、resume、render 或 promotion，也沒有改
+runner、tests、preregistration 或 artifacts。
+
+Preregistration:
+``docs/journal/1789890630_player_v5_aux_control_independent_ppo_seed_replication_preregistration.txt``
+
+歷史 exploratory 比較（不是本輪 endpoint）：
+``docs/journal/1789696064_player_v5_aux_control_10k_comparison.txt``
+
+假說與 verdict
+--------------
+
+預先登記假說：從同一 seed-5 BC 出發，在獨立 PPO seed 11 與 rollout
+window ``130000``–``209999`` 下，aux retention 相對無 aux 的 control，
+在鎖定後段 matched survival 上顯示正的配對優勢。
+
+- Primary（U={3200,3400,…,10000}，n=30 seed-wise late-curve averages）：
+  **support**（雙尾 paired Student-t 95% CI 下界 > 0）。
+- Terminal u10000 30-seed survival： **indeterminate**（CI 含 0）。
+- Terminal held teacher diagnostics：有非空 agreement／KL；aux 明顯高於
+  control。這是 secondary，**不得**單獨當 retention 證據，也不得覆蓋
+  primary。
+- Promotion：**false**。support 不是 production 授權。
+
+Artifact roots
+--------------
+
+訓練寫入（report 內 checkpoint／jsonl 絕對路徑）：
+
+``/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20260920-1724-aux-control-independent-ppo-seed11/{aux,control}``
+
+本文件分析用唯讀 NAS 副本：
+
+``/mnt/minion/88_minion_ro/projects/qrokkun26/runs/20260920-1724-aux-control-independent-ppo-seed11/{aux,control}``
+
+兩臂 ``report.json``／``run.json`` 的 SHA-256（RO 副本）：
+
+- aux ``run.json``
+  ``bd18ba1efc0bcf77f502def520193a8a268ae424496255d2f74ad2252670ec33``
+- aux ``report.json``
+  ``133faa1a0c6bd265da086f2a85f4c0680e51f837db530796476c8aca04434701``
+- control ``run.json``
+  ``fdf8038f1604b3277129b09c340259f5bb3e555189eb23e5a0fa1ec52c4210ad``
+- control ``report.json``
+  ``956d27364a55426c457e87987e14ebee270eb65b254eeb5abf59e4ae925c5cd7``
+
+獨立 review
+-----------
+
+獨立 review **ACCEPTED**。
+
+Audit 路徑：
+
+``/storage/hermes/project/qrokkun26/artifacts/review-20260920-1724-seed11-dev_gpt_1/audit_result.json``
+
+SHA-256
+``4219a2971952bc8d0b48673e70c77b81d3c6db26786e9eb57d332ee2aad4783d``
+
+該 audit 的 ``operational_integrity`` 為 ``pass``，primary／terminal／
+alpha／frames 數字與下文一致（浮點結尾位在 CI 邊界可差 1 ulp；本
+journal 採用下方鎖定十進位寫法）。
+
+非阻擋的 provenance 完整性限制（audit ``provenance_gap``，不推翻
+ACCEPTED）：run bundle **沒有**啟動 argv、host 名稱、Python／CUDA
+版本紀錄，也 **沒有** 把 ``INIT_CHECKPOINT`` 絕對路徑寫進
+``run.json``。``run.json`` 只記錄 hashes、``device=cuda``、
+``torch_version=2.11.0+cu128``、``dirty=false`` 與 code SHA。因此本
+文件不虛構 host／argv／Python／CUDA。鎖定的 NAS RO init 路徑仍以
+preregistration 為準；兩臂記錄的 file／state-dict SHA 與其鎖定值一致。
+
+Run 身份與契約核對
+------------------
+
+兩臂皆通過 preregistration acceptance 字面條件：
+
+- ``schema_version === 4``（精確整數）；``format`` 1；
+  ``no_promotion`` true；``promotion`` false。
+- ``effective_seed === 11``。``knobs.torch_seed`` 仍為常數 ``0``
+  （``PPO_TORCH_SEED``）；契約以 ``effective_seed`` 為準。
+- ``knobs.rollout_seed_start === 130000``；
+  ``knobs.terminal_teacher_diagnostics === true``。
+- ``stop_args``：``effective_max_updates === 10000``、
+  ``effective_end_time_hkt === 2099-12-31T23:59:00+08:00``。
+- ``provenance.git_commit``
+  ``bd7443cd7fbbd72fcb6243afc66dc0bf59025c01``；``dirty === false``。
+- Init checkpoint：architecture ``player_ranked_topk``；file SHA-256
+  ``decc50ba2f781f243814bb0c984499bc6bf3ce66f5bcc9cbf22ae1acd3fd545a``；
+  state-dict SHA-256
+  ``d88c96213f9064658760d598a563d43df5a847a228a313837f00982bc3151b0f``。
+  Player checkpoint pack schema 仍為 1。
+- Teacher file SHA-256
+  ``1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1``。
+  ``run.json`` 仍無 teacher state-dict SHA-256，本文件不回填。
+- Dataset identity
+  ``2521bd12ae8b630e65f2645132bde4952fe8f60783ad0e87648ed2af688e558a``
+  （240 ep／211 train 146688 frames／29 held 20300 frames）。
+- Eval seeds 精確 ``3000``–``3029``；``eval_max_steps``／
+  ``max_frames_per_episode``／``data_max_steps`` 皆 ``4200``。
+- 工具：aux ``phase3_ranked_ppo_retention_aux``；control
+  ``phase3_ranked_ppo_retention``。
+- 完成：兩臂 ``completed_updates === 10000``、名義
+  ``total_episodes === 80000``、``stop_reason === max_updates``；
+  頂層 ``status === max_updates``。aux ``arm_ran=true``；control
+  ``control_ran=true``。
+- Initial gate：兩臂 PASS（mean／median ≥ 25.0 s）。
+- U 內 35 個 periodic Player checkpoints 存在（aux
+  ``ppo_aux_update_{u}.pt``、control ``ppo_update_{u}.pt``）；u10000
+  為 full snapshot，teacher diagnostics 非空。
+- recovery_archives：兩臂各 201 個 ``update_<N>.pt``（每 50 updates，
+  含 0 與 10000），與 periodic model 的 200 間隔分開。
+
+唯一 treatment 仍是 aux 在鎖定 PPO 上加入 frozen-alpha Phase-2 hybrid
+BC-retention（target gradient ratio 0.15）；control 沒有 retention
+loss。這是 update／episode-matched 比較，不是 equal-frame 或
+equal-optimizer-step 比較。
+
+時間（``status.jsonl`` HKT）
+----------------------------
+
+- aux started ``2026-09-20T17:24:19.893129+08:00``，
+  max_updates ``2026-09-23T06:32:35.767531+08:00``
+  （audit duration 220095.874402 s）。
+- control started ``2026-09-20T17:25:20.753105+08:00``，
+  max_updates ``2026-09-23T02:09:59.131821+08:00``
+  （audit duration 204278.378716 s）。
+
+共同 update-0 deterministic eval（30 seeds、0 censor；兩臂相同）：
+mean ``36.268888888888036`` s、median ``38.59999999999909`` s。
+
+Aux alpha 與 realized gradient ratio
+------------------------------------
+
+Update-1 on-policy window ``130000``–``130007`` 校準一次並凍結：
+
+- ``alpha = 0.3352400983844746``
+- target_ratio 0.15；8 matched minibatches；n_samples =
+  n_retention_samples = 4096；minibatch 512
+- mean ``||g_ppo||`` 0.7810657173395157；mean ``||g_ret||``
+  0.34948043152689934；calibration cosine −0.05258106510154903
+- 歷史 alpha ``0.38932983697041385`` **沒有**被使用
+
+jsonl 全程 realized ``grad_ratio``（機制描述，不進 primary）：
+
+- whole：``0.13730680431066242``
+- first 1000：``0.169956925528663``
+- last 1000：``0.11756737013474242``
+
+完成與 accounting（非 equal-compute）
+-------------------------------------
+
+=================  ==============  ==============
+Metric             Aux             Control
+=================  ==============  ==============
+updates            10000           10000
+episodes           80000           80000
+total frames       190512181       167012689
+optimizer steps    1508524         1324724
+=================  ==============  ==============
+
+Aux 比 control 多 23499492 frames、183800 optimizer steps。較長
+survival 會中介出更多 frames 與 minibatches；不得事後解讀成相同
+sample budget 下的純 retention 效果。
+
+Primary estimator
+-----------------
+
+鎖定：
+
+1. ``U = {3200, 3400, …, 10000}``，35 點。
+2. 對每個 eval seed ``s ∈ {3000,…,3029}``，
+   ``d_s = (1/35) * Σ_{u∈U} (elapsed_aux(u,s) − elapsed_control(u,s))``。
+3. ``d̄ = mean_s d_s``；n=30 paired Student-t 雙尾 95% CI。
+4. 禁止把 35 個 checkpoint 當獨立樣本；禁止刪種子；禁止改 U。
+
+結果：
+
+- n = 30
+- ``d̄ = +3.20230158730141`` s
+- sample SD ``s_d = 4.273837941612275``
+- 雙尾 paired Student-t 95% CI
+  ``[1.6064242723937798, 4.79817890220904]``
+- 分類：**support**
+
+Censor caveat：primary 視窗內 aux 有 **一格** 截尾（u9200、seed
+3025；packed elapsed 為 cap 70 s），control **零** 截尾。Censor 不改
+primary 公式，但兩臂截尾結構不同，**support 不得被說成未截尾生存
+優勢**。Terminal u10000 兩臂皆 0 censor。
+
+Secondary：terminal survival
+----------------------------
+
+u10000 deterministic eval、seeds 3000–3029、0 censor：
+
+=================  ==============  ==============
+Metric             Aux             Control
+=================  ==============  ==============
+mean               36.61499999999914 s  40.672222222221194 s
+median             39.308333333332385 s 39.949999999999015 s
+population std     14.774494006500749 s 8.250927370249242 s
+=================  ==============  ==============
+
+Per-seed (aux−control) paired 95% t：mean
+``-4.057222222222053`` s，CI
+``[-9.937250159913017, 1.8228057154689123]``。分類：
+**indeterminate**。這是單一 checkpoint，不是 primary。
+
+Secondary：terminal teacher diagnostics（held）
+----------------------------------------------
+
+u10000 snapshot（非空；缺值會失敗閉合，本輪未缺）：
+
+=================  =======================  =======================
+Metric             Aux                      Control
+=================  =======================  =======================
+agreement          0.6678817868232727       0.1367487758398056
+teacher→student KL 0.24085557460784912      0.8716331720352173
+=================  =======================  =======================
+
+Harness 舊 retention 物件（aux ``retention_pass=true``、control
+``retention_pass=false``）現在對應 u10000 full snapshot，但仍 **不是**
+本 confirmatory 契約的 primary，也不得單獨當 promotion／retention
+裁決。不得用歷史 u2200／u3107 數字填補。
+
+Diagnostic snapshots 0／10／25／50／100／200 held agreement（描述）
+-----------------------------------------------------------------
+
+================  ==========  ==========  ==========  ==========
+Update            Aux agr.    Aux KL      Ctrl agr.   Ctrl KL
+================  ==========  ==========  ==========  ==========
+0                 0.70201975  0.17762676  0.70201975  0.17762676
+10                0.67576355  0.18131976  0.53009856  0.22368668
+25                0.67581284  0.18642290  0.37192118  0.31527430
+50                0.68039411  0.18726942  0.29581282  0.39688286
+100               0.68591136  0.18259566  0.25522169  0.44468683
+200               0.69773400  0.17663781  0.22029558  0.45694795
+================  ==========  ==========  ==========  ==========
+
+精確值見各臂 ``report.json`` snapshots。這不是 primary。
+
+結論
+----
+
+1. 本配對在鎖定 commit 上兩臂皆 ``max_updates`` 完成 10000 updates，
+   schema v4／seed 11／window 130000／terminal teacher diagnostics／
+   dataset／init／teacher hashes 與 preregistration 相符。獨立 review
+   ACCEPTED；argv／host／CUDA 與 init 絕對路徑的缺失是非阻擋
+   provenance 限制。
+
+2. Primary 支持 aux 在 seed-averaged 後段 elapsed 上高於 control
+   （+3.20230158730141 s；CI 不含 0）。這是 30 個 eval seed 的曲線
+   平均差，不是 35 個獨立 replication。
+
+3. Terminal survival 不支持同一方向（點估計為負、CI 含 0）。不得用
+   terminal 否證或改寫 primary，也不得用 primary 宣稱 terminal 優勢。
+
+4. Terminal teacher：aux agreement 0.6678817868232727／KL
+   0.24085557460784912，control 0.1367487758398056／KL
+   0.8716331720352173。禁止僅憑 survival 宣稱 retention。
+
+5. 一格 aux primary censor（u9200 seed3025）相對 control 零 censor：
+   禁止把 support 說成未截尾生存優勢。
+
+6. Frames／optimizer steps 不相等。禁止 equal-frame 重詮釋。
+
+7. **Promote nothing.** experimental checkpoints 不得作 production
+   初始化。歷史 post-hoc best（aux u5000、control u5400）禁止作為
+   本輪 endpoint。
+
+明確禁止
+--------
+
+禁止 promotion；禁止 self-play／learned Spawner／DAgger／critic-warmup
+混入；禁止改 PPO knobs、horizon、eval seeds、dataset、retention
+ratio、三條 retention RNG；禁止把歷史 alpha 當本輪 alpha；禁止
+resume 本 run 或任何非空目錄；禁止 ``--quick``；禁止把 35 個
+checkpoint 當獨立樣本；禁止 post-hoc 選 best update；禁止
+survival-only retention 宣稱；禁止 equal-frame 重詮釋本契約；禁止
+把本 support 推廣到其他 PPO seed／window；禁止單臂失敗後的配對
+推論（本輪未觸發）。下一步若要再複製，必須另立 preregistration。
+
+依據
+----
+
+``docs/journal/1789890630_player_v5_aux_control_independent_ppo_seed_replication_preregistration.txt``、
+NAS RO ``.../20260920-1724-aux-control-independent-ppo-seed11/{aux,control}``
+的 ``run.json``／``report.json``／``status.jsonl``／packed U
+checkpoints、獨立 audit
+``artifacts/review-20260920-1724-seed11-dev_gpt_1/audit_result.json``。
