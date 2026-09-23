@@ -23,6 +23,7 @@ import random
 import signal
 import statistics
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,14 +51,21 @@ from qrokkun_ai.v1.train import player_v1 as scripted_ppo
 
 from qrokkun_ai.v4.tools.phase2_distill_v1_to_v4 import collect_dataset, frames_to_tensors
 from qrokkun_ai.v5.tools.phase2_ranked_multiseed import dataset_identity
+from qrokkun_ai.v5.tools import phase3_run_provenance as prov
 
 _REPO_ROOT = next(
     parent for parent in Path(__file__).resolve().parents if (parent / ".git").exists()
 )
-_HKT = ZoneInfo("Asia/Hong_Kong")
+# Clock, atomic writers and every launch/input/artifact provenance record are
+# defined once in ``phase3_run_provenance`` and used verbatim by both arms, so
+# the control and the auxiliary arm cannot drift apart.
+_HKT = prov.HKT
 UNBOUNDED_MAX_UPDATES = 2_147_483_647
 FAR_FUTURE_END_TIME = dt.datetime(2099, 12, 31, 23, 59, tzinfo=_HKT)
-CURRENT_RUN_SCHEMA_VERSION = 4
+# v5 binds the teacher's state-dict hash and architecture into the immutable
+# run contract, not just its file hash.  A schema-4 run.json is refused on
+# resume rather than being reinterpreted: there is no hand-edit upgrade path.
+CURRENT_RUN_SCHEMA_VERSION = 5
 RECOVERY_ARCHIVE_INTERVAL = 50
 PERIODIC_MODEL_CHECKPOINT_INTERVAL = 200
 RECOVERY_ARCHIVE_DIRNAME = "recovery_archives"
@@ -156,19 +164,8 @@ def resolve_resume_from_stop_budget(
     return target, deadline
 
 
-def _atomic_replace(path: Path, write: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    try:
-        write(tmp)
-        os.replace(tmp, path)
-    finally:
-        if tmp.exists():
-            tmp.unlink()
-
-
-def atomic_write_json(path: Path, value: dict[str, Any]) -> None:
-    _atomic_replace(path, lambda tmp: tmp.write_text(json.dumps(value, indent=2, sort_keys=True)))
+_atomic_replace = prov.atomic_replace
+atomic_write_json = prov.atomic_write_json
 
 
 def append_run_status(run_dir: Path, event: dict[str, Any]) -> None:
@@ -282,8 +279,17 @@ def restore_rng_state(state: dict[str, Any]) -> None:
         raise RunStateError("malformed recovery RNG state") from exc
 
 
-def atomic_save_recovery(path: Path, state: dict[str, Any]) -> None:
-    _atomic_replace(path, lambda tmp: torch.save(state, tmp))
+def atomic_save_recovery(
+    path: Path, state: dict[str, Any], *, kind: str = prov.CHECKPOINT_KIND_RECOVERY_CURRENT,
+) -> None:
+    """Write a recovery pack, stamped with the kind of recovery it is.
+
+    The same in-memory boundary state becomes both the latest recovery and an
+    archive, so the kind is stamped on a copy at write time rather than
+    mutating the caller's state.
+    """
+    stamped = {**state, "checkpoint_kind": prov.require_checkpoint_kind(kind)}
+    _atomic_replace(path, lambda tmp: torch.save(stamped, tmp))
 
 
 def archived_recovery_path(run_dir: Path, update: int) -> Path:
@@ -293,7 +299,10 @@ def archived_recovery_path(run_dir: Path, update: int) -> Path:
 def save_archived_recovery_if_due(run_dir: Path, state: dict[str, Any]) -> None:
     update = state["completed_update"]
     if archived_recovery_due(update):
-        atomic_save_recovery(archived_recovery_path(run_dir, update), state)
+        atomic_save_recovery(
+            archived_recovery_path(run_dir, update), state,
+            kind=prov.CHECKPOINT_KIND_RECOVERY_ARCHIVE,
+        )
 
 
 def load_archived_recovery(run_dir: Path, update: int, device: torch.device) -> dict[str, Any]:
@@ -329,7 +338,11 @@ def rewind_run_to_archived_recovery(
 ) -> None:
     """Restore archive N as latest recovery and destroy same-run history after N."""
     state = load_archived_recovery(run_dir, update, device)
-    atomic_save_recovery(run_dir / "recovery.pt", state)
+    # Restoring archive N as the latest recovery relabels the restored copy;
+    # the archive itself stays an archive.
+    atomic_save_recovery(
+        run_dir / "recovery.pt", state, kind=prov.CHECKPOINT_KIND_RECOVERY_CURRENT,
+    )
     progress_path = run_dir / progress_filename
     if progress_path.exists():
         try:
@@ -432,10 +445,19 @@ def _without_stop(contract: dict[str, Any]) -> dict[str, Any]:
     return reduced
 
 
-def _require_current_schema_version(contract: dict[str, Any]) -> None:
+def _require_current_schema_version(
+    contract: dict[str, Any], expected: int = CURRENT_RUN_SCHEMA_VERSION,
+) -> None:
+    """Refuse any run.json that is not exactly at ``expected``.
+
+    ``expected`` defaults to the retention arms' own current version.  A tool
+    whose contract binds something different (the critic-warmup harness) passes
+    its own version instead, so bumping the retention contract can neither
+    reinterpret nor strand that tool's on-disk runs.
+    """
     schema_version = contract.get("schema_version")
     if isinstance(schema_version, bool) or not isinstance(schema_version, int) \
-            or schema_version != CURRENT_RUN_SCHEMA_VERSION:
+            or schema_version != expected:
         raise RunStateError("run.json schema_version is unsupported")
 
 
@@ -499,7 +521,12 @@ def _append_stop_budget_amendment(
         os.fsync(audit.fileno())
 
 
-def require_matching_current_run_contract(run_dir: Path, contract: dict[str, Any]) -> dict[str, Any]:
+def require_matching_current_run_contract(
+    run_dir: Path,
+    contract: dict[str, Any],
+    *,
+    expected_schema_version: int = CURRENT_RUN_SCHEMA_VERSION,
+) -> dict[str, Any]:
     """Fail closed on schema/identity before any resume mutation."""
     path = run_dir / "run.json"
     if not path.is_file():
@@ -510,17 +537,39 @@ def require_matching_current_run_contract(run_dir: Path, contract: dict[str, Any
         raise RunStateError("resume run.json is malformed") from exc
     if not isinstance(existing, dict) or not isinstance(contract, dict):
         raise RunStateError("resume immutable run contract mismatch")
-    _require_current_schema_version(existing)
+    _require_current_schema_version(existing, expected_schema_version)
     if _without_stop(existing) != _without_stop(contract):
         raise RunStateError("resume immutable run contract mismatch")
     return existing
 
 
-def create_or_validate_run_contract(run_dir: Path, contract: dict[str, Any], *, resume: bool) -> dict[str, Any] | None:
+def refuse_fresh_reentry(run_dir: Path, args: argparse.Namespace) -> None:
+    """Refuse a fresh launch into a directory that already locked ``run.json``.
+
+    Resume and rewind are the invocations that may continue.  Everything else
+    stops here, after ``launch.json`` may have been appended and before any
+    input manifest, report, or artifact manifest is written.  A first
+    failed-closed launch that never created ``run.json`` stays retryable.
+    """
+    if getattr(args, "resume", False) or getattr(args, "resume_from_update", None) is not None:
+        return
+    if (Path(run_dir) / "run.json").exists():
+        raise RunStateError("run directory already has run.json; use --resume")
+
+
+def create_or_validate_run_contract(
+    run_dir: Path,
+    contract: dict[str, Any],
+    *,
+    resume: bool,
+    expected_schema_version: int = CURRENT_RUN_SCHEMA_VERSION,
+) -> dict[str, Any] | None:
     """Lock experiment identity; append audited stop-budget revisions."""
     path = run_dir / "run.json"
     if resume:
-        existing = require_matching_current_run_contract(run_dir, contract)
+        existing = require_matching_current_run_contract(
+            run_dir, contract, expected_schema_version=expected_schema_version,
+        )
         authorized = _read_authorized_stop_budget(run_dir, existing)
         requested = _stop_budget(contract.get("stop_args"))
         requested_end = dt.datetime.fromisoformat(requested["effective_end_time_hkt"])
@@ -540,7 +589,7 @@ def create_or_validate_run_contract(run_dir: Path, contract: dict[str, Any], *, 
         raise RunStateError("run directory already has run.json; use --resume")
     if not isinstance(contract, dict):
         raise RunStateError("run.json schema_version is unsupported")
-    _require_current_schema_version(contract)
+    _require_current_schema_version(contract, expected_schema_version)
     atomic_write_json(path, contract)
 
 
@@ -1314,9 +1363,10 @@ def run_ppo_arm(
         0, episodes_per_update=args.episodes_per_update, rollout_seed_start=rollout_seed_start,
     )
 
-    def _pack_extra(update: int, eval_summary: dict[str, Any]) -> dict[str, Any]:
+    def _pack_extra(update: int, eval_summary: dict[str, Any], kind: str) -> dict[str, Any]:
         return {
             "update": update,
+            "checkpoint_kind": prov.require_checkpoint_kind(kind),
             "parent_state_dict_sha256": parent_state_dict_sha256,
             "parent_file_sha256": parent_file_sha256,
             "dataset_hash": dataset_hash,
@@ -1326,7 +1376,7 @@ def run_ppo_arm(
             "eval_seed_window": args.eval_seeds,
         }
 
-    def _snapshot(update: int) -> None:
+    def _snapshot(update: int, kind: str) -> None:
         eval_results = evaluate_deterministic(net, device, args.eval_seeds, args.eval_max_steps)
         eval_summary = summarize_evaluation(eval_results)
         if held_tensors is not None:
@@ -1340,11 +1390,12 @@ def run_ppo_arm(
             source_tool="phase3_ranked_ppo_retention",
             experimental=True,
             production_compatible=False,
-            extra=_pack_extra(update, eval_summary),
+            extra=_pack_extra(update, eval_summary, kind),
         )
         snapshots.append(
             {
                 "update": update,
+                "checkpoint_kind": kind,
                 "evaluation": eval_summary,
                 "teacher_diagnostics": diag,
                 "checkpoint": str(ckpt_path),
@@ -1368,10 +1419,7 @@ def run_ppo_arm(
             source_tool="phase3_ranked_ppo_retention",
             experimental=True,
             production_compatible=False,
-            extra={
-                **_pack_extra(update, evaluation),
-                "checkpoint_kind": "periodic_model_only",
-            },
+            extra=_pack_extra(update, evaluation, prov.CHECKPOINT_KIND_PERIODIC_MODEL_ONLY),
         )
 
     recovery_path = out_dir / "recovery.pt"
@@ -1389,7 +1437,7 @@ def run_ppo_arm(
             raise RunStateError("resume recovery state is malformed") from exc
         append_run_status(out_dir, {"event": "resumed", "completed_update": completed})
     elif 0 in snapshot_updates:
-        _snapshot(0)
+        _snapshot(0, prov.CHECKPOINT_KIND_INITIAL_SNAPSHOT)
 
     if getattr(args, "resume", False):
         # Recovery is the source of truth: any journal row describing an
@@ -1451,6 +1499,7 @@ def run_ppo_arm(
                 row["update"] = update
                 row["scripted_survival_mean"] = statistics.mean([r.elapsed for r in rollouts])
                 row["rollout_censoring"] = rollout_censor_stats(rollouts)
+                row.update(prov.rollout_seed_record([r.seed for r in rollouts]))
                 row["collect_wall_s"] = collect_wall_s
                 row["ppo_wall_s"] = ppo_wall_s
                 row["total_wall_s"] = collect_wall_s + ppo_wall_s
@@ -1462,7 +1511,7 @@ def run_ppo_arm(
                     "effective_max_updates": max_updates, "effective_end_time_hkt": end_time.isoformat(),
                 })
                 if update in snapshot_updates and update <= PERIODIC_MODEL_CHECKPOINT_INTERVAL:
-                    _snapshot(update)
+                    _snapshot(update, prov.scheduled_snapshot_kind(update))
                     _save_boundary()
                 maybe_terminal_full = (
                     getattr(args, "terminal_teacher_diagnostics", False)
@@ -1515,7 +1564,8 @@ def run_ppo_arm(
             )
         )
     ):
-        _snapshot(completed)
+        # Unscheduled end-of-run snapshot: terminal, never a diagnostic one.
+        _snapshot(completed, prov.CHECKPOINT_KIND_TERMINAL_FULL_SNAPSHOT)
     if stop_reason == "interrupted":
         unlink_latest_recovery(recovery_path)
     else:
@@ -1529,7 +1579,7 @@ def run_ppo_arm(
         source_tool="phase3_ranked_ppo_retention",
         experimental=True,
         production_compatible=False,
-        extra=_pack_extra(completed, final_eval_summary),
+        extra=_pack_extra(completed, final_eval_summary, prov.CHECKPOINT_KIND_FINAL_ALIAS),
     )
 
     return {
@@ -1574,6 +1624,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--terminal-teacher-diagnostics",
         action="store_true",
         help="on max-updates completion, write one full terminal snapshot with teacher diagnostics",
+    )
+    ap.add_argument(
+        "--hash-recovery-archives",
+        action="store_true",
+        help="also SHA-256 every recovery archive in artifact_manifest.json (slow; many GiB)",
     )
     return ap
 
@@ -1702,17 +1757,24 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
     out_dir.mkdir(parents=True, exist_ok=True)
     effective_max_updates, effective_end_time = effective_stop_budget(args)
 
+    git_commit = current_git_commit(_REPO_ROOT)
+    git_dirty = _git_dirty(_REPO_ROOT)
+    # Written before the initial gate evaluation, the dataset collection and
+    # any rollout, so a run that dies early still says how it was launched.
+    launch_record = prov.record_launch(
+        out_dir, arm="control", tool="phase3_ranked_ppo_retention", args=args,
+        device=device, git_commit=git_commit, git_dirty=git_dirty,
+    )
+
     init_net, init_meta = load_initial_checkpoint(args.init_checkpoint, device)
     init_prov = checkpoint_provenance(args.init_checkpoint, init_meta)
-    try:
-        teacher_prov = {"file_sha256": file_sha256(args.teacher)}
-    except OSError:
-        teacher_prov = {"file_sha256": None}
+    teacher_id = prov.teacher_identity(args.teacher)
+    teacher_prov = prov.contract_teacher_inputs(teacher_id)
     provenance = {
         "init_checkpoint": init_prov,
         "teacher": teacher_prov,
-        "git_commit": current_git_commit(_REPO_ROOT),
-        "dirty": _git_dirty(_REPO_ROOT),
+        "git_commit": git_commit,
+        "dirty": git_dirty,
         "torch_version": torch.__version__,
         "device": str(device),
     }
@@ -1770,19 +1832,37 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
         args.effective_end_time = dt.datetime.fromisoformat(authorized["effective_end_time_hkt"])
         effective_max_updates, effective_end_time = args.effective_max_updates, args.effective_end_time
 
-    gate_results = evaluate_deterministic(init_net, device, args.eval_seeds, args.eval_max_steps)
-    gate_summary = summarize_evaluation(gate_results)
-    initial_gate = evaluate_initial_gate(
-        gate_summary, mean_min=args.initial_gate_mean_min, median_min=args.initial_gate_median_min
+    refuse_fresh_reentry(out_dir, args)
+    # Resume/rewind validates the rebuilt identity in memory and leaves the
+    # previous input_manifest.json byte-for-byte intact until this launch
+    # either knows the dataset again or finalizes a failed report that still
+    # carries it. A fresh run records the failed-closed identity immediately.
+    resuming = bool(getattr(args, "resume", False))
+    input_manifest = prov.stage_input_manifest(
+        out_dir,
+        prov.build_input_manifest(
+            arm="control", tool="phase3_ranked_ppo_retention",
+            init_path=args.init_checkpoint, init_meta=init_meta,
+            init_provenance=init_prov, teacher_path=args.teacher,
+        ),
+        resume=resuming,
     )
 
     report: dict[str, Any] = {
         "status": None,
         "control_ran": False,
-        "initial_gate": initial_gate,
+        "initial_gate": None,
         "provenance": provenance,
+        "launch": launch_record,
+        "input_manifest": input_manifest,
         "knobs": knobs,
-        "dataset": None,
+        "dataset": prov.report_dataset_from_manifest(input_manifest) if resuming else None,
+        # No auxiliary term exists on this arm, including a run that fails
+        # closed on identity or the gate.  The shared wrapper is on disk
+        # before any early finalize, so the report cannot omit it.
+        "alpha_calibration": prov.write_calibration_record(
+            out_dir, prov.calibration_record(arm="control"),
+        ),
         "frozen_arm": None,
         "ppo_arm": None,
         "retention": None,
@@ -1792,14 +1872,30 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
         },
     }
 
-    if not initial_gate["gate_pass"]:
+    def _finalize_report() -> dict[str, Any]:
+        prov.write_input_manifest(out_dir, input_manifest)
+        return prov.finalize_run_reporting(
+            out_dir, arm="control", report=report, write_report=_write_report,
+            hash_recovery_archives=bool(getattr(args, "hash_recovery_archives", False)),
+        )
+
+    # Identity first: a run whose inputs cannot be identified stops before it
+    # steps a single environment frame.
+    if not input_manifest["complete"]:
         report["status"] = "failed_closed"
-        _write_report(out_dir, report)
+        _finalize_report()
         return report
 
-    if teacher_prov["file_sha256"] is None:
+    gate_results = evaluate_deterministic(init_net, device, args.eval_seeds, args.eval_max_steps)
+    gate_summary = summarize_evaluation(gate_results)
+    initial_gate = evaluate_initial_gate(
+        gate_summary, mean_min=args.initial_gate_mean_min, median_min=args.initial_gate_median_min
+    )
+    report["initial_gate"] = initial_gate
+
+    if not initial_gate["gate_pass"]:
         report["status"] = "failed_closed"
-        _write_report(out_dir, report)
+        _finalize_report()
         return report
 
     if not getattr(args, "resume", False):
@@ -1830,6 +1926,7 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
         "n_train_frames": dataset["n_train_frames"],
         "teacher_file_sha256": dataset["teacher_file_sha256"],
     }
+    prov.attach_dataset_identity(out_dir, input_manifest, report["dataset"])
 
     snapshot_updates = snapshot_schedule(args.updates)
 
@@ -1857,12 +1954,13 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
 
     report["status"] = ppo_arm["stop_reason"]
     report["control_ran"] = True
-    _write_report(out_dir, report)
+    _finalize_report()
     return report
 
 
 def main() -> None:
     args = apply_mode_defaults(build_parser().parse_args())
+    args.argv = list(sys.argv)
     device = torch.device(args.device)
     report = run_experiment(args, device)
     print(json.dumps({"status": report["status"], "control_ran": report["control_ran"]}))

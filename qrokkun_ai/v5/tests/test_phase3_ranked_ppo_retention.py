@@ -82,6 +82,7 @@ from qrokkun_ai.v5.agents.player_checkpoints import (  # noqa: E402
     state_dict_sha256,
 )
 from qrokkun_ai.v5.agents.player_ranked_topk import PlayerRankedTopK  # noqa: E402
+from qrokkun_ai.v1.agents.player_v1 import PlayerV1  # noqa: E402
 from qrokkun_env.env import ACTIONS, Qrokkun26Env  # noqa: E402
 from qrokkun_ai.v1.train import player_v1 as scripted_ppo  # noqa: E402
 
@@ -677,7 +678,7 @@ def test_run_experiment_fails_closed_before_ppo_when_initial_gate_fails(
                 "--init-checkpoint",
                 str(ckpt),
                 "--teacher",
-                str(TEACHER_CKPT),
+                str(_write_tiny_teacher(tmp_path)),
                 "--out-dir",
                 str(out_dir),
                 "--quick",
@@ -871,10 +872,20 @@ def test_control_progress_jsonl_records_update_wall_clocks(
 # --------------------------------------------------------------------------- #
 # 12. Phase-3 replication CLI: rollout seed start + terminal teacher diagnostics
 # --------------------------------------------------------------------------- #
+def _write_tiny_teacher(tmp_path: Path, name: str = "teacher.pt", *, hidden: int = 8) -> Path:
+    """A real loadable V1 teacher artifact.
+
+    The run records teacher identity (file AND state-dict SHA-256) before any
+    experiment work, so a placeholder byte blob would legitimately fail closed.
+    """
+    path = tmp_path / name
+    torch.save({"hidden": hidden, "state_dict": PlayerV1(hidden=hidden).state_dict()}, path)
+    return path
+
+
 def _control_replication_argv(tmp_path: Path, *extra: str) -> list[str]:
     ckpt, _net = _write_ranked_ckpt(tmp_path)
-    teacher = tmp_path / "teacher.pt"
-    teacher.write_bytes(b"teacher")
+    teacher = _write_tiny_teacher(tmp_path)
     return [
         "--init-checkpoint",
         str(ckpt),

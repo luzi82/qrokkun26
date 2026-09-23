@@ -93,16 +93,111 @@ def test_locked_knobs_match_control_except_update_budget() -> None:
     assert warmup.collect_rollout is ret.collect_rollout
     assert warmup.ppo_update is ret.ppo_update
     assert warmup.evaluate_deterministic is ret.evaluate_deterministic
-    assert warmup.CURRENT_RUN_SCHEMA_VERSION is ret.CURRENT_RUN_SCHEMA_VERSION
     assert warmup.PPO_UPDATES == 10
     assert warmup.SNAPSHOT_UPDATES == (0, 10)
     assert warmup.WARMUP_UPDATES == 10
     assert warmup.PPO_UPDATES != ret.PPO_UPDATES
 
 
-def test_schema_version_is_shared_four() -> None:
-    assert ret.CURRENT_RUN_SCHEMA_VERSION == 4
-    assert warmup.CURRENT_RUN_SCHEMA_VERSION == 4
+def _warmup_contract(**fields: object) -> dict:
+    return {
+        "format": 1,
+        "schema_version": warmup.WARMUP_RUN_SCHEMA_VERSION,
+        "tool": warmup.TOOL_NAME,
+        "arm": "direct",
+        "stop_args": {
+            "effective_max_updates": 1,
+            "effective_end_time_hkt": "2099-12-31T23:59:00+08:00",
+        },
+        "no_promotion": True,
+        **fields,
+    }
+
+
+def test_warmup_declares_its_own_run_schema_version() -> None:
+    """The warmup contract binds only what warmup records, so it carries its
+    own version.  The retention arms bumped to 5 when they started binding the
+    teacher's state-dict identity; warmup's contract did not change, and an
+    already-running warmup run must stay resumable."""
+    assert warmup.WARMUP_RUN_SCHEMA_VERSION == 4
+    assert ret.CURRENT_RUN_SCHEMA_VERSION == 5
+
+
+def test_warmup_writes_and_validates_run_json_at_its_own_schema_version(tmp_path: Path) -> None:
+    contract = _warmup_contract()
+    warmup.create_or_validate_warmup_run_contract(tmp_path, contract, resume=False)
+    assert json.loads((tmp_path / "run.json").read_text())["schema_version"] == (
+        warmup.WARMUP_RUN_SCHEMA_VERSION
+    )
+    # The same contract resumes, and the explicit validation entry point agrees.
+    warmup.create_or_validate_warmup_run_contract(tmp_path, contract, resume=True)
+    assert warmup.require_matching_warmup_run_contract(tmp_path, contract)["schema_version"] == (
+        warmup.WARMUP_RUN_SCHEMA_VERSION
+    )
+
+
+def test_an_existing_schema_four_warmup_run_json_still_resumes_after_a_retention_bump(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The regression under test: warmup validation must not read the
+    retention arms' current schema version, or every future retention bump
+    would strand warmup runs that are mid-flight on disk."""
+    contract = _warmup_contract()
+    (tmp_path / "run.json").write_text(json.dumps(contract, indent=2, sort_keys=True))
+
+    monkeypatch.setattr(ret, "CURRENT_RUN_SCHEMA_VERSION", 99)
+    assert warmup.require_matching_warmup_run_contract(tmp_path, contract) == contract
+    warmup.create_or_validate_warmup_run_contract(tmp_path, contract, resume=True)
+
+
+@pytest.mark.parametrize("bad", [5, 3, 2, 1, 4.0, True, None])
+def test_warmup_refuses_a_run_json_at_any_other_schema_version(
+    bad: object, tmp_path: Path,
+) -> None:
+    contract = _warmup_contract()
+    stale = dict(contract)
+    stale["schema_version"] = bad
+    (tmp_path / "run.json").write_text(json.dumps(stale))
+    with pytest.raises(ret.RunStateError, match="schema_version"):
+        warmup.create_or_validate_warmup_run_contract(tmp_path, contract, resume=True)
+
+
+def test_warmup_refuses_to_create_a_contract_at_a_foreign_schema_version(tmp_path: Path) -> None:
+    with pytest.raises(ret.RunStateError, match="schema_version"):
+        warmup.create_or_validate_warmup_run_contract(
+            tmp_path, _warmup_contract(schema_version=ret.CURRENT_RUN_SCHEMA_VERSION),
+            resume=False,
+        )
+    assert not (tmp_path / "run.json").exists()
+
+
+def test_retention_fail_closed_schema_check_is_unweakened(tmp_path: Path) -> None:
+    """Decoupling warmup must not loosen the retention arms: their default
+    remains the current retention schema version, and a schema-4 run.json is
+    still refused there."""
+    contract = {
+        "format": 1,
+        "schema_version": ret.CURRENT_RUN_SCHEMA_VERSION,
+        "tool": "phase3_ranked_ppo_retention",
+        "arm": "control",
+        "stop_args": {
+            "effective_max_updates": 1,
+            "effective_end_time_hkt": "2099-12-31T23:59:00+08:00",
+        },
+        "no_promotion": True,
+    }
+    stale = dict(contract)
+    stale["schema_version"] = warmup.WARMUP_RUN_SCHEMA_VERSION
+    (tmp_path / "run.json").write_text(json.dumps(stale))
+    with pytest.raises(ret.RunStateError, match="schema_version"):
+        ret.create_or_validate_run_contract(tmp_path, contract, resume=True)
+
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    ret.create_or_validate_run_contract(fresh, contract, resume=False)
+    assert json.loads((fresh / "run.json").read_text())["schema_version"] == (
+        ret.CURRENT_RUN_SCHEMA_VERSION
+    )
 
 
 def test_warmup_optimizer_only_receives_value_parameters() -> None:
@@ -199,29 +294,19 @@ def test_ppo_phase_reseed_matches_after_divergent_global_rng() -> None:
     assert torch.equal(state_a[2], state_b[2])
 
 
-def test_new_run_json_writes_schema_four_and_rejects_three(tmp_path: Path) -> None:
-    contract = {
-        "format": 1,
-        "schema_version": warmup.CURRENT_RUN_SCHEMA_VERSION,
-        "tool": "phase3_ranked_ppo_critic_warmup",
-        "arm": "direct",
-        "stop_args": {
-            "effective_max_updates": 1,
-            "effective_end_time_hkt": "2099-12-31T23:59:00+08:00",
-        },
-        "no_promotion": True,
-    }
-    ret.create_or_validate_run_contract(tmp_path, contract, resume=False)
+def test_new_run_json_writes_the_warmup_schema_and_rejects_every_other(tmp_path: Path) -> None:
+    contract = _warmup_contract()
+    warmup.create_or_validate_warmup_run_contract(tmp_path, contract, resume=False)
     written = json.loads((tmp_path / "run.json").read_text())
-    assert written["schema_version"] == 4
-    for bad in (3, 2, 1, 4.0, True, None):
+    assert written["schema_version"] == warmup.WARMUP_RUN_SCHEMA_VERSION
+    for bad in (5, 3, 2, 1, 4.0, True, None):
         other = tmp_path / f"bad-{bad}"
         other.mkdir()
         stale = dict(contract)
         stale["schema_version"] = bad
         (other / "run.json").write_text(json.dumps(stale))
         with pytest.raises(ret.RunStateError, match="schema_version"):
-            ret.create_or_validate_run_contract(other, contract, resume=True)
+            warmup.create_or_validate_warmup_run_contract(other, contract, resume=True)
 
 
 def test_packed_warmup_checkpoint_is_experimental_non_production() -> None:

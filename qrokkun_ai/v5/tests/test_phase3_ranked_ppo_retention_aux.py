@@ -1203,6 +1203,8 @@ def test_parser_exposes_only_the_allowed_flags() -> None:
         "--resume-from-update",
         "--seed",
         "--device",
+        # reporting-only: changes what the artifact manifest hashes, never a knob
+        "--hash-recovery-archives",
         "--quick",
         "--rollout-seed-start",
         "--terminal-teacher-diagnostics",
@@ -1399,7 +1401,7 @@ def test_quick_end_to_end_writes_report_with_alpha_and_no_promotion(tmp_path: Pa
     assert report["status"] == "completed"
     assert report["arm_ran"] is True
     assert report["retention"]["promotion"] is False
-    alpha = report["alpha_calibration"]["alpha"]
+    alpha = report["alpha_calibration"]["calibration"]["alpha"]
     assert alpha > 0.0 and math.isfinite(alpha)
     assert report["knobs"]["target_retention_grad_ratio"] == aux.TARGET_RETENTION_GRAD_RATIO
     assert report["knobs"]["retention_objective"] == "phase2_ranked_multiseed.hybrid_loss"
@@ -1474,8 +1476,11 @@ def test_aux_progress_jsonl_records_update_wall_clocks(
 def _aux_replication_argv(tmp_path: Path, *extra: str) -> list[str]:
     init_path = tmp_path / "init.pt"
     save_player_checkpoint(_tiny_net(seed=3), init_path, source_tool="tests")
+    # A real loadable V1 teacher: teacher identity (file AND state-dict
+    # SHA-256) is recorded before any experiment work, so a placeholder byte
+    # blob would legitimately fail closed.
     teacher = tmp_path / "teacher.pt"
-    teacher.write_bytes(b"teacher")
+    torch.save({"hidden": 8, "state_dict": PlayerV1(hidden=8).state_dict()}, teacher)
     return [
         "--init-checkpoint",
         str(init_path),

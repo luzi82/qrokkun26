@@ -20,10 +20,30 @@ if str(_ROOT) not in sys.path:
 from qrokkun_ai.v5.agents.player_ranked_topk import PlayerRankedTopK
 from qrokkun_ai.v5.agents.obs_v4 import BULLET_FEAT_V4, MAX_BULLETS_V4, PLAYER_FEAT_V4
 
+from qrokkun_ai.v1.agents.player_v1 import PlayerV1
+
 from qrokkun_ai.v5.tools import phase3_ranked_ppo_retention as control
 from qrokkun_ai.v5.tools import phase3_ranked_ppo_retention_aux as aux
+from qrokkun_ai.v5.tools import phase3_run_provenance as prov
 
 _CURRENT_SCHEMA_VERSION = control.CURRENT_RUN_SCHEMA_VERSION
+
+# A stubbed initial load still has to look like a real strict load: the input
+# manifest records architecture/schema identity and fails closed without it.
+_STUB_INIT_META = {
+    "architecture": "player_ranked_topk",
+    "architecture_version": 1,
+    "schema_version": 1,
+    "production_compatible": True,
+    "experimental": False,
+}
+
+
+def _write_tiny_teacher(tmp_path: Path, *, hidden: int = 8) -> Path:
+    """A real loadable V1 teacher, so teacher identity can be produced."""
+    path = tmp_path / "teacher.pt"
+    torch.save({"hidden": hidden, "state_dict": PlayerV1(hidden=hidden).state_dict()}, path)
+    return path
 
 
 def _current_contract(**fields: object) -> dict:
@@ -745,22 +765,22 @@ def test_resume_from_update_max_only_uses_far_future_end_time(module) -> None:
     assert deadline == control.FAR_FUTURE_END_TIME
 
 
-def test_new_control_contract_has_schema_version_4(tmp_path: Path) -> None:
+def test_new_control_contract_has_schema_version_5(tmp_path: Path) -> None:
     contract = _current_contract(tool="phase3_ranked_ppo_retention", stop_args={
         "effective_max_updates": 1, "effective_end_time_hkt": "2099-12-31T23:59:00+08:00",
     })
     control.create_or_validate_run_contract(tmp_path, contract, resume=False)
-    assert json.loads((tmp_path / "run.json").read_text())["schema_version"] == 4
-    assert control.CURRENT_RUN_SCHEMA_VERSION == 4
+    assert json.loads((tmp_path / "run.json").read_text())["schema_version"] == 5
+    assert control.CURRENT_RUN_SCHEMA_VERSION == 5
 
 
-def test_new_aux_contract_has_schema_version_4(tmp_path: Path) -> None:
+def test_new_aux_contract_has_schema_version_5(tmp_path: Path) -> None:
     contract = _current_contract(tool="phase3_ranked_ppo_retention_aux", arm="aux", stop_args={
         "effective_max_updates": 1, "effective_end_time_hkt": "2099-12-31T23:59:00+08:00",
     })
     control.create_or_validate_run_contract(tmp_path, contract, resume=False)
-    assert json.loads((tmp_path / "run.json").read_text())["schema_version"] == 4
-    assert aux.ret_mod.CURRENT_RUN_SCHEMA_VERSION == 4
+    assert json.loads((tmp_path / "run.json").read_text())["schema_version"] == 5
+    assert aux.ret_mod.CURRENT_RUN_SCHEMA_VERSION == 5
 
 
 def test_recovery_archives_every_50_including_zero_and_periodic_model_stays_200() -> None:
@@ -808,9 +828,9 @@ def test_control_sparse_latest_recovery_and_archives(
     saves: list[tuple[str, int]] = []
     real = control.atomic_save_recovery
 
-    def spy(path, state):
+    def spy(path, state, **kwargs):
         saves.append((Path(path).name, int(state["completed_update"])))
-        return real(path, state)
+        return real(path, state, **kwargs)
 
     monkeypatch.setattr(control, "atomic_save_recovery", spy)
     control.run_ppo_arm(
@@ -958,7 +978,7 @@ def test_aux_resume_reuses_cached_first_update_collect_wall(
 def _stub_control_experiment_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         control, "load_initial_checkpoint",
-        lambda *_: (torch.nn.Linear(1, 1), {"metadata": {}}),
+        lambda *_: (torch.nn.Linear(1, 1), _STUB_INIT_META),
     )
     monkeypatch.setattr(
         control, "checkpoint_provenance",
@@ -1045,7 +1065,11 @@ def test_update_200_archive_matches_full_recovery_payload(tmp_path: Path) -> Non
     assert archive.is_file()
     loaded = torch.load(archive, map_location="cpu", weights_only=False)
     latest = torch.load(tmp_path / "recovery.pt", map_location="cpu", weights_only=False)
-    assert loaded == latest == state
+    # The payload is identical; only the declared kind distinguishes the two.
+    assert loaded["checkpoint_kind"] == "recovery_archive"
+    assert latest["checkpoint_kind"] == "recovery_current"
+    assert {k: v for k, v in loaded.items() if k != "checkpoint_kind"} == state
+    assert {k: v for k, v in latest.items() if k != "checkpoint_kind"} == state
 
 
 def test_archive_at_400_does_not_remove_update_200(tmp_path: Path) -> None:
@@ -1388,7 +1412,7 @@ def _write_matching_run_json(
     historical_max: int = 800,
 ) -> None:
     init_prov = {"file_sha256": "init", "state_dict_sha256": "state"}
-    teacher_prov = {"file_sha256": "teacher"}
+    teacher_prov = prov.contract_teacher_inputs(prov.teacher_identity(args.teacher))
     provenance = {
         "init_checkpoint": init_prov, "teacher": teacher_prov,
         "git_commit": "commit", "dirty": False,
@@ -1416,14 +1440,14 @@ def _orch_args(tmp_path: Path, *, resume_from_update: int = 200, max_updates: in
         effective_max_updates=max_updates, effective_end_time=control.FAR_FUTURE_END_TIME,
         initial_gate_mean_min=0.0, initial_gate_median_min=0.0,
         data_episodes=1, data_max_steps=1, data_frames_cap=1,
-        init_checkpoint=Path("init.pt"), teacher=Path("teacher.pt"), effective_seed=1,
+        init_checkpoint=Path("init.pt"), teacher=_write_tiny_teacher(tmp_path), effective_seed=1,
     )
 
 
 def _stub_control_experiment(monkeypatch: pytest.MonkeyPatch, net: PlayerRankedTopK) -> list[str]:
     order: list[str] = []
     _stub_control_loop(monkeypatch)
-    monkeypatch.setattr(control, "load_initial_checkpoint", lambda *_: (net, {"metadata": {}}))
+    monkeypatch.setattr(control, "load_initial_checkpoint", lambda *_: (net, _STUB_INIT_META))
     monkeypatch.setattr(control, "checkpoint_provenance", lambda *_: {"file_sha256": "init", "state_dict_sha256": "state"})
     monkeypatch.setattr(control, "file_sha256", lambda *_: "teacher")
     monkeypatch.setattr(control, "current_git_commit", lambda *_: "commit")
@@ -1440,9 +1464,12 @@ def _stub_control_experiment(monkeypatch: pytest.MonkeyPatch, net: PlayerRankedT
     real_schema = control._require_current_schema_version
     real_rewind = control.rewind_run_to_archived_recovery
 
-    def spy_schema(contract):
+    def spy_schema(contract, expected=control.CURRENT_RUN_SCHEMA_VERSION):
         order.append("schema")
-        return real_schema(contract)
+        # Retention resume must still be checked against the retention schema,
+        # not whatever version a decoupled tool happens to use.
+        assert expected == control.CURRENT_RUN_SCHEMA_VERSION
+        return real_schema(contract, expected)
 
     def spy_rewind(*a, **k):
         order.append("rewind")
@@ -1461,7 +1488,7 @@ def _stub_control_experiment(monkeypatch: pytest.MonkeyPatch, net: PlayerRankedT
 def _stub_aux_experiment(monkeypatch: pytest.MonkeyPatch, net: PlayerRankedTopK) -> list[str]:
     order: list[str] = []
     _stub_aux_loop(monkeypatch)
-    monkeypatch.setattr(aux, "load_initial_checkpoint", lambda *_: (net, {"metadata": {}}))
+    monkeypatch.setattr(aux, "load_initial_checkpoint", lambda *_: (net, _STUB_INIT_META))
     monkeypatch.setattr(aux, "checkpoint_provenance", lambda *_: {"file_sha256": "init", "state_dict_sha256": "state"})
     monkeypatch.setattr(aux, "file_sha256", lambda *_: "teacher")
     monkeypatch.setattr(aux, "current_git_commit", lambda *_: "commit")
@@ -1484,9 +1511,10 @@ def _stub_aux_experiment(monkeypatch: pytest.MonkeyPatch, net: PlayerRankedTopK)
     real_schema = control._require_current_schema_version
     real_rewind = control.rewind_run_to_archived_recovery
 
-    def spy_schema(contract):
+    def spy_schema(contract, expected=control.CURRENT_RUN_SCHEMA_VERSION):
         order.append("schema")
-        return real_schema(contract)
+        assert expected == control.CURRENT_RUN_SCHEMA_VERSION
+        return real_schema(contract, expected)
 
     def spy_rewind(*a, **k):
         order.append("rewind")

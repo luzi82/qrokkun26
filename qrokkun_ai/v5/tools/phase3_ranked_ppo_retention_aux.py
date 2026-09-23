@@ -24,6 +24,7 @@ import json
 import os
 import signal
 import statistics
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,6 +43,7 @@ from qrokkun_ai.v5.agents.player_checkpoints import (
 from qrokkun_ai.v5.agents.player_ranked_topk import PlayerRankedTopK
 
 from qrokkun_ai.v5.tools import phase3_ranked_ppo_retention as ret_mod
+from qrokkun_ai.v5.tools import phase3_run_provenance as prov
 from qrokkun_ai.v5.tools.phase2_ranked_multiseed import (
     HYBRID_HARD_WEIGHT,
     HYBRID_SOFT_WEIGHT,
@@ -378,13 +380,15 @@ def calibrate_alpha(
     batch = rollouts_to_batch(rollouts, device)
     advantages = normalized_advantages(batch)
 
-    ppo_norms: list[float] = []
-    ret_norms: list[float] = []
-    cosines: list[float] = []
+    # Every matched pair is kept, not just its contribution to the mean: the
+    # aggregates alone cannot show how much the eight draws disagreed, and a
+    # spread that the frozen alpha papers over is exactly what a reader of
+    # the mechanism hypothesis needs to see.
+    pairs: list[dict[str, Any]] = []
     n_ppo_samples = 0
     n_ret_samples = 0
 
-    for _ in range(int(n_minibatches)):
+    for pair_index in range(int(n_minibatches)):
         index = torch.randperm(n_frames, generator=gen)[:ppo_k].to(device)
         g_ppo = flat_grad(policy_loss_only(net, batch, advantages, index=index), params)
 
@@ -392,27 +396,39 @@ def calibrate_alpha(
         dist, _value = net(mb["player"], mb["bullets"], mb["pad"])
         g_ret = flat_grad(retention_loss(dist.logits, mb["teacher_logits"]), params)
 
-        ppo_norms.append(float(g_ppo.norm().item()))
-        ret_norms.append(float(g_ret.norm().item()))
-        cosines.append(
-            float((g_ppo @ g_ret / (g_ppo.norm() * g_ret.norm() + _GRAD_EPS)).item())
+        pairs.append(
+            {
+                "index": pair_index,
+                "g_ppo_norm": float(g_ppo.norm().item()),
+                "g_ret_norm": float(g_ret.norm().item()),
+                "cosine_similarity": float(
+                    (g_ppo @ g_ret / (g_ppo.norm() * g_ret.norm() + _GRAD_EPS)).item()
+                ),
+                "n_ppo_samples": int(index.shape[0]),
+                "n_retention_samples": int(mb["player"].shape[0]),
+            }
         )
         n_ppo_samples += int(index.shape[0])
         n_ret_samples += int(mb["player"].shape[0])
 
-    g_ppo_norm = statistics.fmean(ppo_norms)
-    g_ret_norm = statistics.fmean(ret_norms)
+    g_ppo_norm = statistics.fmean(pair["g_ppo_norm"] for pair in pairs)
+    g_ret_norm = statistics.fmean(pair["g_ret_norm"] for pair in pairs)
     alpha = float(target_ratio * (g_ppo_norm / (g_ret_norm + _GRAD_EPS)))
+    for pair in pairs:
+        pair["g_ret_weighted_norm"] = alpha * pair["g_ret_norm"]
+        pair["realized_ratio"] = pair["g_ret_weighted_norm"] / (pair["g_ppo_norm"] + _GRAD_EPS)
     result: dict[str, Any] = {
         "g_ppo_norm": g_ppo_norm,
         "g_ret_norm": g_ret_norm,
-        "cosine_similarity": statistics.fmean(cosines),
+        "cosine_similarity": statistics.fmean(pair["cosine_similarity"] for pair in pairs),
         "n_samples": n_ppo_samples,
         "n_retention_samples": n_ret_samples,
         "calibration_minibatches": int(n_minibatches),
         "minibatch_size": int(minibatch),
         "alpha": alpha,
         "target_ratio": float(target_ratio),
+        "pairs": pairs,
+        "pairs_provenance": prov.EVIDENCE_COMPUTED,
     }
     result["g_ret_weighted_norm"] = alpha * g_ret_norm
     result["grad_ratio"] = result["g_ret_weighted_norm"] / (g_ppo_norm + _GRAD_EPS)
@@ -722,6 +738,9 @@ def run_aux_arm(
         calibration = calibrate_alpha(net, calib_rollouts, train_tensors, device, minibatch=minibatch, generator=calib_gen)
         calibration["rollout_seed_window"] = calib_seeds
         alpha = FrozenAlpha(alpha=float(calibration["alpha"]), calibration=calibration).alpha
+    # Persisted on every launch, including a resume that recovered the frozen
+    # calibration, so the full per-pair record always sits beside the run.
+    prov.write_calibration_record(out_dir, prov.calibration_record(arm="aux", calibration=calibration))
 
     snapshots: list[dict[str, Any]] = []
     total_episodes = 0
@@ -729,9 +748,10 @@ def run_aux_arm(
     optimizer_steps = 0
     rollout_seed_window = calib_seeds
 
-    def _pack_extra(update: int, eval_summary: dict[str, Any]) -> dict[str, Any]:
+    def _pack_extra(update: int, eval_summary: dict[str, Any], kind: str) -> dict[str, Any]:
         return {
             "update": update,
+            "checkpoint_kind": prov.require_checkpoint_kind(kind),
             "parent_state_dict_sha256": parent_state_dict_sha256,
             "parent_file_sha256": parent_file_sha256,
             "dataset_hash": dataset_hash,
@@ -745,7 +765,9 @@ def run_aux_arm(
             "retention_objective": "phase2_ranked_multiseed.hybrid_loss",
         }
 
-    def _snapshot(update: int, rollouts: list, alignment: dict[str, Any] | None = None) -> None:
+    def _snapshot(
+        update: int, rollouts: list, kind: str, alignment: dict[str, Any] | None = None,
+    ) -> None:
         eval_results = evaluate_deterministic(net, device, args.eval_seeds, args.eval_max_steps)
         eval_summary = summarize_evaluation(eval_results)
         if diagnostic_tensors is not None:
@@ -780,11 +802,12 @@ def run_aux_arm(
             source_tool="phase3_ranked_ppo_retention_aux",
             experimental=True,
             production_compatible=False,
-            extra=_pack_extra(update, eval_summary),
+            extra=_pack_extra(update, eval_summary, kind),
         )
         snapshots.append(
             {
                 "update": update,
+                "checkpoint_kind": kind,
                 "evaluation": eval_summary,
                 "teacher_diagnostics": diag,
                 "grad_alignment": alignment,
@@ -810,10 +833,7 @@ def run_aux_arm(
             source_tool="phase3_ranked_ppo_retention_aux",
             experimental=True,
             production_compatible=False,
-            extra={
-                **_pack_extra(update, evaluation),
-                "checkpoint_kind": "periodic_model_only",
-            },
+            extra=_pack_extra(update, evaluation, prov.CHECKPOINT_KIND_PERIODIC_MODEL_ONLY),
         )
 
     if getattr(args, "resume", False):
@@ -824,7 +844,7 @@ def run_aux_arm(
     if not getattr(args, "resume", False) and 0 in snapshot_updates:
         # Snapshot 0 only INSPECTS the already-collected window: it never
         # collects again and never samples an action.
-        _snapshot(0, calib_rollouts)
+        _snapshot(0, calib_rollouts, prov.CHECKPOINT_KIND_INITIAL_SNAPSHOT)
 
     if getattr(args, "resume", False):
         # Recovery is the source of truth: drop any stale ahead-rows before
@@ -902,6 +922,7 @@ def run_aux_arm(
                 row["update"] = update
                 row["scripted_survival_mean"] = statistics.mean([r.elapsed for r in rollouts])
                 row["rollout_censoring"] = rollout_censor_stats(rollouts)
+                row.update(prov.rollout_seed_record([r.seed for r in rollouts]))
                 row["collect_wall_s"] = collect_wall_s
                 row["ppo_wall_s"] = ppo_wall_s
                 row["total_wall_s"] = collect_wall_s + ppo_wall_s
@@ -922,7 +943,10 @@ def run_aux_arm(
                     update in snapshot_updates
                     and update <= ret_mod.PERIODIC_MODEL_CHECKPOINT_INTERVAL
                 ):
-                    _snapshot(update, rollouts, alignment=metrics["grad_alignment"])
+                    _snapshot(
+                        update, rollouts, prov.scheduled_snapshot_kind(update),
+                        alignment=metrics["grad_alignment"],
+                    )
                     _save_boundary()
                 maybe_terminal_full = (
                     getattr(args, "terminal_teacher_diagnostics", False)
@@ -977,7 +1001,11 @@ def run_aux_arm(
     ):
         if last_update_rollouts is None or last_grad_alignment is None:
             raise ret_mod.RunStateError("missing final update diagnostic state")
-        _snapshot(completed, last_update_rollouts, alignment=last_grad_alignment)
+        # Unscheduled end-of-run snapshot: terminal, never a diagnostic one.
+        _snapshot(
+            completed, last_update_rollouts, prov.CHECKPOINT_KIND_TERMINAL_FULL_SNAPSHOT,
+            alignment=last_grad_alignment,
+        )
     if stop_reason == "interrupted":
         ret_mod.unlink_latest_recovery(recovery_path)
     else:
@@ -993,7 +1021,7 @@ def run_aux_arm(
         source_tool="phase3_ranked_ppo_retention_aux",
         experimental=True,
         production_compatible=False,
-            extra=_pack_extra(completed, final_eval_summary),
+        extra=_pack_extra(completed, final_eval_summary, prov.CHECKPOINT_KIND_FINAL_ALIAS),
     )
 
     return {
@@ -1046,6 +1074,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="on max-updates completion, write one full terminal snapshot with teacher diagnostics",
     )
+    ap.add_argument(
+        "--hash-recovery-archives",
+        action="store_true",
+        help="also SHA-256 every recovery archive in artifact_manifest.json (slow; many GiB)",
+    )
     return ap
 
 
@@ -1070,13 +1103,22 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
     out_dir.mkdir(parents=True, exist_ok=True)
     effective_max_updates, effective_end_time = ret_mod.effective_stop_budget(args)
 
+    git_commit = current_git_commit(_REPO_ROOT)
+    git_dirty = _git_dirty(_REPO_ROOT)
+    # Same shared writer, same ordering guarantee as the control arm.
+    launch_record = prov.record_launch(
+        out_dir, arm="aux", tool="phase3_ranked_ppo_retention_aux", args=args,
+        device=device, git_commit=git_commit, git_dirty=git_dirty,
+    )
+
     init_net, init_meta = load_initial_checkpoint(args.init_checkpoint, device)
     init_prov = checkpoint_provenance(args.init_checkpoint, init_meta)
+    teacher_id = prov.teacher_identity(args.teacher)
     provenance = {
         "init_checkpoint": init_prov,
-        "teacher": {"file_sha256": file_sha256(args.teacher)},
-        "git_commit": current_git_commit(_REPO_ROOT),
-        "dirty": _git_dirty(_REPO_ROOT),
+        "teacher": prov.contract_teacher_inputs(teacher_id),
+        "git_commit": git_commit,
+        "dirty": git_dirty,
         "torch_version": torch.__version__,
         "device": str(device),
     }
@@ -1120,7 +1162,12 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
         "effective_seed": getattr(args, "effective_seed", PPO_TORCH_SEED),
         "no_promotion": True,
     }
+    # A resume/rewind is tied to an immutable contract, so it is validated
+    # before the initial gate evaluates the environment.  A FRESH run creates
+    # no run.json and claims no started history until its inputs are
+    # identified and the gate has passed -- exactly the control's ordering.
     selected = getattr(args, "resume_from_update", None)
+    authorized: dict[str, Any] | None = None
     if selected is not None:
         resolved_max, resolved_end = ret_mod.resolve_resume_from_stop_budget(args, selected)
         args.effective_max_updates = resolved_max
@@ -1135,10 +1182,8 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
             out_dir, selected, progress_filename="ppo_aux_updates.jsonl", device=device,
         )
         authorized = ret_mod.create_or_validate_run_contract(out_dir, contract, resume=True)
-    else:
-        authorized = ret_mod.create_or_validate_run_contract(
-            out_dir, contract, resume=getattr(args, "resume", False),
-        )
+    elif getattr(args, "resume", False):
+        authorized = ret_mod.create_or_validate_run_contract(out_dir, contract, resume=True)
     if authorized is not None:
         args.effective_max_updates = authorized["effective_max_updates"]
         args.effective_end_time = ret_mod.dt.datetime.fromisoformat(
@@ -1147,28 +1192,31 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
         effective_max_updates, effective_end_time = (
             args.effective_max_updates, args.effective_end_time,
         )
-    ret_mod.append_run_status(out_dir, {
-        "event": "resume_requested" if getattr(args, "resume", False) else "started",
-        "effective_max_updates": effective_max_updates,
-        "effective_end_time_hkt": effective_end_time.isoformat(),
-    })
 
-    gate_summary = summarize_evaluation(
-        evaluate_deterministic(init_net, device, args.eval_seeds, args.eval_max_steps)
-    )
-    initial_gate = evaluate_initial_gate(
-        gate_summary,
-        mean_min=args.initial_gate_mean_min,
-        median_min=args.initial_gate_median_min,
+    ret_mod.refuse_fresh_reentry(out_dir, args)
+    # Same resume rule as the control: identity is rebuilt and checked in
+    # memory, and input_manifest.json stays byte-for-byte until the dataset
+    # is known or a failed report is intentionally finalized with it carried.
+    resuming = bool(getattr(args, "resume", False))
+    input_manifest = prov.stage_input_manifest(
+        out_dir,
+        prov.build_input_manifest(
+            arm="aux", tool="phase3_ranked_ppo_retention_aux",
+            init_path=args.init_checkpoint, init_meta=init_meta,
+            init_provenance=init_prov, teacher_path=args.teacher,
+        ),
+        resume=resuming,
     )
 
     report: dict[str, Any] = {
         "status": None,
         "arm_ran": False,
-        "initial_gate": initial_gate,
+        "initial_gate": None,
         "provenance": provenance,
+        "launch": launch_record,
+        "input_manifest": input_manifest,
         "knobs": knobs,
-        "dataset": None,
+        "dataset": prov.report_dataset_from_manifest(input_manifest) if resuming else None,
         "alpha_calibration": None,
         "aux_arm": None,
         "retention": None,
@@ -1178,10 +1226,50 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
         },
     }
 
+    def _finalize_report() -> dict[str, Any]:
+        # A fresh failure has no calibration.json and stays null. A resume or
+        # rewind that dies on identity or the gate must report the calibration
+        # the earlier launch retained, without rewriting that file. A present
+        # file that is not this arm's wrapper fails here, before the report
+        # can claim the calibration is unavailable.
+        if report.get("alpha_calibration") is None:
+            report["alpha_calibration"] = prov.load_retained_calibration_record(
+                out_dir, arm="aux",
+            )
+        prov.write_input_manifest(out_dir, input_manifest)
+        return prov.finalize_run_reporting(
+            out_dir, arm="aux", report=report, write_report=_write_report,
+            hash_recovery_archives=bool(getattr(args, "hash_recovery_archives", False)),
+        )
+
+    # Identity first, exactly as in the control arm.
+    if not input_manifest["complete"]:
+        report["status"] = "failed_closed"
+        _finalize_report()
+        return report
+
+    gate_summary = summarize_evaluation(
+        evaluate_deterministic(init_net, device, args.eval_seeds, args.eval_max_steps)
+    )
+    initial_gate = evaluate_initial_gate(
+        gate_summary,
+        mean_min=args.initial_gate_mean_min,
+        median_min=args.initial_gate_median_min,
+    )
+    report["initial_gate"] = initial_gate
+
     if not initial_gate["gate_pass"]:
         report["status"] = "failed_closed"
-        _write_report(out_dir, report)
+        _finalize_report()
         return report
+
+    if not getattr(args, "resume", False):
+        ret_mod.create_or_validate_run_contract(out_dir, contract, resume=False)
+    ret_mod.append_run_status(out_dir, {
+        "event": "resume_requested" if getattr(args, "resume", False) else "started",
+        "effective_max_updates": effective_max_updates,
+        "effective_end_time_hkt": effective_end_time.isoformat(),
+    })
 
     teacher = load_teacher(args.teacher, device)
     dataset = collect_aux_dataset(
@@ -1203,6 +1291,7 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
         "n_train_frames": dataset["n_train_frames"],
         "teacher_file_sha256": dataset["teacher_file_sha256"],
     }
+    prov.attach_dataset_identity(out_dir, input_manifest, report["dataset"])
 
     snapshot_updates = snapshot_schedule(args.updates)
     aux_arm = run_aux_arm(
@@ -1219,7 +1308,12 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
         ppo_knobs=knobs,
     )
     report["aux_arm"] = {k: v for k, v in aux_arm.items()}
-    report["alpha_calibration"] = aux_arm["alpha_calibration"]
+    # The same wrapper the control uses to say "no auxiliary term here", so a
+    # reader comparing the two arms' reports finds one shape at one key.  The
+    # raw per-pair calibration stays available under ``calibration``.
+    report["alpha_calibration"] = prov.calibration_record(
+        arm="aux", calibration=aux_arm["alpha_calibration"],
+    )
 
     reference = build_retention_reference(aux_arm["snapshots"][0])
     report["retention"] = evaluate_retention(reference, aux_arm["snapshots"])
@@ -1227,12 +1321,13 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
 
     report["status"] = aux_arm["stop_reason"]
     report["arm_ran"] = True
-    _write_report(out_dir, report)
+    _finalize_report()
     return report
 
 
 def main() -> None:
     args = apply_mode_defaults(build_parser().parse_args())
+    args.argv = list(sys.argv)
     device = torch.device(args.device)
     report = run_experiment(args, device)
     print(
@@ -1240,7 +1335,9 @@ def main() -> None:
             {
                 "status": report["status"],
                 "arm_ran": report["arm_ran"],
-                "alpha": (report["alpha_calibration"] or {}).get("alpha"),
+                "alpha": (
+                    (report["alpha_calibration"] or {}).get("calibration") or {}
+                ).get("alpha"),
             }
         )
     )

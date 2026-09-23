@@ -8,7 +8,8 @@ Run from the repository root with::
 
 The only treatment is value-head-only warmup on a frozen BC ``body``/``policy``
 before unregularized scripted PPO. Snapshots are experimental; promotion is
-always false. New runs use the shared Phase 3 ``CURRENT_RUN_SCHEMA_VERSION``.
+always false. New runs use this harness's own ``WARMUP_RUN_SCHEMA_VERSION``,
+which is validated explicitly and moves only when THIS contract changes.
 """
 
 from __future__ import annotations
@@ -42,7 +43,6 @@ from qrokkun_ai.v5.tools.phase3_ranked_ppo_retention import (
     COLLECT_EPISODES,
     COLLECT_MAX_STEPS,
     COLLECT_SEED_START,
-    CURRENT_RUN_SCHEMA_VERSION,
     EPISODES_PER_UPDATE,
     EVAL_MAX_STEPS,
     EVAL_SEED_COUNT,
@@ -93,6 +93,35 @@ HELD_VALUE_FIT_COUNT = 30
 WARMUP_GENERATOR_SEED = 4242
 HELD_FIT_GENERATOR_SEED = 4343
 TOOL_NAME = "phase3_ranked_ppo_critic_warmup"
+
+# This harness keeps its own run-contract version rather than following the
+# retention arms'.  Its contract records the teacher by file hash only, so the
+# retention bump to 5 -- which binds the teacher's state-dict hash and
+# architecture -- describes nothing warmup writes.  Following that bump would
+# have refused every schema-4 warmup run.json already on disk while changing
+# nothing about what warmup actually records.  A future warmup contract change
+# bumps THIS constant, and the shared validators are told which version to
+# require rather than assuming the retention one.
+WARMUP_RUN_SCHEMA_VERSION = 4
+
+
+def require_matching_warmup_run_contract(
+    run_dir: Path, contract: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate an existing warmup ``run.json`` against the warmup schema."""
+    return ret_mod.require_matching_current_run_contract(
+        run_dir, contract, expected_schema_version=WARMUP_RUN_SCHEMA_VERSION,
+    )
+
+
+def create_or_validate_warmup_run_contract(
+    run_dir: Path, contract: dict[str, Any], *, resume: bool,
+) -> dict[str, Any] | None:
+    """Create or validate the warmup run contract at the warmup schema version."""
+    return ret_mod.create_or_validate_run_contract(
+        run_dir, contract, resume=resume,
+        expected_schema_version=WARMUP_RUN_SCHEMA_VERSION,
+    )
 
 
 def snapshot_schedule(final_update: int) -> list[int]:
@@ -750,7 +779,7 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
     knobs["value_bootstrap"] = False
     contract = {
         "format": 1,
-        "schema_version": CURRENT_RUN_SCHEMA_VERSION,
+        "schema_version": WARMUP_RUN_SCHEMA_VERSION,
         "tool": TOOL_NAME,
         "arm": args.arm,
         "inputs": {"init_checkpoint": init_prov, "teacher": teacher_prov},
@@ -773,16 +802,16 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
             "effective_end_time_hkt": resolved_end.isoformat(),
             "effective_max_updates": resolved_max,
         }
-        ret_mod.require_matching_current_run_contract(out_dir, contract)
+        require_matching_warmup_run_contract(out_dir, contract)
         ret_mod.rewind_run_to_archived_recovery(
             out_dir, selected, progress_filename="ppo_updates.jsonl", device=device,
         )
-        authorized = ret_mod.create_or_validate_run_contract(out_dir, contract, resume=True)
+        authorized = create_or_validate_warmup_run_contract(out_dir, contract, resume=True)
         args.effective_max_updates = authorized["effective_max_updates"]
         args.effective_end_time = ret_mod.dt.datetime.fromisoformat(authorized["effective_end_time_hkt"])
         effective_max_updates, effective_end_time = args.effective_max_updates, args.effective_end_time
     elif getattr(args, "resume", False):
-        authorized = ret_mod.create_or_validate_run_contract(out_dir, contract, resume=True)
+        authorized = create_or_validate_warmup_run_contract(out_dir, contract, resume=True)
         args.effective_max_updates = authorized["effective_max_updates"]
         args.effective_end_time = ret_mod.dt.datetime.fromisoformat(authorized["effective_end_time_hkt"])
         effective_max_updates, effective_end_time = args.effective_max_updates, args.effective_end_time
@@ -810,7 +839,7 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
         _write_report(out_dir, report)
         return report
     if not getattr(args, "resume", False):
-        ret_mod.create_or_validate_run_contract(out_dir, contract, resume=False)
+        create_or_validate_warmup_run_contract(out_dir, contract, resume=False)
     ret_mod.append_run_status(out_dir, {
         "event": "resume_requested" if getattr(args, "resume", False) else "started",
         "arm": args.arm,
