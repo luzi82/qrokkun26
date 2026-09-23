@@ -9,8 +9,79 @@ terminal survival secondary **indeterminate**。promotion: false。沒有
 checkpoint 被 promote。
 
 本文件是 canonical results journal。它只記錄已完成 artifacts 與獨立
-review，沒有啟動訓練、評估、resume、render 或 promotion，也沒有改
-runner、tests、preregistration 或 artifacts。
+audit artifact 的內容，沒有啟動訓練、評估、resume、render 或
+promotion，也沒有改 runner、tests、preregistration 或 artifacts。
+
+支援證據（machine-readable，與本文件同目錄）：
+
+``docs/journal/1790171597_player_v5_aux_control_independent_ppo_seed_replication_results.json``
+
+SHA-256
+``b265fa04410e0a60b39fa83e933cc511c3b4044f2fbac305340c09115a6a3b4d``
+（615529 bytes）。該 JSON 的每一個**被報告的**數值都是從 NAS RO bundle
+與 hash 核對過的本機 checkpoint 副本重算出來的，不是從任何散文轉抄；唯
+一例外是 ``audit_comparison`` 與 ``audit_provenance_gap_text`` 兩處明確
+標記為引用 ``audit_result.json`` 原值的欄位。本文件與該 JSON 衝突時以
+JSON 為準。
+
+前一次修訂（第一次 journal review 退回後）保留的修正：加入上述支援
+JSON、補上 30 個 ``d_s`` 與 t 分位數、補上 ``status.jsonl``／progress
+jsonl 雜湊、修正 terminal teacher 的方向敘述（agreement 較高、KL 較
+低）、撤回「兩臂皆通過全部 acceptance 字面條件」的說法、把「init
+content identity 已核對」與「啟動時實際 init 路徑未記錄故未核對」分
+開、並把未記錄欄位集中標記為 unavailable。
+
+第二次 journal review 退回後的六項更正（本次修訂一併保留）：
+
+1. 逐一載入 70 個 hash 核對過的本機 U checkpoint，記錄其頂層 ``source``
+   區塊（``python_version`` ``3.12.3``、``numpy_version`` ``2.5.3``、
+   ``device`` ``cuda:0``、``torch_version`` ``2.11.0+cu128``、逐檔
+   ``created_utc``），並說明那是 checkpoint 寫檔時的紀錄，不等於啟動環
+   境快照。host、GPU 型號／數量／driver、CUDA runtime／driver 仍為
+   unavailable。「Python 版本未記錄」的舊敘述據此撤回。
+2. 撤回「progress jsonl 逐 update 記錄 rollout seed window」的錯誤敘
+   述：兩條 jsonl 都沒有該欄位。改為說明 seed window 未逐 update 落
+   盤、可由鎖定排程確定性重建、僅在 checkpoint 的 update 上直接存在並
+   核對，並把它列為一項 completed-record 偏離。
+3. 把 u10000 的 ``checkpoint_kind=full_snapshot`` 明說為推導分類（來自
+   該欄位缺席），不是 packed 欄位，並在支援 JSON 內加上來源標記。
+4. 撤回「唯一差異在 primary CI 下界」的浮點敘述：實際上 t 分位數、
+   primary CI 下界與 terminal CI 兩端都有 ulp 級差異，同時撤回「50 位
+   十進位」的精度宣稱。
+5. 撤回「``audit_result.json`` 本身寫著 ACCEPTED」的說法：該檔只記
+   ``operational_integrity`` 為 ``pass``。
+6. 依上列更正重新產生支援 JSON，更新其 SHA-256 與 byte 數，並重跑自洽
+   檢查。
+
+本次修訂（第三次 journal review 退回後）同樣只改文件，不改 artifacts、
+不改 runner／tests、不寫 NAS、沒有訓練或評估，並保留上列全部修正。新
+增的五項更正：
+
+1. 把 rollout seed window 的稽核範圍從「U 內 35 個 checkpoint」擴大到
+   **RO 兩臂目錄下的每一個 checkpoint pack**。每臂有 **55** 個
+   ``ppo_*_update_<N>.pt``（N 為 ``{0, 10, 25, 50, 100, 200, 400, 600,
+   …, 10000}``），**全部**都帶 ``extra.rollout_seed_window``。因此
+   「直接落盤且已核對」的 update 數從每臂 35 提高為 aux **55**、control
+   **54**，而只能重建的 update 數從每臂 9965 降為 aux **9945**、control
+   **9946**。詳見下方「Rollout seed window 的證據層級」。
+2. 明確區分三件先前被混在一起的事：**checkpoint 檔案紀錄數**（每臂 55
+   筆）、**唯一對應 update 的直接證據數**（aux 55／control 54）與
+   **確定性重建**（10000 個 update 全部可算，但算出來不等於觀測到）。
+   u0 pack 記的是 ``130000``–``130007``，那是 **update-1 的 window**，
+   不是 u0 代入公式的 window（公式在 u=0 給 ``129992``–``129999``）。
+3. 把「``extra.checkpoint_kind`` 缺席即分類為 full_snapshot」這條推導規
+   則**明確限定在 U 之內**。全 55 個 pack 的逐檔核對顯示，兩臂缺該 key
+   的 update 精確是 ``{0, 10, 25, 50, 100, 200, 10000}``，正好等於
+   ``report.json`` 的 snapshot update 集合；規則若套到 U 以外會把六個早
+   期 diagnostic pack 也標成 full_snapshot。u10000 的既有推導標籤與其限
+   定不變。
+4. 撤回「RO 掛載是 SMB2」：實際是 **CIFS**，SMB dialect **3.1.1**
+   （``vers=3.1.1``）。撤回 aux recovery archive「約 20 GiB」的約略說
+   法：精確為 **19.43 GiB／20.86 GB**（20864895351 B）。
+5. 依上列更正重新產生支援 JSON（新增
+   ``checkpoint_pack_seed_window_inventory`` 與完整的逐檔
+   ``observed_update_to_window_source_list``），更新其 SHA-256 與 byte
+   數，並補上八條新的自洽檢查後重跑全部檢查。
 
 Preregistration:
 ``docs/journal/1789890630_player_v5_aux_control_independent_ppo_seed_replication_preregistration.txt``
@@ -28,9 +99,13 @@ window ``130000``–``209999`` 下，aux retention 相對無 aux 的 control，
 - Primary（U={3200,3400,…,10000}，n=30 seed-wise late-curve averages）：
   **support**（雙尾 paired Student-t 95% CI 下界 > 0）。
 - Terminal u10000 30-seed survival： **indeterminate**（CI 含 0）。
-- Terminal held teacher diagnostics：有非空 agreement／KL；aux 明顯高於
-  control。這是 secondary，**不得**單獨當 retention 證據，也不得覆蓋
-  primary。
+- Terminal held teacher diagnostics：兩臂 agreement／KL 皆非空。aux 的
+  **agreement 較高**（0.6678817868232727 對 0.1367487758398056，
+  差 +0.5311330109834671），aux 的 **teacher→student KL 較低**
+  （0.24085557460784912 對 0.8716331720352173，差
+  −0.6307775974273682）。「aux 明顯高於 control」不是正確敘述：KL 是
+  越低越接近 teacher。這是 secondary，**不得**單獨當 retention 證據，
+  也不得覆蓋 primary。
 - Promotion：**false**。support 不是 production 授權。
 
 Artifact roots
@@ -40,25 +115,82 @@ Artifact roots
 
 ``/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20260920-1724-aux-control-independent-ppo-seed11/{aux,control}``
 
-本文件分析用唯讀 NAS 副本：
+本文件分析用唯讀 NAS 副本（所有數值的來源）：
 
 ``/mnt/minion/88_minion_ro/projects/qrokkun26/runs/20260920-1724-aux-control-independent-ppo-seed11/{aux,control}``
 
-兩臂 ``report.json``／``run.json`` 的 SHA-256（RO 副本）：
+**更正**：該 RO 掛載先前寫成 SMB2 是錯的。它是 ``//192.168.0.88/minion``
+的 **CIFS** 唯讀掛載，協商到的 **SMB dialect 為 3.1.1**（掛載選項
+``vers=3.1.1``，由 ``findmnt -T /mnt/minion/88_minion_ro`` 讀出）。
+dialect 不影響任何量測值，只描述讀取 RO 鏡像所走的傳輸層。
 
-- aux ``run.json``
+``aux`` 是 DOS 保留裝置名，所以目錄列舉會把該項顯示
+成 mangled 8.3 別名 ``AHY9U3~9``；``.../aux`` 與 ``.../AHY9U3~9`` 經核
+對為同一個目錄（子項列舉相同、``run.json``／``report.json`` SHA-256 相
+同）。臂身分以 bundle 內容（``run.json`` 的 ``arm``／``tool``、
+``ppo_aux_*`` 檔名）認定，不以目錄名認定。
+
+兩臂 bundle 檔案的 SHA-256 與大小（RO 副本；本機 audit 副本逐檔重算後
+與 RO 相同）：
+
+- aux ``run.json`` 3250 B
   ``bd18ba1efc0bcf77f502def520193a8a268ae424496255d2f74ad2252670ec33``
-- aux ``report.json``
+- aux ``report.json`` 31758 B
   ``133faa1a0c6bd265da086f2a85f4c0680e51f837db530796476c8aca04434701``
-- control ``run.json``
+- aux ``status.jsonl`` 2043331 B
+  ``1805831e9284aef5562dc8a6bea467eb267cdd25fedac56ab99412df426886ef``
+- aux ``ppo_aux_updates.jsonl`` 13572376 B
+  ``8a155227a493fb10ab116d608d920a443e3b8178fb48b08f40721b8df9e614fb``
+- control ``run.json`` 2888 B
   ``fdf8038f1604b3277129b09c340259f5bb3e555189eb23e5a0fa1ec52c4210ad``
-- control ``report.json``
+- control ``report.json`` 41468 B
   ``956d27364a55426c457e87987e14ebee270eb65b254eeb5abf59e4ae925c5cd7``
+- control ``status.jsonl`` 2042308 B
+  ``f0073d0c783e04de8df0cb0a625a266d1967ffd8c4981f58834c99a959d2b094``
+- control ``ppo_updates.jsonl`` 5472107 B
+  ``c58c5f48b2a804008011593d26be18384d1df611aa01fb0306c79730d6b7f8a3``
 
-獨立 review
------------
+兩條 progress jsonl 各 10000 列、``update`` 連續 1–10000。逐列欄位集兩
+臂不同，且已與支援 JSON 的 ``per_row_fields`` 逐名對齊：
 
-獨立 review **ACCEPTED**。
+- aux 每列 **27** 個 key：``update``；``n_samples``／
+  ``n_retention_samples``；``optimizer_steps``；``total_loss``／
+  ``ppo_policy_loss``／``ppo_value_loss``／``approx_kl``／
+  ``clip_fraction``／``entropy``／``explained_variance``；
+  ``retention_hybrid_loss``／``retention_hard_ce``／
+  ``retention_soft_ce``／``retention_soft_kl``；``alpha``／
+  ``grad_ratio``／``g_ppo_norm``／``g_ret_norm``／
+  ``g_ret_weighted_norm``／``cosine_similarity``／巢狀
+  ``grad_alignment``；``scripted_survival_mean``（rollout survival）與巢
+  狀 ``rollout_censoring``（``censor_count``／``censor_rate``／
+  ``n_rollouts``）；``collect_wall_s``／``ppo_wall_s``／
+  ``total_wall_s``。
+- control 每列 **15** 個 key：``update``；``n_samples``；
+  ``optimizer_steps``；``total_loss``／``policy_loss``／``value_loss``／
+  ``approx_kl``／``clip_fraction``／``entropy``／
+  ``explained_variance``；``scripted_survival_mean`` 與巢狀
+  ``rollout_censoring``；``collect_wall_s``／``ppo_wall_s``／
+  ``total_wall_s``。control 沒有 retention 項，所以沒有 alpha／
+  grad_ratio／gradient-norm 欄位，且 PPO loss 的 key 名是
+  ``policy_loss``／``value_loss``，不是 aux 的 ``ppo_policy_loss``／
+  ``ppo_value_loss``。
+
+**更正**：先前寫「progress jsonl 逐 update 記錄 rollout seed window」是
+錯的。兩條 jsonl **都沒有** ``rollout_seed_window`` 這個 key，也沒有逐
+列時間戳。per-update 的 rollout seed window **未落盤**。它可由鎖定排程
+確定性重建（見下方「Rollout seed window 的證據層級」），但只有在有
+checkpoint pack 的 update（以及 aux 的 update-1 校準紀錄）上才是直接存
+在且已核對的事實。
+
+這 20000 列**沒有**抄進本文件或支援 JSON；兩者都只用上列精確路徑、
+SHA-256 與 byte 數綁定它們。每臂 U 內 35 個 checkpoint 的 file
+SHA-256、packed state-dict SHA-256、per-seed elapsed 與 censor 全文見支
+援 JSON ``checkpoints``；每臂全部 55 個 update-indexed pack 加上
+``ppo_*_final.pt`` 與 ``recovery.pt`` 的逐檔清單見支援 JSON
+``checkpoint_pack_seed_window_inventory``。
+
+獨立 audit artifact 記了什麼
+----------------------------
 
 Audit 路徑：
 
@@ -67,22 +199,222 @@ Audit 路徑：
 SHA-256
 ``4219a2971952bc8d0b48673e70c77b81d3c6db26786e9eb57d332ee2aad4783d``
 
-該 audit 的 ``operational_integrity`` 為 ``pass``，primary／terminal／
-alpha／frames 數字與下文一致（浮點結尾位在 CI 邊界可差 1 ulp；本
-journal 採用下方鎖定十進位寫法）。
+**更正**：先前寫「針對 run artifacts 的獨立 audit **ACCEPTED**」是沒有
+根據的。該 JSON 的頂層 key 只有 ``accounting``／``aux_grad_ratio``／
+``operational_integrity``／``primary``／``primary_censoring``／
+``primary_updates``／``provenance_gap``／``terminal``／
+``terminal_teacher``。它記的是 ``operational_integrity`` 為 ``pass``、一
+段 ``provenance_gap`` 字串，以及重算過的 primary／terminal／teacher／
+accounting／grad-ratio 數字。它**沒有** verdict／decision／status／
+review 這類欄位，檔內也不出現 ``ACCEPTED``／``REJECTED`` 字樣。因此本文
+件只陳述 ``operational_integrity == pass``，不把任何 accept／reject 結
+論歸給這個 artifact。
 
-非阻擋的 provenance 完整性限制（audit ``provenance_gap``，不推翻
-ACCEPTED）：run bundle **沒有**啟動 argv、host 名稱、Python／CUDA
-版本紀錄，也 **沒有** 把 ``INIT_CHECKPOINT`` 絕對路徑寫進
-``run.json``。``run.json`` 只記錄 hashes、``device=cuda``、
-``torch_version=2.11.0+cu128``、``dirty=false`` 與 code SHA。因此本
-文件不虛構 host／argv／Python／CUDA。鎖定的 NAS RO init 路徑仍以
-preregistration 為準；兩臂記錄的 file／state-dict SHA 與其鎖定值一致。
+Run 層級的 accept／reject 判定屬於 review 流程，不是這個 audit JSON 的
+內容；本倉庫沒有記錄該 run 的 review 結論的 artifact，所以本文件不宣稱
+有這樣的結論。本文件自身的 journal review 被退回兩次，上面「本次修訂」
+列出因此修正的項目。
+
+本文件沒有採信該 audit 的數字，而是從 RO bundle 重算了一遍。支援 JSON
+``audit_comparison`` 逐欄比對了 **63** 個欄位：**58** 個 bit-identical，
+**5** 個有差異。
+
+**更正**：先前寫「唯一差異在 primary CI 下界」是錯的。有差異的 5 個欄位
+是 primary 與 terminal 各自引用的 t 分位數（同一個值）、primary CI 下界
+以及 terminal CI 的**兩端**：
+
+=========================  =====================  =====================
+Field                      Recomputed here        audit_result.json
+=========================  =====================  =====================
+t_{0.975, 29}              2.0452296421327043     2.0452296421327034
+primary CI lower           1.6064242723937798     1.6064242723937805
+primary CI upper           4.79817890220904       4.79817890220904
+terminal CI lower          -9.937250159913017     -9.937250159913015
+terminal CI upper          1.8228057154689123     1.8228057154689097
+=========================  =====================  =====================
+
+差異全部限於 t 分位數與由它算出的 CI 端點，絕對量級 ≤ 2.7e-15（1–12
+ulp）。點估計 ``d̄``、sample SD、30 個 ``d_s``、censor 格數、frames／
+optimizer steps／duration、grad-ratio 摘要與 terminal teacher 診斷都
+bit-identical。primary CI 下界在兩種分位數下都 > 0、terminal CI 在兩種
+分位數下都含 0，所以兩個分類都不受影響。成因是兩邊用不同的數值程序反演
+Student-t CDF，不是對資料的分歧。
+
+Checkpoint 頂層 ``source`` 區塊記錄的執行環境
+----------------------------------------------
+
+本次修訂逐一 ``torch.load`` 了 **70** 個（35 updates × 2 臂）hash 核對
+過的本機 U checkpoint 副本，讀出其頂層 ``source`` 區塊。每個區塊都恰好
+七個欄位：``commit``／``created_utc``／``device``／``numpy_version``／
+``python_version``／``tool``／``torch_version``。70 個之中下列值**完全
+一致**：
+
+- ``python_version`` ``3.12.3``
+- ``numpy_version`` ``2.5.3``
+- ``device`` ``cuda:0``
+- ``torch_version`` ``2.11.0+cu128``
+- ``commit`` ``bd7443cd7fbbd72fcb6243afc66dc0bf59025c01``（與鎖定 code
+  SHA 相同）
+
+``tool`` 依臂不同（aux ``phase3_ranked_ppo_retention_aux``、control
+``phase3_ranked_ppo_retention``），與各自 ``run.json`` 的 ``tool`` 相
+符。``created_utc`` 是**逐 checkpoint** 的值，兩臂都隨 update 嚴格遞增，
+且都是 UTC：aux 從 ``2026-09-21T07:22:53.834757+00:00``（u3200）到
+``2026-09-22T22:32:51.200816+00:00``（u10000），control 從
+``2026-09-21T02:28:53.379729+00:00`` 到
+``2026-09-22T18:11:03.803373+00:00``。70 個逐檔值全文見支援 JSON
+``checkpoint_source_provenance.created_utc_by_arm_and_update``。
+
+**這些是 checkpoint 寫檔時的紀錄，不等於啟動環境快照。** bundle 內沒有
+任何 argv 或環境 dump，所以這些值說的是「每次存檔時該行程自報的狀態」。
+它們只在「整個 run 是單一未中斷行程」的前提下才能當啟動事實的間接證據；
+``status.jsonl`` 只有一個 ``started`` 事件、``update`` 連續 1–10000，與該
+前提一致，但那仍是推論而非啟動紀錄。
+
+``device`` 這一項比 ``run.json`` 的 ``provenance.device == "cuda"`` 精
+確：checkpoint 記到 ``cuda:0``，固定了寫檔時用的 CUDA device ordinal，
+但仍然沒有 GPU 型號、沒有可見裝置數量、沒有 driver 版本。
+``torch_version`` 的 ``+cu128`` 是 wheel 的 local-version tag，不是已記錄
+的 CUDA runtime 版本，本文件不當它是。
+
+未記錄／無法取得的欄位
+----------------------
+
+以下欄位在 RO bundle、checkpoint ``source`` 區塊與本機 audit artifacts
+中 **都沒有證據**，一律標記為 unavailable／unrecorded，**不得**虛構：
+
+- 啟動 argv：**unrecorded**。兩臂的 ``run.json``、``report.json``、
+  ``status.jsonl``、progress jsonl、``stdout.log``、``stderr.log`` 都沒
+  有 argv（也沒有任何 ``--init-checkpoint``／host／GPU／CUDA runtime 字
+  樣）。``status.jsonl`` 每列只有 ``at_hkt``／``event``／
+  ``effective_*``／``update`` 這類欄位。
+- 啟動環境快照：**unrecorded**。沒有任何 start-of-run 的環境 dump；上節
+  的 interpreter／numpy／torch／device ordinal 都是逐 checkpoint 的寫檔
+  紀錄，不是啟動快照。
+- host 名稱：**unrecorded**。run bundle 與 checkpoint ``source`` 區塊都
+  沒有任何 host 身分。
+- GPU 型號：**unrecorded**。只有 ``provenance.device == "cuda"`` 與
+  checkpoint 的 ``device == "cuda:0"``，兩者都沒有指出是哪張卡。
+- GPU 數量：**unrecorded**。``cuda:0`` 只說明寫檔時用 device 0，沒有記錄
+  當時可見幾張裝置。
+- GPU driver 版本：**unrecorded**。
+- CUDA runtime 版本：**unrecorded**。torch wheel 的 ``+cu128``
+  local-version tag **不是**已記錄的 CUDA runtime 版本。
+- CUDA driver 版本：**unrecorded**。
+- per-update rollout seed window：**未逐 update 落盤**（見下節）。
+- 啟動時實際傳給 ``--init-checkpoint`` 的絕對路徑：**unrecorded**（見下
+  面 content-identity 與 launch-path 區分那節）。
+- teacher state-dict SHA-256：**unrecorded**。``run.json``／
+  ``report.json`` 只有 teacher file SHA-256。另一份 journal 的 GB10B 核
+  對曾對同一 file hash 量到一個 state-dict hash；那是該次核對的值，不
+  是本 run 的紀錄，本文件 **不回填**。
+- alpha 校準的 8 組個別 matched-minibatch ``||g_ppo||``／``||g_ret||``：
+  **unrecorded**。artifacts 只寫了聚合平均、cosine 與 alpha；8 組個別
+  norms 從未落盤，除了重跑校準無法回復，而本文件無權重跑。
+- ``88_minion_rw`` run 目錄的現況：**未從本主機核對**。那些絕對路徑只
+  是 ``report.json`` 內的字串；本文件只讀 RO 鏡像。
+- 201 個 recovery archive 的逐檔內容 SHA：**未計算**（存在性、精確 N
+  集合、數量與大小已直接核對；僅 aux 一側就 **19.43 GiB／20.86 GB**
+  （20864895351 B），且無 hash 核對過的本機副本）。這 201 個檔也
+  **沒有被打開**，所以它們可能含有的 rollout seed 不計入下節的 seed
+  window 計數（範圍界定見下節與支援 JSON
+  ``checkpoint_pack_seed_window_inventory.not_inspected``）。
+
+（audit ``provenance_gap`` 記了大致同一組缺口。它的字串照原文引用，但已
+部分被上節取代：interpreter 與 numpy 版本其實有記錄，只是記在 checkpoint
+pack 裡而不是 ``run.json``；host／GPU／CUDA runtime 與 driver／啟動路徑
+的缺口仍然成立。）
+
+Rollout seed window 的證據層級
+-------------------------------
+
+**更正（第二次 review）**：先前把 rollout seed window 列為 progress
+jsonl 的逐列欄位是錯的。兩條 jsonl 都沒有該欄位。
+
+**更正（本次 review）**：先前只稽核了 U 內 35 個 checkpoint，因而把
+「直接落盤且已核對」的範圍說得太窄。本次對 **RO 兩臂目錄下的每一個
+checkpoint pack** 逐一 hash 核對後載入，範圍與結果如下。
+
+**稽核範圍**：每臂打開 **57** 個檔：55 個 ``ppo_*_update_<N>.pt``、1 個
+``ppo_*_final.pt``、1 個 ``recovery.pt``。每個檔都先確認本機 audit 副本
+的 SHA-256 與 byte 數與 RO 相同，才從本機副本讀取。**沒有打開**每臂 201
+個 ``recovery_archives/update_<N>.pt``（19.43 GiB／20.86 GB，無 hash 核
+對過的本機副本），理由與上節「逐檔內容 SHA 未計算」相同。
+
+**三個不可混用的量**：
+
+===========================  ==========  ==========
+量                           Aux         Control
+===========================  ==========  ==========
+checkpoint 檔案紀錄數（檔）  55          55
+唯一對應 update 直接證據數   55          54
+只能確定性重建的 update 數   9945        9946
+===========================  ==========  ==========
+
+1. **checkpoint 檔案紀錄數**數的是**檔案**：每臂 55 個
+   update-indexed pack，N 精確等於
+   ``{0, 10, 25, 50, 100, 200, 400, 600, …, 10000}``，**全部 55 個**都
+   帶 ``extra.rollout_seed_window``，且每個 window 都是**連續 8 個**
+   seed 的完整列舉（不是端點對）。缺漏數為 0。
+2. **唯一對應 update 直接證據數**數的是 **update**：某個 artifact 直接
+   落盤了「鎖定排程指派給該 update 本身」的 window。55 個 pack 之中
+   **54 個（全部 u≥1）**符合，u0 那個不符合（見下）。aux 另外有被消耗
+   掉的 update-1 校準 window，所以 aux 55、control 54。
+3. **確定性重建**覆蓋全部 10000 個 update，但重建值是**算出來的，不是
+   觀測到的**，不得說成「已核對的落盤紀錄」。扣掉第 2 列後，沒有對應
+   直接落盤觀測的 update 是 aux 9945、control 9946（55+9945 =
+   54+9946 = 10000）。
+
+**u0 pack 帶的是 update-1 的 window**：
+兩臂的 ``ppo_*_update_0.pt`` 都有 ``extra.update == 0``，但其
+``extra.rollout_seed_window`` 是 ``130000``–``130007``，也就是
+**update 1 的 window**；鎖定公式在 u=0 應給 ``129992``–``129999``。它是
+update 1 跑之前寫下的 pre-training snapshot，欄位記的是「即將被消耗的
+window」。因此它是一筆落盤的 window 紀錄，但**不是對應紀錄**：既不能讀
+成 u0 有 window（u0 不抽 rollout），也**不**單獨算成 update 1 的直接證
+據（欄位標著 update 0，沒有說 update 1 實際消耗了什麼）。
+
+**為什麼 aux 比 control 多一個**：
+aux 在 update-1 的 on-policy rollout 上校準一次 alpha，且該次**實際消耗**
+的 window 被落盤了三處：``report.json`` 的
+``alpha_calibration.rollout_seed_window``、每個 aux pack 內同值的
+``extra.alpha_calibration``、以及 aux ``recovery.pt`` 的 ``calib_seeds``
+與 ``first_update_rollouts[].seed``，三處都是 ``130000``–``130007``。所
+以 update 1 對 aux 是直接觀測到的對應 update。control 沒有校準步驟、任何
+地方都沒有 ``alpha_calibration``，其 ``recovery.pt`` 也**沒有**
+``calib_seeds``／``first_update_rollouts``／``last_update_rollouts``
+任一 key，所以 update 1 對 control 不是直接觀測。
+
+**不增加計數的重複紀錄**：
+``ppo_*_final.pt``（兩臂各一）packed ``update`` 為 10000、window
+``209992``–``209999``、state-dict SHA-256 與 u10000 pack 相同，只是 file
+SHA-256 與 ``created_utc`` 不同；aux ``recovery.pt`` 的
+``last_update_rollouts[].seed`` 同樣是 ``209992``–``209999``。這些都只是
+**重述已被證據涵蓋的 update**，不提高上表第 2 列。
+
+**範圍限定**：
+上表的計數**限定**在「checkpoint packs ＋ aux 校準紀錄」這個範圍內。aux
+``recovery.pt`` 顯示 recovery 格式會存 calibration seeds 與首／末 update
+的 rollout seed，所以未打開的 201 個 aux recovery archive 原則上還可能在
+其他 50 的倍數上提供對應觀測（control recovery 沒有這些 key）。因此
+「9945／9946」對上述範圍是精確值，對未打開的 aux recovery archive 而言
+是**上界**。
+
+全程 window ``130000``–``209999`` 是由
+``rollout_seed_window(u) = [130000+(u−1)*8, 130000+u*8−1]`` 在
+u=1…10000 推得的，不是某個落盤欄位。逐檔的 (update, window, 來源檔,
+來源檔 SHA-256, 來源欄位, 證據類別) 全文見支援 JSON
+``rollout_seed_window_provenance.observed_update_to_window_source_list``
+與 ``checkpoint_pack_seed_window_inventory``。
 
 Run 身份與契約核對
 ------------------
 
-兩臂皆通過 preregistration acceptance 字面條件：
+下列條件逐條從 artifacts 核對通過。**但本文件不再宣稱「兩臂皆通過全部
+acceptance 字面條件」**：preregistration 的 acceptance 還包含
+「``INIT_CHECKPOINT`` 為鎖定的 NAS RO 絕對路徑」，而 run bundle 沒有記錄
+任何 init 路徑，該條**無法從 artifacts 評定**，因此既不算通過也不算失敗
+（詳見下方 content identity／launch path 的區分）。
 
 - ``schema_version === 4``（精確整數）；``format`` 1；
   ``no_promotion`` true；``promotion`` false。
@@ -94,14 +426,24 @@ Run 身份與契約核對
   ``effective_end_time_hkt === 2099-12-31T23:59:00+08:00``。
 - ``provenance.git_commit``
   ``bd7443cd7fbbd72fcb6243afc66dc0bf59025c01``；``dirty === false``。
-- Init checkpoint：architecture ``player_ranked_topk``；file SHA-256
+- Init checkpoint **content identity：已核對**。architecture
+  ``player_ranked_topk``；file SHA-256
   ``decc50ba2f781f243814bb0c984499bc6bf3ce66f5bcc9cbf22ae1acd3fd545a``；
   state-dict SHA-256
   ``d88c96213f9064658760d598a563d43df5a847a228a313837f00982bc3151b0f``。
+  兩者與 preregistration 鎖定值逐字相同，且 U 內每個 checkpoint 的
+  ``parent_file_sha256``／``parent_state_dict_sha256`` 也是這兩個值。
   Player checkpoint pack schema 仍為 1。
+- Init checkpoint **launch path：未核對**。``run.json`` 只寫 hashes，
+  沒有寫啟動時實際使用的絕對路徑。因此可以說「起點的內容就是那個鎖定
+  的 seed-5 資產」，**不能**說「已證實啟動時讀的是
+  ``/mnt/minion/88_minion_ro/.../seed5/seed5.pt`` 這個路徑」。鎖定路徑的
+  唯一依據是 preregistration，那是契約意圖，不是觀測到的啟動事實。任何
+  同內容的副本都會產生一樣的 hash 紀錄。
 - Teacher file SHA-256
-  ``1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1``。
-  ``run.json`` 仍無 teacher state-dict SHA-256，本文件不回填。
+  ``1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1``
+  （與鎖定值相同）。``run.json`` 仍無 teacher state-dict SHA-256，本文件
+  不回填（見上節）。
 - Dataset identity
   ``2521bd12ae8b630e65f2645132bde4952fe8f60783ad0e87648ed2af688e558a``
   （240 ep／211 train 146688 frames／29 held 20300 frames）。
@@ -114,40 +456,95 @@ Run 身份與契約核對
   頂層 ``status === max_updates``。aux ``arm_ran=true``；control
   ``control_ran=true``。
 - Initial gate：兩臂 PASS（mean／median ≥ 25.0 s）。
-- U 內 35 個 periodic Player checkpoints 存在（aux
-  ``ppo_aux_update_{u}.pt``、control ``ppo_update_{u}.pt``）；u10000
-  為 full snapshot，teacher diagnostics 非空。
-- recovery_archives：兩臂各 201 個 ``update_<N>.pt``（每 50 updates，
-  含 0 與 10000），與 periodic model 的 200 間隔分開。
+- U 內全部 35 個 Player checkpoints 存在（aux
+  ``ppo_aux_update_{u}.pt``、control ``ppo_update_{u}.pt``）。每個
+  checkpoint 的 ``state_dict_sha256`` 都用同一個 ``state_dict_sha256()``
+  對載入後的 tensors 重算並相符。
+- 每臂 update-indexed pack 共 **55** 個（N 為
+  ``{0, 10, 25, 50, 100, 200, 400, 600, …, 10000}``），全部帶
+  ``extra.rollout_seed_window``；u≥1 的 54 個都等於
+  ``[130000+(u−1)*8, 130000+u*8−1]``，u0 那個帶的是 update-1 的 window
+  （見「Rollout seed window 的證據層級」）。
+- Checkpoint kind：34 個 u<10000 的 U pack 都有
+  ``extra.checkpoint_kind == "periodic_model_only"``（packed 欄位，直接
+  讀到的事實）。**u10000 的 pack 根本沒有 ``extra.checkpoint_kind`` 這個
+  key**，兩臂都一樣；任何 pack 內也都不存在 ``full_snapshot`` 這個字串。
+  本文件把 u10000 標成 ``full_snapshot`` 是**推導分類**（規則：該欄位缺
+  席即分類為 full_snapshot），不是 packed 欄位。**該規則刻意只適用於
+  U**：本次對全部 55 個 pack 的逐檔核對顯示，兩臂缺該 key 的 update 精確
+  是 ``{0, 10, 25, 50, 100, 200, 10000}``（``ppo_*_final.pt`` 也缺），而
+  這組**正好等於** ``report.json`` 的 snapshot update 集合。也就是說「缺
+  該 marker」對應的是「以 snapshot 而非 periodic model-only 方式寫入」，
+  這正是 u10000 那個推導標籤的全部意思；若把規則套到 U 以外，會把 0／10
+  ／25／50／100／200 這六個早期 diagnostic pack 也標成 full_snapshot。
+  支援 JSON 為每個
+  checkpoint 記了 ``packed_checkpoint_kind``、
+  ``packed_checkpoint_kind_field_present``、
+  ``checkpoint_kind_classification`` 與來源標記
+  ``checkpoint_kind_classification_source``（``packed_field:...`` 對
+  ``derived:absence_of_extra.checkpoint_kind``），另有
+  ``checkpoint_kind_classification`` 區塊記錄推導規則、範圍限定與全 run
+  的證據（``run_wide_evidence``）。
+  **限定**：除了那個缺席的 key，u10000 pack 的頂層與 ``extra`` key 集與
+  periodic pack **完全相同**，所以 ``full_snapshot`` 這個標籤**不得**被
+  讀成「該檔多存了 optimizer／scheduler／RNG state」。它只表示 runner 沒
+  把這個 pack 標記為 periodic model-only 寫入；另外 u10000 是 U 之中唯一
+  有 ``report.json`` snapshot 條目的 update，且該條目的 teacher
+  diagnostics 非空。
+- recovery_archives：兩臂各 **201** 個 ``update_<N>.pt``。這是對 RO 兩個
+  ``recovery_archives`` 目錄**直接列舉**得到的，不是從 runner 的 stride
+  常數推論：201 個檔名全部符合 ``update_<N>.pt``，N 集合精確等於
+  ``{0, 50, 100, …, 10000}``（每 50，含 0 與 10000），與 periodic model
+  的 200 間隔分開。完整 N 清單與逐檔 byte 數見支援 JSON
+  ``recovery_archives``（aux 合計 20864895351 B ＝ **19.43 GiB／
+  20.86 GB**、control 合計 653726389 B；逐檔內容 SHA 未計算、檔案未打
+  開，理由見上節）。
 
-唯一 treatment 仍是 aux 在鎖定 PPO 上加入 frozen-alpha Phase-2 hybrid
+Treatment 是 aux 在鎖定 PPO 上加入 frozen-alpha Phase-2 hybrid
 BC-retention（target gradient ratio 0.15）；control 沒有 retention
-loss。這是 update／episode-matched 比較，不是 equal-frame 或
-equal-optimizer-step 比較。
+loss。上面逐條核對過的契約項（commit／seed／rollout window／init 與
+teacher 與 dataset identity／eval seeds 與 caps／horizon）在兩臂完全相
+同，所以訓練目標是唯一**經核對**的設計差異；但兩臂是兩支不同的 tool
+module（``phase3_ranked_ppo_retention_aux`` 對
+``phase3_ranked_ppo_retention``），所以這句說的是訓練目標層面，不是宣稱
+兩邊走 byte-identical 的 code path。這是 update／episode-matched 比較，
+不是 equal-frame 或 equal-optimizer-step 比較。
 
 時間（``status.jsonl`` HKT）
 ----------------------------
 
+兩臂 ``status.jsonl`` 皆 10002 列：首列 ``started``、中間 ``update``
+連續 1–10000、末列 ``max_updates`` 且 ``completed_update == 10000``。
+
 - aux started ``2026-09-20T17:24:19.893129+08:00``，
   max_updates ``2026-09-23T06:32:35.767531+08:00``
-  （audit duration 220095.874402 s）。
+  （重算 wall clock 220095.874402 s）。
 - control started ``2026-09-20T17:25:20.753105+08:00``，
   max_updates ``2026-09-23T02:09:59.131821+08:00``
-  （audit duration 204278.378716 s）。
+  （重算 wall clock 204278.378716 s）。
 
-共同 update-0 deterministic eval（30 seeds、0 censor；兩臂相同）：
-mean ``36.268888888888036`` s、median ``38.59999999999909`` s。
+共同 update-0 deterministic eval（30 seeds、0 censor）：mean
+``36.268888888888036`` s、median ``38.59999999999909`` s。兩臂的
+update-0 ``evaluation`` 物件逐欄 bit-identical，且 update-0 state-dict
+SHA-256 等於鎖定 init 的 state-dict SHA-256。
 
 Aux alpha 與 realized gradient ratio
 ------------------------------------
 
 Update-1 on-policy window ``130000``–``130007`` 校準一次並凍結：
 
-- ``alpha = 0.3352400983844746``
-- target_ratio 0.15；8 matched minibatches；n_samples =
-  n_retention_samples = 4096；minibatch 512
-- mean ``||g_ppo||`` 0.7810657173395157；mean ``||g_ret||``
-  0.34948043152689934；calibration cosine −0.05258106510154903
+- ``alpha = 0.3352400983844746``；achieved ``grad_ratio``
+  0.1499999937874614（target 0.15）
+- 8 matched minibatches；n_samples = n_retention_samples = 4096；
+  minibatch 512；calibration rollout seed window 精確 130000–130007
+- **聚合值**：mean ``||g_ppo||`` 0.7810657173395157；mean ``||g_ret||``
+  0.34948043152689934；mean weighted ``||α·g_ret||``
+  0.11715985424852637（= α × mean ``||g_ret||``）；calibration cosine
+  −0.05258106510154903
+- 那 **8 組個別 pair 的 norms：unrecorded**。artifacts 只有上列聚合值；
+  preregistration 要求的「八 pair 全文」無法從 artifacts 補齊，也不得
+  編造（見「未記錄／無法取得的欄位」）。
+- alpha 在全部 10000 列 progress jsonl 中只有這一個相異值，確認凍結。
 - 歷史 alpha ``0.38932983697041385`` **沒有**被使用
 
 jsonl 全程 realized ``grad_ratio``（機制描述，不進 primary）：
@@ -183,37 +580,72 @@ Primary estimator
 3. ``d̄ = mean_s d_s``；n=30 paired Student-t 雙尾 95% CI。
 4. 禁止把 35 個 checkpoint 當獨立樣本；禁止刪種子；禁止改 U。
 
-結果：
+結果（全部由本次修訂從 RO packed ``eval_summary.per_seed`` 重算）：
 
-- n = 30
+- n = 30、df = 29
 - ``d̄ = +3.20230158730141`` s
-- sample SD ``s_d = 4.273837941612275``
+- sample SD ``s_d = 4.273837941612275``（分母 n−1）
+- t 分位數 ``t_{0.975, 29} = 2.0452296421327043``。方法：以 regularized
+  incomplete beta 建的 Student-t CDF，用 ``mpmath.findroot`` 在 **60 位十
+  進位工作精度**下求根，得
+  ``2.045229642132704298193772221507074957687``（40 位有效位），再**四捨
+  五入到最近的 IEEE-754 double**，即上列值。存下來的 double 只有約 16 位
+  有效十進位，**不是** 50 或 60 位；先前寫「50 位十進位」是錯的精度宣
+  稱，已撤回。CI 端點本身是用一般 double 精度算的，所以其末一兩位會隨反
+  演程序在數 ulp 的層級變動（見上面與 audit 的比對）。
 - 雙尾 paired Student-t 95% CI
   ``[1.6064242723937798, 4.79817890220904]``
-- 分類：**support**
+- 分類：**support**（CI 下界 > 0）
 
-Censor caveat：primary 視窗內 aux 有 **一格** 截尾（u9200、seed
-3025；packed elapsed 為 cap 70 s），control **零** 截尾。Censor 不改
-primary 公式，但兩臂截尾結構不同，**support 不得被說成未截尾生存
-優勢**。Terminal u10000 兩臂皆 0 censor。
+30 個 ``d_s``（秒，aux−control 的 35 點曲線平均；完整值同時在支援 JSON
+``primary.per_seed_curve_difference_d_s``）：
+
+========  ====================  ========  ====================
+Seed      d_s                   Seed      d_s
+========  ====================  ========  ====================
+3000      -4.442380952380815    3015      -9.399999999999622
+3001      0.3947619047619134    3016      6.375238095237747
+3002      4.451904761904498     3017      3.934761904761763
+3003      8.02523809523769      3018      7.356190476190119
+3004      5.524761904761597     3019      2.441904761904578
+3005      10.61952380952333     3020      0.8157142857142222
+3006      -5.367142857142613    3021      4.589047619047271
+3007      10.240476190475636    3022      3.459047619047318
+3008      4.462857142856965     3023      5.8880952380949285
+3009      4.046190476190339     3024      3.048571428571289
+3010      2.3771428571427244    3025      5.87285714285681
+3011      2.2980952380951285    3026      6.031904761904465
+3012      2.4661904761903535    3027      0.37285714285723687
+3013      1.5004761904760429    3028      6.291904761904404
+3014      -0.3890476190476149   3029      2.7819047619045962
+========  ====================  ========  ====================
+
+30 個 ``d_s`` 中 4 個為負（3000、3006、3014、3015）。這是 30 個 eval
+seed 的曲線平均差，不是 35 個獨立 replication。
+
+Censor caveat：primary 視窗共 35×30 = 1050 格／臂。aux 有 **一格** 截尾
+（u9200、seed 3025；packed elapsed ``69.99999999999731`` s，即 70 s
+cap），control **零** 截尾。Censor 不改 primary 公式，但兩臂截尾結構不
+同，**support 不得被說成未截尾生存優勢**。Terminal u10000 兩臂皆
+0 censor。
 
 Secondary：terminal survival
 ----------------------------
 
 u10000 deterministic eval、seeds 3000–3029、0 censor：
 
-=================  ==============  ==============
-Metric             Aux             Control
-=================  ==============  ==============
-mean               36.61499999999914 s  40.672222222221194 s
-median             39.308333333332385 s 39.949999999999015 s
-population std     14.774494006500749 s 8.250927370249242 s
-=================  ==============  ==============
+=================  ====================  ====================
+Metric             Aux                   Control
+=================  ====================  ====================
+mean               36.61499999999914 s   40.672222222221194 s
+median             39.308333333332385 s  39.949999999999015 s
+population std     14.774494006500749 s  8.250927370249242 s
+=================  ====================  ====================
 
-Per-seed (aux−control) paired 95% t：mean
-``-4.057222222222053`` s，CI
-``[-9.937250159913017, 1.8228057154689123]``。分類：
-**indeterminate**。這是單一 checkpoint，不是 primary。
+Per-seed (aux−control) paired 95% t：mean ``-4.057222222222053`` s、
+sample SD ``15.747004022861475``、同一 ``t_{0.975, 29} =
+2.0452296421327043``、CI ``[-9.937250159913017, 1.8228057154689123]``。
+分類：**indeterminate**（CI 含 0）。這是單一 checkpoint，不是 primary。
 
 Secondary：terminal teacher diagnostics（held）
 ----------------------------------------------
@@ -227,8 +659,18 @@ agreement          0.6678817868232727       0.1367487758398056
 teacher→student KL 0.24085557460784912      0.8716331720352173
 =================  =======================  =======================
 
+方向（差值 aux−control）：agreement ``+0.5311330109834671``（aux 較
+**高**）、teacher→student KL ``-0.6307775974273682``（aux 較 **低**）。
+兩個方向都指向 aux 較貼近 teacher，但表述必須分開：agreement 越高越貼
+近，KL 越低越貼近。不得把兩者一起寫成「aux 高於 control」。
+
+兩臂的 ``by_elapsed_bucket`` ``60+`` 桶皆為 ``null``（該桶無 held
+樣本）；其餘 bullet／elapsed 桶的值見支援 JSON
+``secondary_terminal_teacher_diagnostics``。
+
 Harness 舊 retention 物件（aux ``retention_pass=true``、control
-``retention_pass=false``）現在對應 u10000 full snapshot，但仍 **不是**
+``retention_pass=false``）現在對應 u10000（依上文推導分類為
+``full_snapshot``），但仍 **不是**
 本 confirmatory 契約的 primary，也不得單獨當 promotion／retention
 裁決。不得用歷史 u2200／u3107 數字填補。
 
@@ -248,14 +690,67 @@ Update            Aux agr.    Aux KL      Ctrl agr.   Ctrl KL
 
 精確值見各臂 ``report.json`` snapshots。這不是 primary。
 
+相對 preregistration「完成後必記錄的欄位」的偏離
+-------------------------------------------------
+
+Preregistration 的「完成後必記錄的欄位」清單有幾項無法照字面滿足。逐項
+說明，全部 **非阻擋**（不影響 primary 的有效性，但必須明說）：
+
+1. **完整 argv、host、Python、CUDA 版本**：argv、host、GPU 型號／數量／
+   driver、CUDA runtime／driver 版本 runner 沒寫，事後無法補，標記
+   unavailable、不虛構。Python 與 numpy 版本**其實有記錄**，但記在
+   checkpoint pack 的 ``source`` 區塊而不是 ``run.json``：70 個 U
+   checkpoint 一致為 ``python_version`` ``3.12.3``、``numpy_version``
+   ``2.5.3``、``torch_version`` ``2.11.0+cu128``、``device`` ``cuda:0``。
+   那是 checkpoint 寫檔紀錄，不是啟動快照，這個限定必須一起帶著。
+2. **鎖定的 NAS RO ``INIT_CHECKPOINT`` 絕對路徑 + 啟動時重算 SHA**：
+   bundle 有 init file／state-dict SHA-256，沒有路徑。因此「
+   ``INIT_CHECKPOINT`` 是那個鎖定絕對路徑」這條 acceptance **無法評定**。
+   已核對的是 content identity；launch path 明說未核對，不改寫成通過。
+3. **teacher state-dict SHA-256**：runner 只寫 teacher file SHA-256。標記
+   unrecorded，不用其他 journal 的 GB10B 值回填。
+4. **alpha 校準全文（八 pair、norms、cosine）**：只有聚合平均、cosine、
+   ratio 與 alpha 落盤。聚合值逐字記錄；8 組個別 norms 標記 unrecorded。
+5. **每 update 的 losses／KL／clip／entropy／EV／optimizer steps／
+   rollout survival／frames／censor**：完整存在於兩條 progress jsonl，但
+   **刻意不**抄進本文件或支援 JSON（否則要內嵌 20000 列）。改以精確 RO
+   路徑、SHA-256、byte 數、列數、``update`` 連續性與完整逐列欄位清單綁
+   定，見上方「Artifact roots」與支援 JSON ``progress_jsonl_binding``；該
+   處的 ``content_description`` 與 ``per_row_fields`` 已逐名對齊，不多列
+   也不少列。
+6. **每 update 的 rollout seed window**：**未逐 update 落盤**。兩條
+   progress jsonl 都沒有該欄位，所以 aux 9945、control 9946 個 update
+   沒有對應的逐 update 紀錄。已改為：由鎖定排程
+   ``rollout_seed_window(u) = [130000+(u−1)*8, 130000+u*8−1]`` 確定性重
+   建，並明說重建值是算出來的；直接落盤且已核對的，是每臂全部 **55** 個
+   update-indexed checkpoint pack 的 ``extra.rollout_seed_window``（其中
+   u≥1 的 54 個對應到自己的 update，u0 那個帶的是 update-1 的 window），
+   加上 aux 被消耗的 update-1 校準 window ``130000``–``130007``，合計
+   唯一對應 update 直接證據 aux **55**、control **54**。檔案紀錄、唯一
+   對應 update 證據與確定性重建三者已分開陳述，逐檔來源清單見支援 JSON。
+7. **u10000 的 checkpoint kind**：u10000 的 pack 沒有
+   ``extra.checkpoint_kind``，任何 pack 也沒有存 ``full_snapshot`` 字串；
+   全 run 缺該 key 的 update 精確是 ``{0, 10, 25, 50, 100, 200, 10000}``，
+   等於 ``report.json`` 的 snapshot update 集合。已改為明說
+   ``full_snapshot`` 是由該欄位缺席推導出的分類、該規則只適用於 U，並在
+   支援 JSON 逐 checkpoint 標記來源與記錄全 run 證據。
+8. **``recovery_archives`` 實際寫入的 N**：已滿足，且是對 RO 目錄直接列
+   舉出 201 個 N，不是從 code 的 stride 推論。
+
 結論
 ----
 
 1. 本配對在鎖定 commit 上兩臂皆 ``max_updates`` 完成 10000 updates，
    schema v4／seed 11／window 130000／terminal teacher diagnostics／
-   dataset／init／teacher hashes 與 preregistration 相符。獨立 review
-   ACCEPTED；argv／host／CUDA 與 init 絕對路徑的缺失是非阻擋
-   provenance 限制。
+   dataset／init／teacher hashes 與 preregistration 相符。獨立 audit
+   artifact 記的是 ``operational_integrity == pass``；它沒有 accept／
+   reject 欄位，本文件也不宣稱有 run 層級的 ACCEPTED 判定。**不宣稱**全
+   部 acceptance 字面條件都通過：init 路徑那一條因為沒有紀錄而無法評定。
+   argv／host／GPU 型號與數量與 driver／CUDA runtime 與 driver／init 絕
+   對路徑的缺失是非阻擋 provenance 限制；Python 3.12.3／numpy 2.5.3／
+   torch 2.11.0+cu128／device cuda:0 有記錄，但那是 checkpoint 寫檔紀錄
+   而非啟動快照。init 的 content identity 已核對、launch path 未核對，兩
+   者不可混為一談。
 
 2. Primary 支持 aux 在 seed-averaged 後段 elapsed 上高於 control
    （+3.20230158730141 s；CI 不含 0）。這是 30 個 eval seed 的曲線
@@ -264,9 +759,12 @@ Update            Aux agr.    Aux KL      Ctrl agr.   Ctrl KL
 3. Terminal survival 不支持同一方向（點估計為負、CI 含 0）。不得用
    terminal 否證或改寫 primary，也不得用 primary 宣稱 terminal 優勢。
 
-4. Terminal teacher：aux agreement 0.6678817868232727／KL
-   0.24085557460784912，control 0.1367487758398056／KL
-   0.8716331720352173。禁止僅憑 survival 宣稱 retention。
+4. Terminal teacher：aux agreement 0.6678817868232727 **高於** control
+   0.1367487758398056；aux teacher→student KL 0.24085557460784912
+   **低於** control 0.8716331720352173。兩個方向都表示 aux 較貼近
+   teacher，但 agreement 是「較高」、KL 是「較低」，不得合寫成同一句
+   「aux 較高」。禁止僅憑 survival 宣稱 retention；也禁止僅憑這組
+   teacher 數字宣稱 retention 或 promotion。
 
 5. 一格 aux primary censor（u9200 seed3025）相對 control 零 censor：
    禁止把 support 說成未截尾生存優勢。
@@ -276,6 +774,12 @@ Update            Aux agr.    Aux KL      Ctrl agr.   Ctrl KL
 7. **Promote nothing.** experimental checkpoints 不得作 production
    初始化。歷史 post-hoc best（aux u5000、control u5400）禁止作為
    本輪 endpoint。
+
+8. Primary 的科學支持仍然成立（support、CI 下界 > 0），但它被上列第 1、
+   3、5、6 點與「未記錄／無法取得的欄位」一節限定：它只是 seed 11／
+   window 130000–209999 下、30 個 eval seed 的後段曲線平均 elapsed
+   優勢，不是 promotion 授權、不是未截尾生存優勢、不是 equal-compute
+   結論，也不是已證實的啟動路徑合規。
 
 明確禁止
 --------
@@ -294,6 +798,24 @@ survival-only retention 宣稱；禁止 equal-frame 重詮釋本契約；禁止
 
 ``docs/journal/1789890630_player_v5_aux_control_independent_ppo_seed_replication_preregistration.txt``、
 NAS RO ``.../20260920-1724-aux-control-independent-ppo-seed11/{aux,control}``
-的 ``run.json``／``report.json``／``status.jsonl``／packed U
-checkpoints、獨立 audit
-``artifacts/review-20260920-1724-seed11-dev_gpt_1/audit_result.json``。
+的 ``run.json``／``report.json``／``status.jsonl``／progress jsonl／
+``recovery_archives`` 目錄列舉／每臂全部 55 個 packed update-indexed
+checkpoints 加 ``ppo_*_final.pt`` 與 ``recovery.pt``（含 U 內 70 個的頂層
+``source`` 區塊）、獨立 audit
+``artifacts/review-20260920-1724-seed11-dev_gpt_1/audit_result.json``
+（SHA-256 ``4219a2971952bc8d0b48673e70c77b81d3c6db26786e9eb57d332ee2aad4783d``）
+與其 ``COPY_MANIFEST.json``（SHA-256
+``e744ecd3b4c2e99fd57a5eafe44c078041fc5dc3f963b8fae98d2c4cce9930d1``）、
+以及本文件的支援 JSON
+``docs/journal/1790171597_player_v5_aux_control_independent_ppo_seed_replication_results.json``
+（SHA-256
+``b265fa04410e0a60b39fa83e933cc511c3b4044f2fbac305340c09115a6a3b4d``、
+615529 bytes）。
+
+支援 JSON 內所有被報告的數值均在本次修訂中從上列 RO 來源重算：bundle 檔
+案與全部 checkpoint pack 的雜湊直接對 RO 計算；tensor、``source`` 區塊與
+``extra`` 欄位只從 hash 與 RO 相符的本機 audit 副本載入；沒有任何欄位取自
+散文。
+``audit_result.json`` 只被讀取兩次且都有標記：引用其
+``provenance_gap`` 原文，以及填 ``audit_comparison`` 比對表；沒有任何被
+報告的量測值以它為來源。
