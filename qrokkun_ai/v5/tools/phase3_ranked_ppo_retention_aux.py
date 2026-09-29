@@ -131,7 +131,27 @@ RETENTION_DIAGNOSTIC_SEED = 32345
 # averaged by the alpha calibration.
 CALIBRATION_GRAD_SAMPLES = 8
 
+# Selected horizon arms share this corrected truncation source. Legacy runs
+# omit the key entirely and keep the historical zero tail.
+BOOTSTRAP_SOURCE_POST_STEP = "post_step_V(s')"
+
 _GRAD_EPS = 1e-8
+
+
+def horizon_config(arm: str | None) -> tuple[float, float, bool]:
+    """Locked ``(gamma, lambda, corrected_bootstrap)`` for one horizon arm.
+
+    ``None`` is the legacy aux path: the phase-3 constants and no post-step
+    bootstrap. ``control`` and ``long`` both turn the corrected bootstrap on;
+    only the discount pair differs.
+    """
+    if arm is None:
+        return (ret_mod.PPO_GAMMA, ret_mod.PPO_LAMBDA, False)
+    if arm == "control":
+        return (0.99, 0.95, True)
+    if arm == "long":
+        return (0.9995, 0.999, True)
+    raise ValueError(f"unknown horizon arm: {arm!r}")
 
 
 def retention_generator(seed: int = RETENTION_SAMPLER_SEED) -> torch.Generator:
@@ -280,6 +300,20 @@ def matched_gradient_minibatch_size(
     return min(int(minibatch), n_ppo_frames, n_retention_frames)
 
 
+def horizon_batch(rollouts, device: torch.device, horizon_arm: str | None):
+    """Batch helper shared by calibration, diagnostics and the optimizer.
+
+    A legacy ``None`` arm keeps the historical positional call. A selected
+    arm passes that arm's gamma, lambda and corrected bootstrap together.
+    """
+    if horizon_arm is None:
+        return rollouts_to_batch(rollouts, device)
+    gamma, lam, bootstrap = horizon_config(horizon_arm)
+    return rollouts_to_batch(
+        rollouts, device, gamma=gamma, lam=lam, bootstrap_truncation=bootstrap,
+    )
+
+
 def grad_alignment(
     net,
     rollouts: list,
@@ -288,6 +322,7 @@ def grad_alignment(
     *,
     generator: torch.Generator,
     minibatch: int = PPO_MINIBATCH,
+    horizon_arm: str | None = None,
 ) -> dict[str, Any]:
     """Norms of (and cosine between) the PPO policy gradient and the
     retention gradient at the CURRENT weights.
@@ -310,7 +345,7 @@ def grad_alignment(
     ppo_k = matched_gradient_minibatch_size(n_frames, n_retention_frames, minibatch)
 
     params = trainable_parameters(net)
-    batch = rollouts_to_batch(rollouts, device)
+    batch = horizon_batch(rollouts, device, horizon_arm)
     advantages = normalized_advantages(batch)
     index = torch.randperm(n_frames, generator=generator)[:ppo_k].to(device)
     g_ppo = flat_grad(policy_loss_only(net, batch, advantages, index=index), params)
@@ -356,6 +391,7 @@ def calibrate_alpha(
     minibatch: int = PPO_MINIBATCH,
     n_minibatches: int = CALIBRATION_GRAD_SAMPLES,
     generator: torch.Generator | None = None,
+    horizon_arm: str | None = None,
 ) -> dict[str, Any]:
     """Calibrate alpha ONCE at the starting checkpoint, before any optimizer
     step::
@@ -377,7 +413,7 @@ def calibrate_alpha(
     ppo_k = matched_gradient_minibatch_size(n_frames, n_retention_frames, minibatch)
 
     params = trainable_parameters(net)
-    batch = rollouts_to_batch(rollouts, device)
+    batch = horizon_batch(rollouts, device, horizon_arm)
     advantages = normalized_advantages(batch)
 
     # Every matched pair is kept, not just its contribution to the mean: the
@@ -449,6 +485,7 @@ def ppo_aux_update(
     generator: torch.Generator,
     diagnostics_generator: torch.Generator | None = None,
     minibatch: int = PPO_MINIBATCH,
+    horizon_arm: str | None = None,
 ) -> dict[str, Any]:
     """One PPO update with the BC-retention auxiliary term::
 
@@ -477,9 +514,10 @@ def ppo_aux_update(
     diagnostics = grad_alignment(
         net, rollouts, train_tensors, device,
         generator=diagnostics_generator, minibatch=minibatch,
+        horizon_arm=horizon_arm,
     )
 
-    batch = rollouts_to_batch(rollouts, device)
+    batch = horizon_batch(rollouts, device, horizon_arm)
     player, bullets, pad = batch["player"], batch["bullets"], batch["pad"]
     actions, old_log_probs = batch["actions"], batch["old_log_probs"]
     old_values, returns = batch["values"], batch["returns"]
@@ -600,10 +638,19 @@ def ppo_aux_update(
 # rollout collection: the calibration window IS the update-1 window
 # --------------------------------------------------------------------------- #
 def collect_rollout_window(
-    net, device: torch.device, seeds: list[int], *, max_frames: int
+    net, device: torch.device, seeds: list[int], *, max_frames: int,
+    horizon_arm: str | None = None,
 ) -> list:
     """Collect one rollout per seed with the phase3 collector."""
-    return [collect_rollout(net, device, seed, max_frames=max_frames) for seed in seeds]
+    if horizon_arm is None:
+        return [collect_rollout(net, device, seed, max_frames=max_frames) for seed in seeds]
+    _gamma, _lam, bootstrap = horizon_config(horizon_arm)
+    return [
+        collect_rollout(
+            net, device, seed, max_frames=max_frames, bootstrap_truncation=bootstrap,
+        )
+        for seed in seeds
+    ]
 
 
 def calibration_and_first_update_rollouts(
@@ -613,6 +660,7 @@ def calibration_and_first_update_rollouts(
     episodes_per_update: int = EPISODES_PER_UPDATE,
     max_frames: int = PPO_MAX_FRAMES,
     rollout_seed_start: int = PPO_ROLLOUT_SEED_START,
+    horizon_arm: str | None = None,
 ) -> tuple[list, list]:
     """Collect the update-1 rollout window EXACTLY ONCE and return it twice.
 
@@ -625,7 +673,9 @@ def calibration_and_first_update_rollouts(
     seeds = rollout_seed_schedule(
         0, episodes_per_update=episodes_per_update, rollout_seed_start=rollout_seed_start,
     )
-    rollouts = collect_rollout_window(net, device, seeds, max_frames=max_frames)
+    rollouts = collect_rollout_window(
+        net, device, seeds, max_frames=max_frames, horizon_arm=horizon_arm,
+    )
     return rollouts, rollouts
 
 
@@ -661,6 +711,7 @@ def run_aux_arm(
     dataset_hash: str,
     ppo_knobs: dict[str, Any],
     minibatch: int = PPO_MINIBATCH,
+    horizon_arm: str | None = None,
 ) -> dict[str, Any]:
     """Train the auxiliary-retention PPO arm from a fresh clone of the loaded
     initial state (the init checkpoint is never mutated).
@@ -732,10 +783,14 @@ def run_aux_arm(
         calib_rollouts, first_update_rollouts = calibration_and_first_update_rollouts(
             net, device, episodes_per_update=args.episodes_per_update, max_frames=args.max_frames,
             rollout_seed_start=int(getattr(args, "rollout_seed_start", PPO_ROLLOUT_SEED_START)),
+            horizon_arm=horizon_arm,
         )
         pre_loop_collect_wall_s = time.perf_counter() - pre_loop_collect_start
         calib_seeds = [r.seed for r in calib_rollouts]
-        calibration = calibrate_alpha(net, calib_rollouts, train_tensors, device, minibatch=minibatch, generator=calib_gen)
+        calibration = calibrate_alpha(
+            net, calib_rollouts, train_tensors, device, minibatch=minibatch, generator=calib_gen,
+            horizon_arm=horizon_arm,
+        )
         calibration["rollout_seed_window"] = calib_seeds
         alpha = FrozenAlpha(alpha=float(calibration["alpha"]), calibration=calibration).alpha
     # Persisted on every launch, including a resume that recovered the frozen
@@ -779,7 +834,8 @@ def run_aux_arm(
             # CURRENT (initial) weights is itself pre-update and on-policy for
             # the calibration/update-1 window.
             alignment = grad_alignment(
-                net, rollouts, train_tensors, device, generator=diag_gen, minibatch=minibatch
+                net, rollouts, train_tensors, device, generator=diag_gen, minibatch=minibatch,
+                horizon_arm=horizon_arm,
             )
             alignment["alpha"] = alpha
             alignment["g_ret_weighted_norm"] = alpha * alignment["g_ret_norm"]
@@ -904,7 +960,7 @@ def run_aux_arm(
                     )
                     collect_start = time.perf_counter()
                     rollouts = collect_rollout_window(
-                        net, device, seeds, max_frames=args.max_frames
+                        net, device, seeds, max_frames=args.max_frames, horizon_arm=horizon_arm,
                     )
                     collect_wall_s = time.perf_counter() - collect_start
                 rollout_seed_window = seeds
@@ -912,6 +968,7 @@ def run_aux_arm(
                 metrics = ppo_aux_update(
                     net, opt, rollouts, train_tensors, alpha, device,
                     generator=generator, diagnostics_generator=diag_gen, minibatch=minibatch,
+                    horizon_arm=horizon_arm,
                 )
                 ppo_wall_s = time.perf_counter() - ppo_start
                 optimizer_steps += int(metrics["optimizer_steps"])
@@ -1099,6 +1156,8 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
     verdict reuses phase3's ``evaluate_retention`` and promotion is always
     false.
     """
+    horizon_arm = getattr(args, "horizon_arm", None)
+    gamma, lam, _bootstrap = horizon_config(horizon_arm)
     out_dir = Path(getattr(args, "run_dir", args.out_dir))
     out_dir.mkdir(parents=True, exist_ok=True)
     effective_max_updates, effective_end_time = ret_mod.effective_stop_budget(args)
@@ -1146,6 +1205,13 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
         knobs["rollout_seed_start"] = int(args.rollout_seed_start)
     if hasattr(args, "terminal_teacher_diagnostics"):
         knobs["terminal_teacher_diagnostics"] = bool(args.terminal_teacher_diagnostics)
+    if horizon_arm is not None:
+        knobs["gamma"] = gamma
+        knobs["lam"] = lam
+        knobs["value_bootstrap"] = True
+        knobs["truncation_treated_as_terminal"] = False
+        knobs["horizon_arm"] = horizon_arm
+        knobs["bootstrap_source"] = BOOTSTRAP_SOURCE_POST_STEP
 
     contract = {
         "format": 1,
@@ -1294,6 +1360,9 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
     prov.attach_dataset_identity(out_dir, input_manifest, report["dataset"])
 
     snapshot_updates = snapshot_schedule(args.updates)
+    arm_kwargs: dict[str, Any] = {}
+    if horizon_arm is not None:
+        arm_kwargs["horizon_arm"] = horizon_arm
     aux_arm = run_aux_arm(
         init_net,
         device,
@@ -1306,6 +1375,7 @@ def run_experiment(args: argparse.Namespace, device: torch.device) -> dict[str, 
         parent_file_sha256=init_prov["file_sha256"],
         dataset_hash=dataset["hash"],
         ppo_knobs=knobs,
+        **arm_kwargs,
     )
     report["aux_arm"] = {k: v for k, v in aux_arm.items()}
     # The same wrapper the control uses to say "no auxiliary term here", so a

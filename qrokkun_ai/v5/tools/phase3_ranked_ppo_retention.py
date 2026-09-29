@@ -792,12 +792,20 @@ class Rollout:
     dones: list[bool] = field(default_factory=list)
     elapsed: float = 0.0
     censored: bool = True
+    bootstrap_value: float = 0.0
 
 
 # --------------------------------------------------------------------------- #
 # on-policy sampled collection (never argmax; deterministic seeded reset only)
 # --------------------------------------------------------------------------- #
-def collect_rollout(net: PlayerRankedTopK, device: torch.device, seed: int, max_frames: int) -> Rollout:
+def collect_rollout(
+    net: PlayerRankedTopK,
+    device: torch.device,
+    seed: int,
+    max_frames: int,
+    *,
+    bootstrap_truncation: bool = False,
+) -> Rollout:
     """Collect one on-policy rollout from a deterministically seeded env reset.
 
     Actions are SAMPLED from the current policy (never argmax) so the batch
@@ -837,6 +845,15 @@ def collect_rollout(net: PlayerRankedTopK, device: torch.device, seed: int, max_
         if done:
             break
     censored = (not dones[-1]) if dones else True
+    bootstrap_value = 0.0
+    if bootstrap_truncation and censored:
+        player, bullets, pad = encode_obs(env)
+        p_t = torch.tensor(player, dtype=torch.float32, device=device).unsqueeze(0)
+        b_t = torch.tensor(bullets, dtype=torch.float32, device=device).unsqueeze(0)
+        m_t = torch.tensor(pad, dtype=torch.bool, device=device).unsqueeze(0)
+        with torch.no_grad():
+            _dist, last_value = net(p_t, b_t, m_t)
+        bootstrap_value = float(last_value.item())
     return Rollout(
         seed=seed,
         player=player_l,
@@ -849,6 +866,7 @@ def collect_rollout(net: PlayerRankedTopK, device: torch.device, seed: int, max_
         dones=dones,
         elapsed=elapsed,
         censored=censored,
+        bootstrap_value=bootstrap_value,
     )
 
 
@@ -856,20 +874,49 @@ def collect_rollout(net: PlayerRankedTopK, device: torch.device, seed: int, max_
 # GAE / batch construction (per-episode boundaries; never bleed across them)
 # --------------------------------------------------------------------------- #
 def compute_gae_for_rollouts(
-    rollouts: list[Rollout], gamma: float, lam: float, device: torch.device
+    rollouts: list[Rollout],
+    gamma: float,
+    lam: float,
+    device: torch.device,
+    *,
+    bootstrap_truncation: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Advantages/returns computed per rollout (episode) then concatenated,
-    so advantages never bleed across episode boundaries."""
+    so advantages never bleed across episode boundaries.
+
+    The default path calls :func:`player_v1.gae`, which appends a zero tail.
+    ``bootstrap_truncation`` uses the rollout's post-step value only when the
+    episode was censored; a true terminal still continues from zero.
+    """
     adv_parts: list[torch.Tensor] = []
     ret_parts: list[torch.Tensor] = []
     for r in rollouts:
-        adv, ret_t = gae(r.rewards, r.values, r.dones, gamma, lam, device)
+        if not bootstrap_truncation:
+            adv, ret_t = gae(r.rewards, r.values, r.dones, gamma, lam, device)
+        else:
+            values = [float(v) for v in r.values] + [float(r.bootstrap_value) if r.censored else 0.0]
+            running = 0.0
+            adv_list = [0.0] * len(r.rewards)
+            for t in range(len(r.rewards) - 1, -1, -1):
+                mask = 0.0 if r.dones[t] else 1.0
+                delta = r.rewards[t] + gamma * values[t + 1] * mask - values[t]
+                running = delta + gamma * lam * mask * running
+                adv_list[t] = running
+            adv = torch.tensor(adv_list, dtype=torch.float32, device=device)
+            ret_t = adv + torch.tensor(values[:-1], dtype=torch.float32, device=device)
         adv_parts.append(adv)
         ret_parts.append(ret_t)
     return torch.cat(adv_parts), torch.cat(ret_parts)
 
 
-def rollouts_to_batch(rollouts: list[Rollout], device: torch.device) -> dict[str, torch.Tensor]:
+def rollouts_to_batch(
+    rollouts: list[Rollout],
+    device: torch.device,
+    *,
+    gamma: float = PPO_GAMMA,
+    lam: float = PPO_LAMBDA,
+    bootstrap_truncation: bool = False,
+) -> dict[str, torch.Tensor]:
     """Flatten rollouts into a PPO batch. Contains only on-policy rollout
     data -- teacher frames/logits NEVER enter a PPO batch."""
     player_l: list[np.ndarray] = []
@@ -885,7 +932,9 @@ def rollouts_to_batch(rollouts: list[Rollout], device: torch.device) -> dict[str
         actions_l.extend(r.actions)
         old_lp_l.extend(r.log_probs)
         values_l.extend(r.values)
-    advantages, returns = compute_gae_for_rollouts(rollouts, PPO_GAMMA, PPO_LAMBDA, device)
+    advantages, returns = compute_gae_for_rollouts(
+        rollouts, gamma, lam, device, bootstrap_truncation=bootstrap_truncation,
+    )
     return {
         "player": torch.tensor(np.stack(player_l), dtype=torch.float32, device=device),
         "bullets": torch.tensor(np.stack(bullets_l), dtype=torch.float32, device=device),
