@@ -1,0 +1,304 @@
+PlayerV5 gamma/lambda 視野對照 — 預先登記
+==========================================
+
+狀態
+----
+
+planned／not executable。本文件是兩條 matched 10k aux-retention run 的
+canonical preregistration。它不是結果、不是啟動授權，也不含可執行 argv
+或執行用 code SHA。
+
+現行 ``qrokkun_ai/v5/tools/phase3_ranked_ppo_retention.py`` 與
+``phase3_ranked_ppo_retention_aux.py`` 尚未支援本契約的 treatment：
+``PPO_GAMMA = 0.99``、``PPO_LAMBDA = 0.95`` 是模組常數，沒有 per-arm
+覆寫；``ppo_hyperparameters()`` 寫 ``value_bootstrap=false``、
+``truncation_treated_as_terminal=true``；``compute_gae_for_rollouts``
+走 ``player_v1.gae``，一律在 values 後附 ``0.0``；``collect_rollout``
+只存 step 前的 ``V(s_t)``。用現行程式啟動不能實現本對照。
+
+``1789890630`` 鎖定的 code identity
+``bd7443cd7fbbd72fcb6243afc66dc0bf59025c01`` 屬於另一份契約（aux 對
+無 aux、seed 11、window ``130000``、截尾當 terminal、無 bootstrap），
+不是本輪執行身份。本文件不指定 HEAD，也不把任何 SHA 寫成可啟動 commit。
+
+啟動前必須另有一份已審查、已凍結的 code commit，實作且只實作本文件的
+科學契約；再以另一份 prelaunch amendment journal 記入兩臂完整 argv
+與該 SHA，並另行 commit/push。正式執行 checkout 必須回到 amendment
+之前的凍結 code commit，保持 clean，HEAD 精確等於記入的 code SHA；
+較新的 amendment journal commit 不是執行 HEAD，也不得把未提交的
+amendment 放在執行 checkout。Amendment 不得改科學內容。在該 amendment
+存在之前，禁止正式
+訓練、正式評估、resume、render 或 promotion；實作與驗證所需的測試、
+非正式短程診斷不算正式實驗，不得用存活結果調整本契約的參數或預算。
+
+身份與唯一 treatment
+--------------------
+
+架構：PlayerV5（code class ``PlayerRankedTopK``；checkpoint architecture
+key ``player_ranked_topk``）。Promotion status：candidate。所有
+snapshot／periodic／final checkpoint 一律 ``experimental=true``、
+``production_compatible=false``、``promotion=false``。
+
+兩臂都是 aux retention、scripted Spawner、同一 optimizer 設定、
+同一 seed、同一 rollout window、同一 seed-5 BC、同一 teacher、
+同一 dataset、同一 eval、同一 corrected bootstrap。不是 aux 對無 aux，
+也不是 equal-frame／equal-optimizer-step。
+
+**唯一 treatment**：折扣視野。
+
+- control：``gamma=0.99``、``lambda=0.95``（``gamma*lambda=0.9405``）
+- long：``gamma=0.9995``、``lambda=0.999``（``gamma*lambda=0.9985005``）
+
+Gamma 與 lambda 一起改。只加長 gamma、把 lambda 留在 0.95，不是本契約。
+不混入 entropy、learned Spawner、self-play、DAgger、equal-compute、
+critic warmup、action repeat／frame skip、reward 改寫或第二個 PPO seed。
+
+此 control 不是歷史 Phase 3 aux 的重跑：歷史 run 把 4200 截尾當
+terminal 且 bootstrap 為 0。本輪兩臂都改用下方 bootstrap。不得把本
+control 與 ``1789696064`` 或 seed-11 confirmatory 當成同一條軌跡。
+
+共同契約（不是 treatment）
+--------------------------
+
+- 兩臂皆 exact 10000 updates、``episodes_per_update=8``、名義 80000
+  episodes。Fresh schema 目錄，事先不得有 ``run.json``。禁止
+  ``--resume``、``--resume-from-update``、``--quick``。Stop 必須為
+  ``effective_max_updates=10000`` 且
+  ``effective_end_time_hkt=2099-12-31T23:59:00+08:00``；不得落到預設
+  200，不得把 max-updates 變成 ``2147483647``。
+- ``--seed`` 等價設定使兩臂 ``effective_seed=17``。``knobs.torch_seed``
+  若仍寫常數 ``0``，以 ``effective_seed`` 與 amendment argv 為準。
+- ``rollout_seed_start=210000``。Update 1 使用 ``210000``–``210007``；
+  update 10000 使用 ``289992``–``289999``。消耗的 env seeds 精確為
+  ``210000``–``289999``（80000，不重複）。同一 update index 的環境
+  seed 兩臂相同；on-policy 動作會因視野不同而分岔，不要求軌跡相同。
+  此 window 不得與 eval ``3000``–``3029``、dataset ``20000``–``20239``、
+  歷史 ``50000``–``129999``、seed-11 confirmatory ``130000``–``209999``
+  重疊。
+- 正式 run-dir 落在
+  ``/mnt/minion/88_minion_rw/projects/qrokkun26/runs/`` 下的兩個空的、
+  獨立子目錄。``88_minion_ro`` 唯讀，不得當 run-dir。時間戳與絕對
+  run-dir 由 amendment 填，本文件不虛構。
+- 兩臂必須在同一個凍結 commit、同一授權窗口、同一 init、同一 teacher
+  上成對啟動。任一臂 fail closed、interrupted、dirty tree、錯誤 SHA、
+  錯誤 seed／window／gamma／lambda／bootstrap、未滿 10000 updates、或
+  缺 terminal teacher diagnostics：**整對作廢**。不得單臂推論，不得
+  補跑冒充原配對。失敗完整保留；再跑須新 preregistration。
+
+Corrected post-step V bootstrap（兩臂相同）
+-------------------------------------------
+
+Rollout cap 仍是 4200 frames。Reward 沿用現行 ``shaped_reward``：真死
+（``done and env.dead``）才減 1；截尾不加死亡罰。不改 reward。
+
+- 真死：延續 mask 為 0，bootstrap value 為 0。``last_value`` 不得進入
+  return。
+- 截尾（跑滿 4200 且環境未 ``done``）：不是 terminal。Bootstrap 為
+  **最後一次 ``env.step`` 之後** 的 observation 上、no-grad 重新前向
+  得到的 ``V(s')``。Player 一步一 frame，該步折扣是 ``gamma * V(s')``。
+- 禁止用 ``player_v1.gae`` 附上的 ``0.0`` 當截尾延續值。禁止用軌跡裡
+  最後一個已存 value：那是發出最後一個 action 的 step 前 ``V(s_t)``，
+  不是後繼狀態。
+- 兩臂的 GAE、return 與 value target 都用這條規則。Knobs 必須明示
+  bootstrap 開啟、截尾不當 terminal、截尾為 post-step ``V(s')``、真死
+  為 0。Eval 的 4200 cap 與 censored elapsed 定義不變；bootstrap 只改
+  訓練 target。
+
+Optimizer（gamma／lambda 除外，兩臂相同）
+------------------------------------------
+
+Adam ``lr=0.0003``、``adam_eps=1e-8``、``clip=0.2``、
+``entropy_coef=0.02``、``value_coef=0.5``、``ppo_epochs=4``、
+``minibatch=512``、``max_grad_norm=1.0``、
+``advantage_normalization=true``。Retention：
+``phase2_ranked_multiseed.hybrid_loss``、hard/soft weight 0.5、
+temperature 1.0、target gradient ratio ``0.15``、calibration samples
+8、sampler／calibration／diagnostic seeds ``12345``／``22345``／
+``32345``。這些 RNG 與 PPO minibatch permutation 分離。
+
+Alpha 分臂校準
+--------------
+
+每臂在任何 optimizer step 之前，用該臂 update-1 rollouts（seeds
+``210000``–``210007``）校準 **一次** 並凍結。校準與 update-1 PPO 重用
+同一批 trajectories。公式：
+
+``alpha = 0.15 * mean(||g_ppo||) / (mean(||g_ret||) + 1e-8)``
+
+8 個 matched minibatch pairs；共同樣本數
+``min(512, PPO frames, TRAIN frames)``。``g_ppo`` 只含該臂自己的
+gamma、lambda 與 post-step bootstrap 所產生的 PPO policy gradient。
+
+兩臂 alpha **分開計算、禁止互抄**。歷史 alpha
+``0.38932983697041385`` 與任何 seed-11 confirmatory alpha 都不得預填。
+不得按 eval、survival、agreement、KL、cosine 或中途曲線重調。
+
+Init、teacher、dataset（沿用 ``1789890630`` 已鎖定身份）
+-------------------------------------------------------
+
+- Init：
+  ``/mnt/minion/88_minion_ro/projects/qrokkun26/assets/20260911-scratch_ranked_multiseed_full/seed5/seed5.pt``
+  file SHA-256
+  ``decc50ba2f781f243814bb0c984499bc6bf3ce66f5bcc9cbf22ae1acd3fd545a``；
+  state-dict SHA-256
+  ``d88c96213f9064658760d598a563d43df5a847a228a313837f00982bc3151b0f``。
+  不得改用 GB10 scratch 或其他 seed-5 檔。
+- Teacher file SHA-256
+  ``1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1``；
+  若 loader 可重算 state-dict，必須為
+  ``39a6bdfc83f827c2c59a6bb0a46b730506b8aff7966e0072b7441cd6cc5a0a2f``。
+  Teacher 絕對路徑由 amendment 填。
+- Dataset identity 的**完成後 acceptance** 必須為
+  ``2521bd12ae8b630e65f2645132bde4952fe8f60783ad0e87648ed2af688e558a``
+  （``DATA_SEED=4``、環境 seed ``20000``–``20239``、240 episodes、
+  4200-step cap、even-stride 每集最多 700 frames、held-out 0.12 →
+  211／29 episodes、146688／20300 frames）。現行 trainer 僅記錄 hash，
+  不在 optimizer 前比對預期值；不符時完成後整對 invalid，不能宣稱
+  launch preflight 曾攔截訓練。
+
+Eval：seeds ``3000``–``3029``，``eval_max_steps=4200``。Initial gate
+仍為 mean／median ≥ 25.0 s；失敗則該臂不訓練，整對 invalid。Gate 不是
+treatment，也不是 primary。
+
+Primary endpoint
+----------------
+
+假說：在上述共同契約下，long 視野相對 control 視野，在預先鎖定的後段
+matched survival 上有正的配對優勢。要回答的是存活時間。Teacher
+agreement 是 secondary，不能單獨判定這項比較成功或失敗。
+
+不得把 35 個時間相關 checkpoint 當成 35 個獨立實驗。
+
+1. ``U = {3200, 3400, …, 10000}``，共 35 點。Primary 只用 U。
+2. 對每個 eval seed ``s ∈ {3000,…,3029}``，
+   ``d_s = (1/35) * Σ_{u∈U} (elapsed_long(u,s) − elapsed_control(u,s))``。
+   Elapsed 是該 checkpoint 已寫入的 deterministic eval（秒），含 cap
+   處 censored elapsed。
+3. ``d̄ = mean_s d_s``。雙尾 95% CI，n=30 paired Student t：
+   ``d̄ ± t_{0.975, 29} * s_d / sqrt(30)``，``s_d`` 為 30 個 ``d_s`` 的
+   樣本標準差（分母 n−1）。分位數分析時計算，不在此手寫常數。
+4. 只在整對 operationally complete 之後，只對 primary CI：
+   - **support**：下界 > 0（long 的 seed-averaged 後段 elapsed 更高）；
+   - **contrary**：上界 < 0；
+   - **indeterminate**：CI 含 0。
+5. 缺任一 ``u∈U`` 的任一種子 elapsed、checkpoint 對不齊、任一臂未完成、
+   gamma／lambda／bootstrap 不符、或 eval seeds 不是精確的 3000–3029：
+   **invalid**。禁止刪種子、改 U、或改用 n=35 的 checkpoint-mean 檢定。
+
+每點另報 censor 數。Censor 不改 primary 公式。若兩臂 censor 結構明顯
+不同，support 不得說成未截尾生存優勢。
+
+資料來源：各臂 ``ppo_aux_update_{u}.pt`` packed
+``extra.eval_summary.per_seed``；u<10000 的 U 點為 periodic model-only，
+u10000 必須是含 teacher diagnostics 的 terminal full snapshot，
+不是 periodic model-only。缺 per-seed
+elapsed 則 fail closed；不得用 on-policy rollout mean 代替。允許事後用
+同一權重、同一 3000–3029／4200 cap 重跑 eval 作核對；與 packed extra
+衝突時以 packed extra 為 primary，差異寫入報告。
+
+較長 survival 會中介更多 frames 與 optimizer steps。必須記帳，不得事後
+解讀成相同 sample budget 下的純視野效果。
+
+Secondary（不能單獨當本比較的成敗）
+------------------------------------
+
+- Terminal u10000：兩臂 30-seed mean／median／pstdev／censor，以及
+  per-seed (long−control) 的 paired 95% t CI。單一 checkpoint。
+- Terminal u10000 held teacher agreement 與 teacher-to-student KL，
+  兩臂皆非 null。缺值則該 secondary 失敗閉合；禁止用 survival 或歷史
+  agreement 填補。
+- 全程 frames 與 optimizer steps。
+- 兩臂各自的凍結 alpha，以及 realized grad_ratio 的全程／首 1000／末
+  1000 描述。
+- Diagnostic snapshots 0／10／25／50／100／200 的 held agreement（描述）。
+
+禁止把歷史 post-hoc best（含 aux u5000）當 endpoint 或 promotion 候選。
+非 u10000 的 retention PASS/FAIL 物件不得當本輪 terminal retention 判決。
+
+Prelaunch amendment（科學凍結之後才寫）
+--------------------------------------
+
+Reviewed code commit 必須先存在，且審查範圍就是本契約的實作：per-arm
+``gamma``／``lambda``、兩臂相同的 corrected post-step bootstrap、真死
+bootstrap 0、以及讓 knobs／provenance 能核對這些欄位。不得在同一 commit
+夾帶其他科學改動。
+
+Amendment 只補執行身份，不改科學：
+
+- 完整 git SHA；clean tree；
+- 兩臂完整 argv（含 device、run-dir、teacher 絕對路徑、init 絕對路徑、
+  seed 17、rollout start 210000、max-updates 10000、terminal teacher
+  diagnostics，以及該 commit 實際用來選擇 gamma／lambda／bootstrap 的
+  旗標或等價入口）；
+- 該 commit 實際寫入的整數 ``schema_version``（不預先假定仍為 4）；
+- 啟動時重算的 init／teacher SHA。
+
+Amendment 本身的 journal commit 只封存契約與執行身份，不修改凍結的
+程式碼。執行時 clean checkout 固定在先前記入的 code SHA；不得用較新
+amendment commit 的 HEAD 冒充 code SHA，亦不得在 dirty tree 執行。
+
+Amendment **禁止**改：兩臂定義、0.99/0.95 與 0.9995/0.999、bootstrap
+規則、seed 17、window ``210000``–``289999``、8 episodes／update、
+init／teacher／dataset 身份、eval 3000–3029、U、primary 公式、alpha
+目標 0.15、optimizer 其餘項、scripted Spawner、10000 updates、
+no-promotion。若實作審查要求改這些，另寫新 preregistration，不叫
+amendment。
+
+本文件不記錄 pytest 結果。啟動授權時再記錄當時的測試輸出。
+
+Acceptance
+----------
+
+每臂必須：``effective_seed=17``；``rollout_seed_start=210000``；消耗
+seeds ``210000``–``289999``；control knobs 精確 ``gamma=0.99``、
+``lam=0.95``；long 精確 ``gamma=0.9995``、``lam=0.999``；兩臂皆為
+post-step ``V(s')`` 截尾 bootstrap 且真死為 0；``effective_max_updates=10000``；
+``aux_arm.completed_updates=10000``；名義 ``aux_arm.total_episodes=80000``；
+``status=max_updates`` 且 ``aux_arm.stop_reason=max_updates``；
+``provenance.git_commit`` 等於 amendment **記入的凍結 code SHA**
+（非 amendment journal 的 commit SHA）且 ``dirty=false``；
+init／teacher／dataset hash 與上文一致；U 的
+35 個 checkpoint 都有 per-seed elapsed；u10000 teacher diagnostics
+非空；alpha 為該臂自己的一次性校準且 target 0.15；``promotion=false``。
+
+作廢：interrupted、deadline、gate fail 以致未訓練、hash／schema／seed／
+window／gamma／lambda／bootstrap 不符、缺 terminal diagnostics、只完成
+一臂、中途改 knobs、resume、或在 amendment 之前啟動。
+
+完成後才填的欄位
+----------------
+
+兩臂：amendment SHA 與 argv；host／device／torch／python／cuda；開始／
+結束 HKT；``88_minion_rw`` run-dir；``run.json``／``report.json`` 路徑
+與 SHA-256；progress jsonl；u∈U 每個 checkpoint 的 file 與 state-dict
+SHA-256、per-seed elapsed 與 censor；u10000 agreement／KL；該臂 alpha
+校準全文（八 pair、norms、cosine、alpha、target 0.15、window 必須為
+``210000``–``210007``）；每 update 的 losses／KL／clip／entropy／EV／
+optimizer steps／frames／censor／seed window／截尾 bootstrap 是否套用；
+總 frames 與 optimizer steps。Primary：30 個 ``d_s``、``d̄``、``s_d``、
+t 分位數、95% CI、分類。永遠 ``promotion=false``。
+
+明確禁止
+--------
+
+禁止從本文件啟動；禁止在沒有 frozen reviewed commit 與 prelaunch
+amendment 時發明 argv 或 SHA；禁止把 amendment 用來改科學；禁止
+promotion；禁止把本對照做成 aux 對無 aux；禁止只改一臂的 bootstrap；
+禁止用最後一個 pre-step value 或 0 冒充 post-step ``V(s')``；禁止兩臂
+共用或預填 alpha；禁止改其餘 PPO knobs、eval seeds、dataset、retention
+ratio、三條 retention RNG；禁止 resume；禁止 ``--quick``；禁止 n=35
+獨立檢定；禁止 post-hoc 選 best update；禁止以單臂 survival、terminal survival
+或 teacher agreement 取代預先鎖定的配對 primary；禁止 equal-frame
+重詮釋；禁止單臂失敗後仍做配對推論。
+
+依據
+----
+
+- ``docs/journal/1790695667_player_v5_gamma_lambda_horizon_direction.txt``
+- ``docs/journal/1789890630_player_v5_aux_control_independent_ppo_seed_replication_preregistration.txt``
+- ``docs/journal/1788785426_gpt56sol.txt``（0.9995／0.999 起始數值；該文
+  不是本輪契約）
+- ``docs/journal/1789225070_player_v5_recovery_roadmap.txt``
+- ``qrokkun_ai/v5/tools/phase3_ranked_ppo_retention.py``
+- ``qrokkun_ai/v5/tools/phase3_ranked_ppo_retention_aux.py``
+- ``qrokkun_ai/v1/train/player_v1.py`` 的 ``gae``（現行錯誤的尾端 0）
