@@ -1,0 +1,91 @@
+PlayerV5 gamma/lambda 視野對照 — 方向紀錄
+==========================================
+
+狀態
+----
+
+方向紀錄，不是可啟動的契約。下一步應是一項預先登記的 gamma/lambda
+視野對照。本文件不鎖定 init、PPO seed、rollout window、update 數、
+primary 公式、CLI 或 code SHA，也不授權訓練、評估、resume、render 或
+promotion。那些細項留到另一次執行用 preregistration。
+
+架構身份不變：PlayerV5（code class ``PlayerRankedTopK``；checkpoint
+architecture key ``player_ranked_topk``）。本文件不是命名裁決，也不改
+promotion status。
+
+為何優先是視野
+--------------
+
+現行 Phase 3 把 ``PPO_GAMMA = 0.99``、``PPO_LAMBDA = 0.95`` 鎖在
+``qrokkun_ai/v5/tools/phase3_ranked_ppo_retention.py``，aux 臂沿用同一對
+常數。``1788785426`` 已記錄這個視野的尺度：Player 每秒 60 次 decision，
+``gamma=0.99`` 的 reward 半衰期約 69 frames、即 1.15 秒；30 秒後的
+reward 權重約 ``1.39e-8``；``gamma * lambda = 0.9405``，GAE advantage
+傳得更短。該視野只覆蓋瞬間避彈，覆蓋不了邊界管理、多顆子彈的路徑與幾十
+秒的存活。
+
+GAE 的混合長度跟著 ``gamma * lambda`` 走。只把 gamma 加長、lambda 留在
+0.95，advantage 視野仍然短。``1788785426`` 因此把 gamma 與 lambda 寫成
+同一個 short-run A/B，而不是兩個先後分開的旋鈕；該文提出的起始數值不在
+本文件採用，也不在本文件重新指定。``1789225070`` 同樣把 gamma/lambda 列
+為 retention 之後的一個比較項。
+
+現有存活證據沒有超過 teacher
+----------------------------
+
+Retention 已經成立，但沒有變成穩定的存活增益。
+
+- Corrected aux round 1（``1789233643``）的 retention gate PASS。那次
+  通過的是 agreement 與存活下限，不是相對起點的顯著存活提升。
+- Seed-11 confirmatory（``1790171597``）的後段曲線 primary 為
+  support，aux 相對 control 約 +3.20 秒。同一輪 terminal 為
+  indeterminate，點估計 aux 較短。後段曲線與 terminal 方向相反，所以
+  aux 保住的是後段曲線，不是一個可以留下來的較長存活終點。
+- 現行契約下 PlayerV1 teacher 的 mean 約 43.42 秒。探索性 10k
+  （``1789696064``）的 aux u5000 到過 43.99 秒；該文自己把它標成事後
+  峰值，不是 endpoint，也不能當下一輪起點。
+
+Aux retention 保住 teacher 技能，也在已完成的 confirmatory 裡抬高後段
+曲線。它沒有把存活穩穩推過 teacher。再把同一個 aux 配方複製到另一個
+PPO seed，或改做 equal-compute，可以收緊「後段約 +3 秒」這個結論，
+不會改變 optimizer 能看見的時間長度。
+
+為何排在其他後續之前
+--------------------
+
+``1789225070`` 在 retention PASS 之後依序考慮 entropy、gamma/lambda、
+Spawner 改動與 self-play，每一項分開預登記。Corrected round 1 已經
+PASS，所以這份清單開了；其中會改變信用分配時間尺度的是 gamma/lambda。
+
+Entropy、learned Spawner、self-play 與再一次 PPO-seed 複製都不改變
+``gamma * lambda``。Equal-compute 問的是 aux 的後段優勢有多少來自主
+額外 sample，同樣不拉長視野。
+
+Critic warmup（``1789833384``）已經做完。``1789633301`` 寫明該診斷不
+解除 Phase 3 的視野鎖定，也不把壞 critic 說成比短視野更優先的唯一根
+因。Value-head-only warmup 沒有取代「視野只有約 1 秒」這個限制：critic
+再準，擬合的仍是這組折扣下的 return。
+
+方向邊界
+--------
+
+未來的執行用 preregistration 只應有一個 treatment：折扣視野。兩臂都
+保留現有 aux retention 與 scripted Spawner。要回答的是存活時間；
+teacher agreement 是 secondary，不能單獨當成這項比較的成功或失敗。
+
+本文件不指定 gamma/lambda 的數值對、estimator 或停止點。不從中間或
+最終 snapshot 事後挑選，也不把 entropy、Spawner、self-play、DAgger、
+equal-compute 或另一個 critic treatment 混進同一輪。
+
+依據
+----
+
+- ``docs/journal/1788785426_gpt56sol.txt``
+- ``docs/journal/1789225070_player_v5_recovery_roadmap.txt``
+- ``docs/journal/1789233643_player_v5_corrected_aux_round1.txt``
+- ``docs/journal/1789633301_player_v5_bad_critic.txt``
+- ``docs/journal/1789696064_player_v5_aux_control_10k_comparison.txt``
+- ``docs/journal/1789833384_player_v5_critic_warmup_results.txt``
+- ``docs/journal/1790171597_player_v5_aux_control_independent_ppo_seed_replication_results.txt``
+- ``qrokkun_ai/v5/tools/phase3_ranked_ppo_retention.py`` 的 ``PPO_GAMMA``
+  與 ``PPO_LAMBDA``
