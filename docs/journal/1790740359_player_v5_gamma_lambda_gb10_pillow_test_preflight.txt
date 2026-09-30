@@ -1,0 +1,164 @@
+PlayerV5 gamma/lambda 視野對照 — GB10 Pillow 測試預飛
+======================================================
+
+狀態
+----
+
+本文件是
+``docs/journal/1790733372_player_v5_gamma_lambda_gb10_preflight.txt``
+的後續預飛紀錄，只封存已授權的步驟 1–4。四步都已完成，預飛就緒停在
+步驟 4。步驟 5 成對 10k 長訓要另行 owner 授權。
+
+科學契約沿父預先登記與
+``docs/journal/1790731001_player_v5_gamma_lambda_horizon_prelaunch_amendment.txt``。
+本文件只新增這份紀錄。正式 initial gate 留待授權啟動後執行；
+dataset identity 留待完成後驗收，本輪均未執行。
+
+父預先登記
+``docs/journal/1790698576_player_v5_gamma_lambda_horizon_preregistration.txt``
+SHA-256
+``4fa87e6459fd26f357ce783de22ea15eda3a00573719c503af3e5575aba94896``。
+
+GB10B（``ovm-hms-bot``）執行 checkout 維持 detached、clean 的
+``c0c9ee165689a043833136de22e9eb0657a8c8f3``。Hermes 在寫入本文件之前
+是 ``fafbbb4840160f7929db02f4cc244f06312b87f6``。本文件是紀錄，執行
+身份仍是該凍結 SHA。
+
+步驟 1–4
+--------
+
+- [已完成] 步驟 1。保留原始 31 包 baseline、Pillow 前 36 包 baseline，
+  並完成 Pillow dry-run。dry-run 只會安裝 ``pillow==12.3.0``，不替換
+  既有套件，套件清單不變。
+- [已完成] 步驟 2。在凍結訓練 venv 安裝 ``pillow==12.3.0``
+  （``--no-deps --only-binary=:all:``）。exit code 0。``PIL.Image``
+  可 import。
+- [已完成] 步驟 3。依賴 diff 為 37 包。相對 Pillow 前只增加
+  pillow 12.3.0。相對 pytest 前只增加 pytest 9.1.1、iniconfig 2.3.0、
+  packaging 26.3、pluggy 1.6.0、Pygments 2.21.0、pillow 12.3.0。
+  ``removed`` 與 ``changed`` 皆空，既有套件版本維持原樣。``pip check``
+  仍是既有 exit code 1，訊息仍是
+  ``nvidia-cusparselt-cu12 0.7.1 is not supported on this platform``。
+- [已完成] 步驟 4。重驗 preflight，並在凍結 repo 跑完
+  ``qrokkun_ai/v5/tests``：983 passed。測試用的暫時 teacher 符號連結
+  已清。結束後 checkout clean、GPU 0%、horizon trainer 0、無正式
+  horizon run 目錄。
+
+步驟 1–4 就緒。pytest 與 pillow 供測試；torch、numpy 與 CUDA 相關套件
+版本未改（``training_dependencies_unchanged`` 為 true）。
+
+證據
+----
+
+目錄
+``/mnt/minion/88_minion_rw/projects/qrokkun26/preflight/``。
+
+- ``20260930-1036-gb10-venv-before-pytest.json``
+  31 包。SHA-256
+  ``e213630401f242a4adc6eee1dd8950acfacfe992e4afcd20c8604c35420ca1d5``。
+- ``20260930-1146-gb10-venv-before-pillow.json``
+  36 包。SHA-256
+  ``e9a1025875241e7a24d8caed0f407355e309e9c6cf1406c7b57766bc51e946ed``。
+- ``20260930-1146-gb10-pillow-dry-run.json``
+  SHA-256
+  ``6ba44b10f4824e90901c137f7aae026b25095543e2690eee600750c066929b4f``。
+  命令
+  ``python -m pip install --dry-run --no-cache-dir --disable-pip-version-check --no-input --quiet --report - Pillow``。
+  exit code 0。``would_install`` 只有 pillow 12.3.0；
+  ``would_replace_existing`` 為空；dry-run 後套件清單不變。
+- ``20260930-gb10-pillow-dependency-diff.json``
+  SHA-256
+  ``2cca80d3eef2c201681861ac1e976df7935d00895256b279f2ba2c51e6d222ce``。
+  HKT 2026-09-30T11:47:46+08:00。安裝前後 ``pip check`` exit code 都是
+  1，輸出相同。
+- ``20260930-gb10-pillow-revalidated-preflight.json``
+  SHA-256
+  ``ad8a3bf41c02386178e20894868d01dd6cee6bc2232ea8af9ab0a8fb361c33bb``。
+
+安裝（已在凍結 venv 執行）
+--------------------------
+
+venv ``/home/ovm-hms-bot/projects/qrokkun26/venv``：
+
+::
+
+    python -m pip install --no-deps --only-binary=:all: --no-cache-dir --disable-pip-version-check --no-input pillow==12.3.0
+
+exit code 0。``PIL.Image`` import 成功。
+
+重驗
+----
+
+HKT 2026-09-30T11:48:44+08:00，host GB10B（``ovm-hms-bot``）。
+torch ``2.11.0+cu128``、numpy 2.5.3、pytest 9.1.1、pillow 12.3.0。
+CUDA runtime 12.8、NVIDIA GB10、tensor op PASS。檢查當下 GPU ``0 %``。
+正式 run 根可寫，463 GiB 可用。``formal_horizon_run_roots`` 為空，
+``active_horizon_trainers`` 為 0。ffmpeg 不在；此項與訓練無關，
+renderer 測試用 mock。
+
+- [已核對] HEAD
+  ``c0c9ee165689a043833136de22e9eb0657a8c8f3``，clean。
+- [已核對] schema 5。預先登記 SHA-256 同上。
+- [已核對] Init 唯讀 file SHA-256
+  ``decc50ba2f781f243814bb0c984499bc6bf3ce66f5bcc9cbf22ae1acd3fd545a``；
+  state-dict SHA-256
+  ``d88c96213f9064658760d598a563d43df5a847a228a313837f00982bc3151b0f``。
+  嚴格 production compatible。
+- [已核對] Teacher GB10 本機 file SHA-256
+  ``1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1``；
+  state-dict SHA-256
+  ``39a6bdfc83f827c2c59a6bb0a46b730506b8aff7966e0072b7441cd6cc5a0a2f``；
+  ``architecture`` 為 ``player_v1``。
+- [已核對] 兩臂 parser：seed 17、10000 updates、8 episodes／update、
+  eval seeds ``3000``–``3029``、cap 4200、rollout
+  ``210000``–``289999``、bootstrap true。control ``(0.99, 0.95)``，
+  long ``(0.9995, 0.999)``。
+
+GB10 測試
+---------
+
+工作目錄是凍結 repo
+``/home/ovm-hms-bot/projects/qrokkun26/qrokkun26``。測試期間，
+``.gitignore`` 的 ``artifacts/`` 下暫時放了 teacher 本機檔的符號連結
+``artifacts/nas_tmp_runs/player_gpu.pt``，目標 file hash 等於上面的
+teacher file SHA-256。fixture 在測試後已清。
+
+::
+
+    cd /home/ovm-hms-bot/projects/qrokkun26/qrokkun26
+    PYTHONPATH=/home/ovm-hms-bot/projects/qrokkun26/qrokkun26 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 OMP_NUM_THREADS=1 timeout 600 /home/ovm-hms-bot/projects/qrokkun26/venv/bin/python -m pytest -q -p no:cacheprovider --basetemp=/mnt/minion/88_minion_rw/projects/qrokkun26/tmp/20260930-gb10-v5-pytest-with-pillow-basetemp qrokkun_ai/v5/tests > /mnt/minion/88_minion_rw/projects/qrokkun26/preflight/20260930-gb10-v5-pytest-with-pillow.log 2>&1
+
+exit code 0。log
+``20260930-gb10-v5-pytest-with-pillow.log``
+末行 ``983 passed in 180.67s (0:03:00)``。SHA-256
+``d266f7185d98e6601b13e1aa91fe30491b65a5f7a395539b9040a9593d623a91``。
+
+Pillow 安裝前的 log
+``20260930-gb10-v5-pytest.log`` SHA-256
+``7a67c51f111d56553eb3bc69af0cd3b5fecb0fbb562ebc8d3b46a746f3ddf2f5``，
+末行 ``18 failed, 965 passed in 161.43s (0:02:41)``。18 個失敗都在
+renderer，原因是 ``No module named 'PIL'``。該結果由上述綠色重跑取代。
+
+測試結束後：checkout clean、fixture 已清、GPU 0%、horizon trainer 0、
+無正式 horizon run 目錄。
+
+步驟 5
+------
+
+成對 10k 長訓要另行 owner 授權。該次啟動時重查 live 資源，並只產生
+一次 HKT ``STAMP``、依 ``1790731001`` 展開的兩條 argv，以及空的正式
+目錄。本紀錄停在步驟 4。
+
+未改的科學
+----------
+
+兩臂、gamma／lambda、bootstrap、seed、window、episodes／update、
+updates、eval、init、teacher、dataset 與其餘預先登記項維持
+``1790698576`` 與 ``1790731001``。本文件沒有新的科學選擇。
+
+依據
+----
+
+- ``docs/journal/1790733372_player_v5_gamma_lambda_gb10_preflight.txt``
+- ``docs/journal/1790731001_player_v5_gamma_lambda_horizon_prelaunch_amendment.txt``
+- ``docs/journal/1790698576_player_v5_gamma_lambda_horizon_preregistration.txt``
