@@ -1,0 +1,297 @@
+PlayerV5 gamma/lambda 視野對照 — 預啟動修正
+==========================================
+
+狀態
+----
+
+planned／not started。本文件只補 ``1790698576`` 預先登記的執行身份。
+它不改科學，不是結果，也不是啟動授權。文內 shell 只給日後另行授權的
+啟動使用；撰寫本文件沒有執行那些命令。
+
+本輪沒有改程式、沒有跑測試、沒有訓練、沒有評估、沒有 resume、沒有
+render、沒有 promotion，也沒有 stage／commit／push，沒有寫 NAS 或
+遠端。日後把本 journal commit 上去，那個 commit 只封存契約與執行身份，
+不是執行 HEAD。GB10 正式 checkout 維持凍結
+``c0c9ee165689a043833136de22e9eb0657a8c8f3``，且工作樹 clean。不得把
+未提交的本文件放進執行 checkout。
+
+撰寫主機本輪核對
+----------------
+
+2026-09-30，本機 repo（撰寫當下，啟動之前）：
+
+- ``git rev-parse HEAD`` =
+  ``c0c9ee165689a043833136de22e9eb0657a8c8f3``
+- ``git rev-parse origin/main`` 同此 SHA
+- ``git status --porcelain`` 為空；``main...origin/main``
+- 預先登記
+  ``docs/journal/1790698576_player_v5_gamma_lambda_horizon_preregistration.txt``
+  SHA-256
+  ``4fa87e6459fd26f357ce783de22ea15eda3a00573719c503af3e5575aba94896``
+- 該 SHA 的
+  ``qrokkun_ai/v5/tools/phase3_ranked_ppo_retention.py``
+  寫 ``CURRENT_RUN_SCHEMA_VERSION = 5``
+
+寫入本文件之後，撰寫主機工作樹不再 clean。那是本 journal 尚未 commit
+的狀態，不是執行樹。
+
+凍結程式（讀 ``c0c9ee``，不新選科學）
+--------------------------------------
+
+Commit ``c0c9ee165689a043833136de22e9eb0657a8c8f3``（2026-09-30
+05:31:04 +0800，``feat: add preregistered PlayerV5 horizon training arms``）。
+``bd7443cd7fbbd72fcb6243afc66dc0bf59025c01`` 是其祖先，屬於 seed-11
+契約，不是本輪執行身份。
+
+可執行入口是
+``python -m qrokkun_ai.v5.tools.phase3_gamma_lambda_horizon``。
+它在 aux parser 上追加必要旗標 ``--horizon-arm``，
+``choices=control|long``，然後呼叫同一個
+``phase3_ranked_ppo_retention_aux`` runner。沒有別的 gamma／lambda／
+bootstrap 旗標。``horizon_config`` 鎖住：
+
+- ``control``：``gamma=0.99``、``lambda=0.95``、corrected bootstrap 開
+- ``long``：``gamma=0.9995``、``lambda=0.999``、corrected bootstrap 開
+
+選中臂寫入 knobs：``value_bootstrap=true``、
+``truncation_treated_as_terminal=false``、``horizon_arm``、
+``bootstrap_source=post_step_V(s')``。``run.json`` 的 ``schema_version``
+是 ``5``。``launch.json`` 的 tool 名仍是
+``phase3_ranked_ppo_retention_aux``；記錄的 argv 是 facade 的
+``sys.argv``，含 ``--horizon-arm``。驗收以
+``provenance.git_commit`` 等於上面的凍結 SHA 且 ``dirty=false`` 為準。
+
+省略 ``--end-time`` 且給 ``--max-updates 10000`` 時，
+``resolve_stop_budget`` 得到 ``effective_max_updates=10000``、
+``effective_end_time_hkt=2099-12-31T23:59:00+08:00``。
+``--seed 17`` 使 ``effective_seed=17``；``knobs.torch_seed`` 仍是常數
+``0``。預設 ``--rollout-seed-start`` 是 ``50000``，正式 argv 必須顯式
+給 ``210000``。程式不拒絕 ``--quick``、``--resume``、
+``--resume-from-update`` 或錯誤 window；那些旗標一旦出現，整對依預先
+登記作廢。
+
+程式就緒（先前一輪，本輪未重跑）
+--------------------------------
+
+獨立唯讀審查在凍結 commit 之前檢視當時工作樹的 horizon 實作，結論
+ACCEPTED。該輪重跑 ``qrokkun_ai/v5/tests``：980 passed、3 skipped；
+``test_phase3_gamma_lambda_horizon.py`` 為 15 passed、0 skipped。審查
+把 3 個 skip 記為本機 teacher-checkpoint 測試。本 amendment 輪沒有
+重跑測試，也不把該計數當成啟動授權或執行完成。審查發生時工作樹仍是
+dirty；執行身份是其後凍結的 ``c0c9ee``，不是審查當下的 dirty tree。
+
+啟動主機既有觀察（preflight，不是 launch）
+------------------------------------------
+
+本輪以只讀 SSH 重新核對 GB10 身份（``GB10B``、``ovm-hms-bot``）、
+checkout HEAD、解譯器與 CUDA，並核對 GB10 上 init 的 file SHA；本機
+RO mirror 重新核對 init 與 teacher 的 file SHA。state-dict SHA 沿用
+既有報告，並未在本輪重算。授權啟動時全部必須重算。
+
+- GB10B repo
+  ``/home/ovm-hms-bot/projects/qrokkun26/qrokkun26``
+  目前 HEAD 仍是 ``bd7443cd7fbbd72fcb6243afc66dc0bf59025c01``。
+- venv
+  ``/home/ovm-hms-bot/projects/qrokkun26/venv/bin/python``
+  存在。該次觀察：torch ``2.11.0+cu128``、``torch.cuda.is_available()``
+  為 true、裝置 NVIDIA GB10。這不是本 run 的 runtime 版本。
+- Init 唯讀檔存在：
+  ``/mnt/minion/88_minion_ro/projects/qrokkun26/assets/20260911-scratch_ranked_multiseed_full/seed5/seed5.pt``
+  file SHA-256
+  ``decc50ba2f781f243814bb0c984499bc6bf3ce66f5bcc9cbf22ae1acd3fd545a``；
+  state-dict SHA-256
+  ``d88c96213f9064658760d598a563d43df5a847a228a313837f00982bc3151b0f``。
+- Teacher 唯讀歷史來源存在：
+  ``/mnt/minion/88_minion_ro/tmp/qrokkun26/runs/player_gpu.pt``
+  file SHA-256
+  ``1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1``；
+  state-dict SHA-256（歷史 loader）
+  ``39a6bdfc83f827c2c59a6bb0a46b730506b8aff7966e0072b7441cd6cc5a0a2f``。
+- GB10 舊路徑
+  ``/home/ovm-hms-bot/scratch_phase1/player_gpu.pt``
+  目前 MISSING。不得當來源。
+- 預定執行 teacher
+  ``/home/ovm-hms-bot/projects/qrokkun26/horizon_inputs/player_gpu.pt``
+  尚未建立。授權啟動前才從上面的 RO 檔複製，並用專案 loader 核對
+  file 與 state hash。本文件不宣稱它現在存在。
+
+鎖定路徑（科學身份不變，只填預先登記留白）
+------------------------------------------
+
+- 執行 repo：``/home/ovm-hms-bot/projects/qrokkun26/qrokkun26``
+- ``PYTHONPATH`` 等於該 repo 根
+- 解譯器：``/home/ovm-hms-bot/projects/qrokkun26/venv/bin/python``
+- Init argv：上面的 RO ``seed5.pt`` 絕對路徑。不改用 GB10 scratch。
+- Teacher argv：上面的本機預定絕對路徑。不把 RO 路徑直接傳給
+  ``--teacher``，也不讀已消失的 scratch 檔。
+- Run 根：授權啟動當下的 HKT 分鐘，只算一次。形式
+  ``/mnt/minion/88_minion_rw/projects/qrokkun26/runs/<stamp>-gamma-lambda-horizon``，
+  ``<stamp>`` = ``TZ=Asia/Hong_Kong date +%Y%m%d-%H%M``。
+  兩臂為其下兩個不同空目錄 ``control`` 與 ``long``。
+  ``88_minion_ro`` 不得當 run-dir。本文件不填具體分鐘。
+
+Run 根與 argv：先展開、先記錄
+------------------------------
+
+沿 ``1789890630`` 的 run 目錄規則：正式目錄在
+``88_minion_rw`` 的 ``yyyyMMdd-HHmm-<topic>``，時間戳在啟動時產生。
+本對照的 topic 後綴是 ``gamma-lambda-horizon``。
+
+另行取得 owner 啟動授權之後、任一臂啟動之前，必須：
+
+1. checkout 精確凍結 SHA 且 ``git status --porcelain`` 為空；
+2. 用下面的命令把 ``STAMP``／``RUN_ROOT`` 算好一次；
+3. 把展開後的 ``RUN_ROOT``、兩個 run-dir、兩條完整 argv（絕對路徑，
+   沒有未展開變數）寫進當次 launch 紀錄，再通過下方 preflight。
+
+沒有另行授權或該紀錄／preflight 未完成，都不得建立 run 或開訓。
+兩臂使用同一 ``STAMP``，不得重算。開始與結束的 HKT、
+以及當次 python／torch／CUDA／裝置字串，在真正啟動時記入；現在留空。
+
+下列區塊不是本文件的授權，現在不要執行。
+
+::
+
+    # 未授權。只解析並印出。不 fetch、不 checkout、不複製、不 mkdir、不訓練。
+    set -euo pipefail
+    cd /home/ovm-hms-bot/projects/qrokkun26/qrokkun26
+    STAMP=$(TZ=Asia/Hong_Kong date +%Y%m%d-%H%M)
+    RUN_ROOT=/mnt/minion/88_minion_rw/projects/qrokkun26/runs/${STAMP}-gamma-lambda-horizon
+    CONTROL_RUN_DIR=${RUN_ROOT}/control
+    LONG_RUN_DIR=${RUN_ROOT}/long
+    INIT=/mnt/minion/88_minion_ro/projects/qrokkun26/assets/20260911-scratch_ranked_multiseed_full/seed5/seed5.pt
+    TEACHER=/home/ovm-hms-bot/projects/qrokkun26/horizon_inputs/player_gpu.pt
+    export PYTHONPATH=/home/ovm-hms-bot/projects/qrokkun26/qrokkun26
+    PY=/home/ovm-hms-bot/projects/qrokkun26/venv/bin/python
+    printf '%s\n' \
+      "HEAD=$(git rev-parse HEAD)" \
+      "STAMP=${STAMP}" \
+      "RUN_ROOT=${RUN_ROOT}" \
+      "CONTROL_RUN_DIR=${CONTROL_RUN_DIR}" \
+      "LONG_RUN_DIR=${LONG_RUN_DIR}" \
+      "ARGV_CONTROL=${PY} -m qrokkun_ai.v5.tools.phase3_gamma_lambda_horizon --init-checkpoint ${INIT} --teacher ${TEACHER} --run-dir ${CONTROL_RUN_DIR} --device cuda --max-updates 10000 --seed 17 --rollout-seed-start 210000 --terminal-teacher-diagnostics --horizon-arm control" \
+      "ARGV_LONG=${PY} -m qrokkun_ai.v5.tools.phase3_gamma_lambda_horizon --init-checkpoint ${INIT} --teacher ${TEACHER} --run-dir ${LONG_RUN_DIR} --device cuda --max-updates 10000 --seed 17 --rollout-seed-start 210000 --terminal-teacher-diagnostics --horizon-arm long"
+    # 另行獲授權後，在啟動窗口把上面展開的七行寫入 launch 紀錄；
+    # 完成 preflight 才能啟動兩臂。
+
+兩臂完整 argv（旗標即凍結 CLI 的實際旗標）
+------------------------------------------
+
+工作目錄是 GB10 repo 根。``PYTHONPATH`` 是該絕對路徑。解譯器是上面的
+venv ``python``。兩條都沒有 ``--quick``、``--resume``、
+``--resume-from-update``、``--end-time``、``--out-dir``、
+``--hash-recovery-archives``。
+
+::
+
+    cd /home/ovm-hms-bot/projects/qrokkun26/qrokkun26
+    export PYTHONPATH=/home/ovm-hms-bot/projects/qrokkun26/qrokkun26
+    /home/ovm-hms-bot/projects/qrokkun26/venv/bin/python \
+      -m qrokkun_ai.v5.tools.phase3_gamma_lambda_horizon \
+      --init-checkpoint /mnt/minion/88_minion_ro/projects/qrokkun26/assets/20260911-scratch_ranked_multiseed_full/seed5/seed5.pt \
+      --teacher /home/ovm-hms-bot/projects/qrokkun26/horizon_inputs/player_gpu.pt \
+      --run-dir "${CONTROL_RUN_DIR}" \
+      --device cuda \
+      --max-updates 10000 \
+      --seed 17 \
+      --rollout-seed-start 210000 \
+      --terminal-teacher-diagnostics \
+      --horizon-arm control
+
+    /home/ovm-hms-bot/projects/qrokkun26/venv/bin/python \
+      -m qrokkun_ai.v5.tools.phase3_gamma_lambda_horizon \
+      --init-checkpoint /mnt/minion/88_minion_ro/projects/qrokkun26/assets/20260911-scratch_ranked_multiseed_full/seed5/seed5.pt \
+      --teacher /home/ovm-hms-bot/projects/qrokkun26/horizon_inputs/player_gpu.pt \
+      --run-dir "${LONG_RUN_DIR}" \
+      --device cuda \
+      --max-updates 10000 \
+      --seed 17 \
+      --rollout-seed-start 210000 \
+      --terminal-teacher-diagnostics \
+      --horizon-arm long
+
+``CONTROL_RUN_DIR``／``LONG_RUN_DIR`` 只來自先前那一次 ``STAMP``。
+兩臂同一凍結 commit、同一授權窗口、同一 init、同一 teacher。文件
+順序是 control 然後 long；這不是新的 treatment。任一臂 fail closed、
+interrupted、dirty、SHA 不符、seed／window／gamma／lambda／bootstrap
+不符、未滿 10000 updates，或缺 terminal teacher diagnostics：整對作廢。
+
+另行授權時的 checkout
+----------------------
+
+只在另行啟動授權之後，於 GB10 repo 執行。目標是精確
+``c0c9ee165689a043833136de22e9eb0657a8c8f3``，不是「較新的 main」。
+目前 GB10 停在祖先 ``bd7443cd``，且本 journal 尚未成為 origin 先端時，
+fast-forward 到該 SHA 即可。一旦 main 含有本 amendment 或更晚的
+commit，改為 detach checkout 這個凍結 SHA，不要 fast-forward 到
+amendment。完成後 ``git rev-parse HEAD`` 必須等於該完整 SHA，
+``git status --porcelain`` 必須為空。然後才進入上面的解析步驟。
+
+授權啟動前 preflight（通過才可開訓）
+------------------------------------
+
+在已記錄的 ``RUN_ROOT`` 與 argv 上重做。任一項不符就停，不開訓。
+Dataset identity 不在此列。
+
+- ``git rev-parse HEAD`` =
+  ``c0c9ee165689a043833136de22e9eb0657a8c8f3`` 且 porcelain 為空。
+- 預先登記檔 SHA-256 =
+  ``4fa87e6459fd26f357ce783de22ea15eda3a00573719c503af3e5575aba94896``。
+- ``CURRENT_RUN_SCHEMA_VERSION == 5``。
+- 從 RO 複製 teacher 到預定本機路徑（只讀 RO、只寫該本機檔）。
+  舊 scratch teacher 仍不得使用。複製後以及若檔已在，都用專案
+  loader 重算，不拿手算 hash 代替。
+- Init：``load_initial_checkpoint``（內部
+  ``load_ranked_top_k_checkpoint``）。file SHA-256 與
+  ``meta["state_dict_sha256"]`` 必須等於上文 init 兩枚。
+- Teacher：``phase3_run_provenance.teacher_identity``。
+  ``file_sha256``、``state_dict_sha256`` 必須等於上文 teacher 兩枚，
+  ``architecture`` 為 ``player_v1``。
+- 對兩條正式 argv 呼叫 horizon ``build_parser`` 與
+  ``apply_mode_defaults``（單獨行程，不呼叫 ``run_experiment``）：
+  ``effective_seed==17``；``effective_max_updates==10000``；
+  ``effective_end_time`` 的 ISO 為
+  ``2099-12-31T23:59:00+08:00``；``rollout_seed_start==210000``；
+  ``rollout_seed_schedule(0)`` 為 ``210000``–``210007``；
+  ``rollout_seed_schedule(9999)`` 為 ``289992``–``289999``；
+  ``horizon_arm`` 分別為 ``control``／``long``。
+- ``torch.cuda.is_available()`` 為 true，並把當次
+  ``python`` 版本、``torch.__version__``、CUDA 與裝置名稱寫進授權紀錄。
+  既有的 ``2.11.0+cu128``／NVIDIA GB10 只是先前觀察，須重讀。
+- 兩個 run-dir 不存在或為空，且都沒有 ``run.json``。建立目錄是
+  授權後、開訓前的寫入，只寫這兩個子目錄。
+
+Dataset identity
+``2521bd12ae8b630e65f2645132bde4952fe8f60783ad0e87648ed2af688e558a``
+仍只在完成後驗收。Trainer 在 optimizer 之前不比對它。不符則整對
+invalid。不得把它寫成 launch preflight 已攔截訓練。
+
+啟動時才填、現在留空
+--------------------
+
+實際 ``STAMP`` 與兩個絕對 run-dir；授權紀錄裡展開後的 argv；開始與
+結束 HKT；當次 host、python、torch、CUDA、裝置；``run.json``／
+``report.json`` 路徑與 SHA-256。其餘完成後欄位仍依 ``1790698576``。
+本文件不填這些值，也不宣稱 run 已開始或已結束。
+
+未改的科學
+----------
+
+兩臂定義、0.99/0.95 與 0.9995/0.999、兩臂相同的 post-step ``V(s')``、
+真死 bootstrap 0、seed 17、window ``210000``–``289999``、8 episodes／
+update、10000 updates、init／teacher／dataset 身份、eval
+``3000``–``3029``、U、primary 公式、alpha 目標 0.15 且分臂一次凍結、
+optimizer 其餘項、scripted Spawner、``promotion=false``。本文件沒有
+新的科學選擇。
+
+依據
+----
+
+- ``docs/journal/1790698576_player_v5_gamma_lambda_horizon_preregistration.txt``
+- ``docs/journal/1790695667_player_v5_gamma_lambda_horizon_direction.txt``
+- ``docs/journal/1789890630_player_v5_aux_control_independent_ppo_seed_replication_preregistration.txt``
+  （``yyyyMMdd-HHmm-<topic>`` run 根；時間戳啟動時才填）
+- 凍結 ``c0c9ee165689a043833136de22e9eb0657a8c8f3`` 的
+  ``qrokkun_ai/v5/tools/phase3_gamma_lambda_horizon.py``、
+  ``phase3_ranked_ppo_retention_aux.py``、
+  ``phase3_ranked_ppo_retention.py``
