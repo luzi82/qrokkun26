@@ -1,0 +1,209 @@
+PlayerV5 gamma/lambda 視野對照 — GB10 預啟動就緒檢查
+================================================
+
+狀態
+----
+
+本文件是 2026-09-30 的 GB10 預啟動就緒檢查：設定、資料、依賴、
+資源，以及已經跑完的兩臂非正式有界 smoke 的命令、路徑與雜湊。
+它不授權啟動，不是正式 10k 結果，不是存活比較，也不是 promotion。
+科學契約沿父預先登記與修正案，本輪沒有新的科學選擇。
+
+父預先登記
+``docs/journal/1790698576_player_v5_gamma_lambda_horizon_preregistration.txt``
+SHA-256
+``4fa87e6459fd26f357ce783de22ea15eda3a00573719c503af3e5575aba94896``。
+執行身份以
+``docs/journal/1790731001_player_v5_gamma_lambda_horizon_prelaunch_amendment.txt``
+為準。
+
+本輪只新增預備紀錄，未改程式或正式訓練資料，未啟動 10k 長訓，
+未建立正式 run 目錄或計算 HKT ``STAMP``。下文的非正式 smoke 各完成
+一個 PPO update，故不能稱本輪完全沒有訓練計算。
+
+Hermes ``main`` 在本紀錄撰寫之前是 amendment
+``932c93662219da95b4a8e1292340d99bae73c294``。該 SHA 只封存契約與
+執行身份；本文件可獨立提交，但 GB10 執行 checkout 仍須維持凍結
+``c0c9ee165689a043833136de22e9eb0657a8c8f3``，不得快進到文件提交。
+
+檢查表
+------
+
+身份
+
+- [已核對] GB10B（``ovm-hms-bot``）repo
+  ``/home/ovm-hms-bot/projects/qrokkun26/qrokkun26``
+  為 detached、clean 的
+  ``c0c9ee165689a043833136de22e9eb0657a8c8f3``。
+- [已核對] Hermes ``main`` =
+  ``932c93662219da95b4a8e1292340d99bae73c294``。
+- [已核對] 預先登記 SHA-256 =
+  ``4fa87e6459fd26f357ce783de22ea15eda3a00573719c503af3e5575aba94896``。
+
+設定（唯讀 parser，兩臂；未呼叫 ``run_experiment``）
+
+- [已核對] schema 5。
+- [已核對] seed 17。
+- [已核對] 10000 updates。
+- [已核對] episodes／update 8。
+- [已核對] rollout ``210000``–``289999``。
+- [已核對] eval seeds ``3000``–``3029``，cap 4200。
+- [已核對] control ``(0.99, 0.95)``，bootstrap true。
+- [已核對] long ``(0.9995, 0.999)``，bootstrap true。
+
+資料
+
+- [已核對] Init 唯讀路徑
+  ``/mnt/minion/88_minion_ro/projects/qrokkun26/assets/20260911-scratch_ranked_multiseed_full/seed5/seed5.pt``
+  file SHA-256
+  ``decc50ba2f781f243814bb0c984499bc6bf3ce66f5bcc9cbf22ae1acd3fd545a``；
+  state-dict SHA-256
+  ``d88c96213f9064658760d598a563d43df5a847a228a313837f00982bc3151b0f``。
+  嚴格 ``load_initial_checkpoint`` 通過，``production_compatible``
+  為 true。
+- [已核對] Teacher 在 GB10 本機
+  ``/home/ovm-hms-bot/projects/qrokkun26/horizon_inputs/player_gpu.pt``
+  file SHA-256
+  ``1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1``；
+  state-dict SHA-256
+  ``39a6bdfc83f827c2c59a6bb0a46b730506b8aff7966e0072b7441cd6cc5a0a2f``；
+  ``architecture`` 為 ``player_v1``。
+- [未做] 正式 dataset identity
+  ``2521bd12ae8b630e65f2645132bde4952fe8f60783ad0e87648ed2af688e558a``
+  仍只在完成後驗收。本輪沒有正式資料收集。
+
+依賴
+
+- [已核對] ``/home/ovm-hms-bot/projects/qrokkun26/venv/bin/python``：
+  Python 3.12.3、torch ``2.11.0+cu128``、numpy 2.5.3、
+  ``torch.cuda.is_available()`` 為 true、裝置 NVIDIA GB10。
+  這是本次 preflight 讀數。正式啟動時再記一次當次 runtime。
+- [已核對] 該 GB10 venv 沒有 pytest。pytest 不是訓練要件。
+- [沿用] 先前 Hermes ``qrokkun_ai/v5/tests``：980 passed、3 skipped。
+  本輪沒有重跑。
+- [未做] GB10 完整測試套件沒有跑。Hermes 計數不是 GB10 套件結果。
+
+資源
+
+- [已核對] 上次查看 GPU 使用率 0%。這是點狀讀數。
+- [已核對] 進行中的 horizon trainer 為 0。
+- [已核對] 正式 run 根
+  ``/mnt/minion/88_minion_rw/projects/qrokkun26/runs/``
+  可寫。
+- [已核對] 尚無 ``gamma-lambda-horizon`` run 根。本文件不建立它。
+
+無更新 CUDA 前向
+
+- [已核對] 數值有限。logits 形狀 ``(1, 9)``，value 形狀 ``(1)``。
+  沒有 grad。state-dict SHA-256 仍為
+  ``d88c96213f9064658760d598a563d43df5a847a228a313837f00982bc3151b0f``。
+
+非正式 smoke
+------------
+
+兩臂已在同一 GB10 上依序跑完：先 control，後 long。工作目錄是上面的
+凍結 checkout，``PYTHONPATH=.``。共同旗標是 init 的 RO 路徑、teacher
+的 GB10 本機路徑、``--device cuda``、``--quick``、``--max-updates 1``、
+``--seed 17``、``--rollout-seed-start 210000``。各臂再加上自己的
+``--run-dir`` 與 ``--horizon-arm``。stdout 導到 run-dir 同層的
+``control.log``／``long.log``。
+
+這組命令含 ``--quick`` 與 ``--max-updates 1``，run-dir 在 tmp。
+``1790731001`` 的正式 argv 是 ``--max-updates 10000``、沒有
+``--quick``、含 ``--terminal-teacher-diagnostics``，而且 run-dir 在
+授權後才展開的 ``runs/<STAMP>-gamma-lambda-horizon/``。下面兩條是
+已執行的歷史命令，**不要在相同 run-dir 重跑或覆寫產物**；若需要
+另作診斷，先選全新的 tmp 子目錄。
+
+::
+
+    cd /home/ovm-hms-bot/projects/qrokkun26/qrokkun26
+    PYTHONPATH=. timeout 600 /home/ovm-hms-bot/projects/qrokkun26/venv/bin/python -u -m qrokkun_ai.v5.tools.phase3_gamma_lambda_horizon \
+      --init-checkpoint /mnt/minion/88_minion_ro/projects/qrokkun26/assets/20260911-scratch_ranked_multiseed_full/seed5/seed5.pt \
+      --teacher /home/ovm-hms-bot/projects/qrokkun26/horizon_inputs/player_gpu.pt \
+      --device cuda \
+      --quick \
+      --max-updates 1 \
+      --seed 17 \
+      --rollout-seed-start 210000 \
+      --run-dir /mnt/minion/88_minion_rw/projects/qrokkun26/tmp/20260930-0953-horizon-preflight-smoke/control \
+      --horizon-arm control \
+      > /mnt/minion/88_minion_rw/projects/qrokkun26/tmp/20260930-0953-horizon-preflight-smoke/control.log
+
+    PYTHONPATH=. timeout 600 /home/ovm-hms-bot/projects/qrokkun26/venv/bin/python -u -m qrokkun_ai.v5.tools.phase3_gamma_lambda_horizon \
+      --init-checkpoint /mnt/minion/88_minion_ro/projects/qrokkun26/assets/20260911-scratch_ranked_multiseed_full/seed5/seed5.pt \
+      --teacher /home/ovm-hms-bot/projects/qrokkun26/horizon_inputs/player_gpu.pt \
+      --device cuda \
+      --quick \
+      --max-updates 1 \
+      --seed 17 \
+      --rollout-seed-start 210000 \
+      --run-dir /mnt/minion/88_minion_rw/projects/qrokkun26/tmp/20260930-0953-horizon-preflight-smoke/long \
+      --horizon-arm long \
+      > /mnt/minion/88_minion_rw/projects/qrokkun26/tmp/20260930-0953-horizon-preflight-smoke/long.log
+
+兩臂 exit code 都是 0。兩份 log 內容相同，SHA-256 都是
+``65bed08565f77a88a70462832d03d815df8dd1f079b5424561081a651d8d25eb``。
+stdout 兩行（收集行用凍結程式裡的 em dash；第二行是 facade 的 JSON）：
+
+::
+
+    collected 6 episodes (5 train / 1 held-out) — frames train=200 held=40 mean_ep_len=40.0
+    {"status": "max_updates", "arm_ran": true}
+
+產物目錄
+``/mnt/minion/88_minion_rw/projects/qrokkun26/tmp/20260930-0953-horizon-preflight-smoke/``。
+寫入在這份 RW tmp。RO mirror 只讀。
+
+- ``/mnt/minion/88_minion_rw/projects/qrokkun26/tmp/20260930-0953-horizon-preflight-smoke/control.log``
+  SHA-256
+  ``65bed08565f77a88a70462832d03d815df8dd1f079b5424561081a651d8d25eb``
+- ``/mnt/minion/88_minion_rw/projects/qrokkun26/tmp/20260930-0953-horizon-preflight-smoke/long.log``
+  SHA-256 同上
+- ``/mnt/minion/88_minion_rw/projects/qrokkun26/tmp/20260930-0953-horizon-preflight-smoke/control/run.json``
+  SHA-256
+  ``778f0bf1da58912c6cfbeae827f2fafc7e0b496f653d37831377225df9b8230f``
+- ``/mnt/minion/88_minion_rw/projects/qrokkun26/tmp/20260930-0953-horizon-preflight-smoke/control/report.json``
+  SHA-256
+  ``a7512af3418bfdbfa382f658ae7c9796a55aa976dba4f729267e5aee04585719``
+- ``/mnt/minion/88_minion_rw/projects/qrokkun26/tmp/20260930-0953-horizon-preflight-smoke/long/run.json``
+  SHA-256
+  ``95267373b5fd610480ae9364e0a583f0656984b6db72c98f3bb3af2cbf90f7c5``
+- ``/mnt/minion/88_minion_rw/projects/qrokkun26/tmp/20260930-0953-horizon-preflight-smoke/long/report.json``
+  SHA-256
+  ``0d8dcd007342b036d4f793c04c527ed6956cf8637bc0468ecf7577d168567c07``
+- ``/mnt/minion/88_minion_rw/projects/qrokkun26/tmp/20260930-0953-horizon-preflight-smoke/control/calibration.json``
+  與
+  ``/mnt/minion/88_minion_rw/projects/qrokkun26/tmp/20260930-0953-horizon-preflight-smoke/long/calibration.json``
+  都存在。本文件不記這兩份的 SHA。
+
+Smoke 契約（``--quick`` 預算；兩臂皆 corrected bootstrap）：
+
+- schema 5；clean commit；seed 17
+- ``max_updates`` 1；episodes／update 2；``max_frames`` 30
+- eval seeds ``3000``、``3001``、``3002``；cap 40
+- report：``status=max_updates``、``completed_updates=1``、
+  ``total_episodes=2``、``total_frames=60``
+- alpha：control ``0.9443974216284028``、long
+  ``0.7353933355126552``。診斷值。禁止抄進正式 run 當正式係數。
+
+上面的 6 episodes（5 train／1 held-out，train 200／held 40 frames）
+是 quick 收集。沒有 canonical 10k，沒有正式資料收集，沒有正式 run
+目錄。這些 quick 結果不能拿來做存活比較，不能 promotion，也不能
+代替正式 initial gate（seeds ``3000``–``3029``、cap 4200、
+mean／median ≥ 25.0 s）。
+
+授權後的下一步（現在不做）
+--------------------------
+
+另有 owner 明示啟動授權之後，才依序做這五件事：HKT ``STAMP`` 只算
+一次；依 ``1790731001`` 展開並記錄兩條正式 argv；建立新的正式目錄；
+重做當次 live preflight；然後成對啟動。本文件不計算 ``STAMP``，不建立
+``/mnt/minion/88_minion_rw/projects/qrokkun26/runs/<stamp>-gamma-lambda-horizon``。
+沒有該授權，就停在本檢查。
+
+依據
+----
+
+- ``docs/journal/1790698576_player_v5_gamma_lambda_horizon_preregistration.txt``
+- ``docs/journal/1790731001_player_v5_gamma_lambda_horizon_prelaunch_amendment.txt``
