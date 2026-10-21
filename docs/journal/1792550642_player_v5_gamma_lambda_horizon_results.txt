@@ -1,0 +1,257 @@
+PlayerV5 gamma/lambda 視野對照 — 最終結果
+==========================================
+
+狀態
+----
+
+operationally_complete = true。primary 官方分類 **contrary**。promotion = false。沒有 checkpoint 被 promote。
+
+本文件依預先登記 ``1790698576`` 與預啟動修正 ``1790731001``，從凍結 RO 產物重算。分析過程沒有訓練、評估、resume、render、promotion，沒有寫 NAS，沒有 SSH 到 GB10，也沒有改 runner 或預先登記。Controller 的 ``pair_completed`` 只是啟動簿記；下面的分類來自 ``report.json``、``status.jsonl`` 與 checkpoint packed ``eval_summary``。
+
+機器可讀證據與本文件同目錄：
+
+``docs/journal/1792550642_player_v5_gamma_lambda_horizon_results.json``
+
+SHA-256 ``2ddd0f4ecd4eb1e10565313977a73c24eb6385e521f047b0c82c5b9e519ad993``（538148 bytes）。
+本文件與該 JSON 衝突時以 JSON 為準。
+
+契約與範圍
+----------
+
+兩臂都是 aux retention。唯一預先鎖定的 treatment 是折扣視野一起改：control ``gamma=0.99``、``lambda=0.95``（乘積 0.9405）；long ``gamma=0.9995``、``lambda=0.999``（乘積 0.9985005）。共同條件是 seed 17、rollout seeds ``210000``–``289999``、同一 seed-5 init、同一 teacher、同一 dataset、eval seeds ``3000``–``3029``、以及兩臂相同的 post-step ``V(s')`` bootstrap。
+
+本結論的範圍是這一組耦合配置。它不分開歸因 gamma 或 lambda，也不外推成所有長視野都會變差或變好。
+
+假說與 primary
+--------------
+
+假說：在共同契約下，long 相對 control 的後段 matched survival 有正的配對優勢。U = {3200, 3400, …, 10000}，共 35 個時間點。每個 eval seed 先對 35 個時間點的 ``elapsed_long - elapsed_control`` 取平均，得到一個 ``d_s``。30 個 seed 的 ``d_s`` 做一次雙尾 paired Student-t 95% CI，df = 29。35 個 checkpoint 是同一批 seed 上的重複觀測，不是 35 個獨立實驗。
+
+- n = 30，df = 29
+- d̄ = -31.187698412697287
+- s_d（分母 n−1）= 4.117656577825765
+- t 統計量 d̄ / (s_d/sqrt(n)) = -41.485261372433925
+- scipy.stats.ttest_1samp 的 t = -41.48526137243393。正文採用與 CI 同一公式的 t。
+- t_0.975,29 = 2.045229642132703
+- 95% CI = [-32.725256647919785, -29.65014017747479]
+- CI 規則分類 = contrary
+- 官方分類 = contrary
+
+30 個 ``d_s``（long − control，單位秒）：
+
+- seed 3000: -25.92380952380862
+- seed 3001: -30.03952380952265
+- seed 3002: -26.67714285714195
+- seed 3003: -37.77809523809395
+- seed 3004: -33.38666666666531
+- seed 3005: -35.03238095237958
+- seed 3006: -20.167142857142228
+- seed 3007: -36.825238095236685
+- seed 3008: -33.60428571428455
+- seed 3009: -36.06809523809407
+- seed 3010: -24.8757142857134
+- seed 3011: -28.751428571427436
+- seed 3012: -34.71809523809417
+- seed 3013: -32.819523809522344
+- seed 3014: -30.891428571427657
+- seed 3015: -26.76904761904679
+- seed 3016: -31.914761904760734
+- seed 3017: -30.327142857141677
+- seed 3018: -33.067619047617725
+- seed 3019: -32.92190476190364
+- seed 3020: -25.867619047618053
+- seed 3021: -30.35428571428464
+- seed 3022: -24.60190476190402
+- seed 3023: -33.95952380952263
+- seed 3024: -32.48999999999865
+- seed 3025: -32.48761904761782
+- seed 3026: -33.801904761903415
+- seed 3027: -35.05619047618933
+- seed 3028: -32.800952380951195
+- seed 3029: -31.651904761903733
+
+U 的 35 點裡，eval censor 計數有非 0 的是：u3400 control 1、long 0；u3800 control 1、long 0。合計 control 2、long 0（各 35×30 個 seed-checkpoint）。其餘 U 點兩臂都是 0。terminal u10000 兩臂都是 0/30。
+被標記為 censor 的 eval 是：control u3400 seed 3024 elapsed 69.99999999999731；control u3800 seed 3003 elapsed 69.99999999999731。
+primary 公式沒有改寫，仍使用含 cap 的 elapsed。官方分類來自整段 CI；censor 計數只併列，不另做一次檢定。
+
+操作驗收
+--------
+
+下列項目都從 RO 產物重算或核對。通過的關鍵檢查構成 operationally complete；任一關鍵檢查失敗時官方分類改為 invalid，CI 數字仍保留為描述。
+
+全部 92 項驗收檢查通過。
+
+已落入產物、且與契約一致的身份：
+
+- control：schema 5，effective_seed 17，torch_seed 0，horizon_arm control，gamma 0.99，lambda 0.95，bootstrap post_step_V(s') / value_bootstrap true / truncation_treated_as_terminal false，git c0c9ee165689a043833136de22e9eb0657a8c8f3，dirty false。
+- long：schema 5，effective_seed 17，torch_seed 0，horizon_arm long，gamma 0.9995，lambda 0.999，bootstrap post_step_V(s') / value_bootstrap true / truncation_treated_as_terminal false，git c0c9ee165689a043833136de22e9eb0657a8c8f3，dirty false。
+
+兩臂 ``run.json`` 的 ``arm`` 欄位都是 ``aux``，因為兩臂都走 aux retention runner。臂別以 ``knobs.horizon_arm`` 與目錄 ``control`` / ``long`` 認定。
+
+``knobs.updates`` 仍是 parser 預設 200；停止預算是 ``effective_max_updates=10000``，完成數也是 10000，``stop_reason=max_updates``。預先登記要求的是 effective 停止預算，這項已核對。
+
+Init 檔已在本機對 RO 路徑重算 SHA-256，等於 ``decc50ba2f781f243814bb0c984499bc6bf3ce66f5bcc9cbf22ae1acd3fd545a``。state-dict SHA-256 以 run／checkpoint 紀錄核對，等於 ``d88c96213f9064658760d598a563d43df5a847a228a313837f00982bc3151b0f``。u0 權重的重算 state-dict SHA 與 init 相同，兩臂 u0 的 per-seed elapsed 相同。
+
+Initial gate 物件只保存布林結果與門檻：gate_pass true，mean_min 25.0，median_min 25.0。它沒有另存當下那一次 ``gate_summary`` 的數字。持久化的初始權重評估是 u0 checkpoint：mean 36.268888888888036，median 38.59999999999909，兩者都高於 25 秒。兩臂都已訓練滿 10000 updates，與 gate 通過後才進入訓練迴圈的紀錄一致。
+
+Dataset identity 在兩臂 ``input_manifest.json`` 與 ``report.json`` 都是 ``2521bd12ae8b630e65f2645132bde4952fe8f60783ad0e87648ed2af688e558a``，240 episodes、211/29、146688/20300 frames。stdout 也印出同一組 frames。本分析沒有重採 dataset。
+
+Teacher 的 argv 路徑在 GB10 本機磁碟。本分析沒有 SSH，所以沒有重讀那份 bytes。兩臂產物記入的 file／state SHA 與預先登記相同。修正案點名的 RO 歷史來源 ``/mnt/minion/88_minion_ro/tmp/qrokkun26/runs/player_gpu.pt`` 已在本機重算 file SHA-256，等於記入值 ``1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1``。state-dict SHA 沿用產物紀錄 ``39a6bdfc83f827c2c59a6bb0a46b730506b8aff7966e0072b7441cd6cc5a0a2f``，本輪沒有用 loader 重算。
+
+Bootstrap 的已核對層是 knobs 與每個已載入 checkpoint 的 ``ppo_knobs``：``value_bootstrap=true``、``truncation_treated_as_terminal=false``、``bootstrap_source=post_step_V(s')``。真死延續值為 0 是這條政策在凍結程式裡的定義；逐 frame 的 bootstrap 數值沒有落盤，本分析沒有重跑 rollout。
+
+原臂 launch 各一筆，lineage ``fresh``，``resume_from_update=null``。status 事件正好是 started、10000 次 update_complete、max_updates。沒有 ``resume_requested``。progress 與 checkpoint 的 rollout window 覆蓋 ``210000``–``289999``，80000 個 seed，不重複。u0 checkpoint 記的是 update 1 的 window ``210000``–``210007``，因為 snapshot 0 檢視的是已經採好的那一批。
+
+Controller、preflight、驗證紀錄
+-------------------------------
+
+Controller ``/mnt/minion/88_minion_ro/projects/qrokkun26/preflight/20260930-1235-gamma-lambda-horizon-launch-preflight-controller.json`` SHA-256 ``56d2d4ec0fad8b0e34728d63fd141c10224e8e9a0e603c82579bd23bba02bdca``，status ``pair_completed``，paired_inference_valid 欄位 true。這個欄位不被當成科學證明。control 結束紀錄 2026-10-04T21:48:54.941353+08:00，long 結束紀錄 2026-10-01T18:48:12.859726+08:00，兩邊 exit_code 都是 0，report_status 都是 ``max_updates``。同一結論由各臂 ``report.json`` 的 status 與 ``status.jsonl`` 的 max_updates 事件獨立出現。
+
+Launch preflight ``/mnt/minion/88_minion_ro/projects/qrokkun26/preflight/20260930-1235-gamma-lambda-horizon-launch-preflight.json`` SHA-256 ``4c6427f4f99baf407d4344e897a56f6bfb5c34cd47a183c652608e25001cb0b2``，status ``ready_for_separate_launch_authorization``，training_started 欄位 false，checkout ``c0c9ee165689a043833136de22e9eb0657a8c8f3``，schema 5。它是開訓前紀錄。
+
+12:39 的驗證檔 ``/mnt/minion/88_minion_ro/projects/qrokkun26/preflight/20260930-1235-gamma-lambda-horizon-launch-verified.json`` SHA-256 ``d4fc07736b04c0e5dbeeca1d20c48fa935e4f9fa12561a1b8b7ddf38e8d2fe77``，status ``pair_started_and_run_contracts_verified``，training_completed 欄位 false。它只證明當時兩臂已經啟動且 run.json 契約通過，不證明 10000 updates 已完成。
+
+Secondary：u10000 survival
+-------------------------
+
+這是單一 checkpoint 的配對 CI，不能取代 primary。
+
+- control：mean 43.668888888887686，median 44.59999999999875，population SD 13.341675677234976，sample SD 13.569755030817744，censor 0/30。
+- long：mean 8.788888888888955，median 7.841666666666644，population SD 4.186562130093934，sample SD 4.2581324790865445，censor 0/30。
+- long−control：mean -34.87999999999873，s_d 13.704428766499996，t -13.940429864891518，95% CI [-39.99731780217407, -29.762682197823395]，CI 分類 contrary。
+
+逐 seed 的 terminal elapsed 在 JSON ``secondary_terminal_survival.per_seed``。
+
+Secondary：u10000 held teacher
+------------------------------
+
+Agreement 與 teacher-to-student KL 來自 ``report.json`` 的 terminal snapshot。checkpoint extra 沒有 ``teacher_diagnostics`` 鍵；本分析沒有重跑 teacher diagnostic。
+
+- control agreement 0.6673399209976196，KL 0.2431681603193283
+- long agreement 0.28295567631721497，KL 0.22592706978321075
+- long−control agreement -0.38438424468040466，KL -0.017241090536117554
+
+兩臂 terminal agreement 與 KL 都不是 null。這項 secondary 不能單獨判定視野對照的成敗。
+
+Secondary：frames 與 optimizer steps
+------------------------------------
+
+- control：frames 189810382，optimizer steps 1502848，episodes 80000。jsonl 合計與 report 欄位一致。
+- long：frames 44450082，optimizer steps 367216，episodes 80000。jsonl 合計與 report 欄位一致。
+- long−control frames -145360300，optimizer steps -1135632。兩邊 sample budget 不相等。較短的 on-policy survival 會少掉 frames 與 optimizer steps；這個差額必須入帳，不能事後讀成相同樣本預算下的純視野效果。
+
+Secondary：alpha 與 realized grad_ratio
+---------------------------------------
+
+每臂在 optimizer 之前用自己的 update-1 rollouts（seeds 210000–210007）校準一次。八個 pair 的 norm 都在 ``calibration.json``。用配對平均 norm 重算 ``alpha = 0.15 * mean(||g_ppo||) / (mean(||g_ret||) + 1e-8)``，與凍結 alpha 一致。progress 全程只有這一個 alpha。歷史 alpha 0.38932983697041385 沒有出現。
+
+- control alpha 0.3664742594043411，target 0.15，校準 grad_ratio 0.14999999328500505，cosine 0.05400053318589926，pairs 8。
+  - 全程 realized grad_ratio：n 10000，mean 0.1451182134917949，sample SD 0.04779115829860775，population SD 0.04778876868095089，min 0.05008734519446237，median 0.1375152191892851，max 0.4850318642024561。
+  - 首 1000 realized grad_ratio：n 1000，mean 0.1860791323060394，sample SD 0.05631812596079623，population SD 0.056289959854528004，min 0.07130567725086347，median 0.17682054023632343，max 0.4850318642024561。
+  - 末 1000 realized grad_ratio：n 1000，mean 0.12382101845283192，sample SD 0.03714893453594595，population SD 0.0371303554227379，min 0.05182951856334989，median 0.11965611053561931，max 0.31790851249423613。
+- long alpha 0.3748730065916145，target 0.15，校準 grad_ratio 0.1499999933286987，cosine 0.015004529064754024，pairs 8。
+  - 全程 realized grad_ratio：n 10000，mean 0.37251374795681924，sample SD 0.13363297661345952，population SD 0.13362629479757926，min 0.09405708828348217，median 0.3496262555245442，max 1.165289765626539。
+  - 首 1000 realized grad_ratio：n 1000，mean 0.3650281395526268，sample SD 0.12319592519336343，population SD 0.12313431182357154，min 0.1291650563629528，median 0.34440525174638836，max 1.0309426307600373。
+  - 末 1000 realized grad_ratio：n 1000，mean 0.3669473659184693，sample SD 0.1282520849909485，population SD 0.12818794290892163，min 0.09654919792299126，median 0.34752389113171234，max 0.9180997985243632。
+
+這裡的 realized grad_ratio 是該 update 的 optimizer step 之前、on-policy rollout 上的 ``alpha * ||g_ret|| / (||g_ppo|| + 1e-8)``。它是機制描述，不是 endpoint。jsonl 每一列的 grad_ratio 都等於同一列的 weighted norm 除以 ``g_ppo_norm + 1e-8``。
+
+Secondary：早期 diagnostic agreement
+------------------------------------
+
+來源同 terminal teacher：``report.json`` snapshots 0／10／25／50／100／200。描述用，不是 primary。
+
+update | control agreement | control KL | long agreement | long KL
+0 | 0.7020197510719299 | 0.17762675881385803 | 0.7020197510719299 | 0.17762675881385803
+10 | 0.6797537207603455 | 0.17501869797706604 | 0.5416256189346313 | 0.24722005426883698
+25 | 0.6787192225456238 | 0.18219105899333954 | 0.5252217054367065 | 0.2514350116252899
+50 | 0.6766995191574097 | 0.17872539162635803 | 0.4862561821937561 | 0.2539854943752289
+100 | 0.6880788207054138 | 0.18620255589485168 | 0.47694581747055054 | 0.25839704275131226
+200 | 0.7013793587684631 | 0.1790151596069336 | 0.4239901602268219 | 0.2613650858402252
+
+執行時間
+--------
+
+Wall time 是執行紀錄，不是受控速度比較。
+
+- control launch started 2026-09-30T12:35:59.185979+08:00；status started 2026-09-30T12:37:46.456927+08:00；status max_updates 2026-10-04T21:45:53.565821+08:00；日曆間隔 378487.108894 秒。jsonl ``total_wall_s`` 合計 370268.31470246613，collect 353229.45678133314，ppo 17038.857921132992。相鄰 update 最大間隔 172.588756 秒（update 400 → 401，2026-09-30T17:48:46.665209+08:00 → 2026-09-30T17:51:39.253965+08:00）。
+- long launch started 2026-09-30T12:35:59.190568+08:00；status started 2026-09-30T12:37:46.450759+08:00；status max_updates 2026-10-01T18:47:17.792994+08:00；日曆間隔 108571.342235 秒。jsonl ``total_wall_s`` 合計 104050.25803415116，collect 99508.11512942007，ppo 4542.142904731096。相鄰 update 最大間隔 124.448576 秒（update 25 → 26，2026-09-30T13:05:42.484990+08:00 → 2026-09-30T13:07:46.933566+08:00）。
+- controller 記錄的退出時間：control 2026-10-04T21:48:54.941353+08:00，long 2026-10-01T18:48:12.859726+08:00。晚於 status 的 max_updates 事件，中間包含收尾寫檔。
+
+control 逐 update 的 ``total_wall_s``，依 status 時間落入的區段（描述執行節奏，不是速度檢定）：
+
+- control_before_recorded_diagnostics：n 4509，mean 38.990637345243535 秒，median 38.500175894994754 秒。
+- during_old_aux_diagnostic：n 528，mean 45.023103196899186 秒，median 45.18521017301828 秒。
+- between_old_aux_and_fresh_shadow：n 46，mean 32.84810322243847 秒，median 33.833796921011526 秒。
+- during_fresh_control_shadow：n 211，mean 44.315351974787916 秒，median 44.79070020507788 秒。
+- between_fresh_shadow_and_resumed_shadow：n 33，mean 34.06189502236807 秒，median 32.94771123002283 秒。
+- during_resumed_control_shadow：n 217，mean 44.17704077994597 秒，median 44.28387204394676 秒。
+- control_after_recorded_diagnostics：n 4456，mean 33.46394075962779 秒，median 33.68446442647837 秒。
+
+並行診斷與時脈觀測
+------------------
+
+下面三個目錄在 ``tmp``，與原臂 control 同時使用同一張 GPU。它們的 checkpoint、report、jsonl 都沒有進入 primary。long 的 status max_updates 早於第一筆診斷開始，所以這三段重疊落在 original control 的後段。
+
+- 20261002-143531 old_aux_diagnostic：/mnt/minion/88_minion_ro/projects/qrokkun26/tmp/20261002-143531-old-aux-gpu-u2000。purpose 紀錄為 non-formal GPU-load diagnostic。started 2026-10-02T14:36:46.366333+08:00，exited 2026-10-02T21:19:58.748193+08:00，exit_code -9，existing_control_pid 2442181。SM clock 樣本 24187，範圍 2476–2548 MHz，眾數 2528 MHz（21941 筆），相異頻率 10 個。gpu-util.csv SHA-256 ``962735ecc7e5607c34f0b341ab893d9e0dae72958a68a4ce668ec55e8aaa0c66``。
+- 20261002-214448 fresh_control_shadow：/mnt/minion/88_minion_ro/projects/qrokkun26/tmp/20261002-214448-shadow-control-gpu-u200。purpose 紀錄為 non-formal GPU-load diagnostic。started 2026-10-02T21:45:11.730487+08:00，exited 2026-10-03T00:24:23.929508+08:00，exit_code 0，existing_control_pid 2442181。SM clock 樣本 9550，範圍 2405–2548 MHz，眾數 2528 MHz（8690 筆），相異頻率 12 個。gpu-util.csv SHA-256 ``1935ec6fedd63fe6cd9ec8ad679cee6c2a49fab8fe9235f7ee5424302a9c70d6``。
+- 20261003-004134 resumed_control_shadow：/mnt/minion/88_minion_ro/projects/qrokkun26/tmp/20261003-004134-shadow-control-resume-gpu。purpose 紀錄為 non-formal GPU-load diagnostic。started 2026-10-03T00:42:38.936634+08:00，exited 2026-10-03T03:26:04.701987+08:00，exit_code 0，existing_control_pid 2442181。SM clock 樣本 9804，範圍 2405–2548 MHz，眾數 2528 MHz（8845 筆），相異頻率 14 個。gpu-util.csv SHA-256 ``777f8bb9cdd0622433f56098247bd4414266dfec982e5d7efec3a782cc50beba``。
+
+原臂目錄沒有自己的 SM 時脈序列。也沒有一份寫在原臂產物裡的手動鎖頻命令。已核對的是診斷取樣器在共享 GPU 上記到的時脈並非常數。共享與時脈變動使 wall time 不能拿來比速度。預先登記的作廢條件沒有把時脈或 wall time 列進去；這次沒有因此把整對標成 invalid。
+
+resumed shadow 的 ``fork-source.json`` 列出從 original control 複製出去的 36 個檔。其中 36 個的現行 RO SHA-256 仍等於複製當下記錄。該診斷的 ``--resume-from-update`` 用在 tmp 複本上，不在 original control 的 launch argv 裡。
+
+Retention 物件
+--------------
+
+- control retention_pass true，promotion false，first_breaking_snapshot 100，reason ""。
+- long retention_pass false，promotion false，first_breaking_snapshot 10，reason "retention failed: mean below threshold, median below threshold, agreement below threshold"。
+
+這是 aux retention 門檻物件。預先登記禁止用它取代配對 primary，也禁止把非本輪 terminal 的 PASS/FAIL 當成這次視野對照的判決。promotion 兩臂都是 false。
+
+已核對與未取得
+--------------
+
+已核對：
+
+- 35 個 U checkpoint 的檔案 SHA-256、本機副本 SHA-256、packed state-dict SHA-256 與重算 state-dict SHA-256。
+- 每個 U 點、每個 seed 3000–3029 的 elapsed 與 censor flag。
+- 早期 snapshot 0／10／25／50／100／200 的同類 checkpoint 身分，以及 report snapshot 與 packed eval 的逐 seed 一致。
+- run、report、launch、calibration、input manifest、status、progress、artifact manifest 的路徑與 SHA-256。
+- ``ppo_aux_final.pt`` 與 ``recovery.pt`` 的檔案 SHA-256。兩者都沒有 torch.load，也沒有進入 primary。
+- schema 5、seed 17、window、gamma／lambda、bootstrap knobs、10000／80000、乾淨凍結 commit、init／dataset hash、gate 布林、terminal diagnostics、分臂 alpha。
+
+未取得，且沒有填造：
+
+- GB10 teacher argv 路徑 ``/home/ovm-hms-bot/projects/qrokkun26/horizon_inputs/player_gpu.pt`` 的 bytes。沒有 SSH。
+- teacher state-dict 的本輪 loader 重算。產物裡有記入值。
+- initial gate 那一次獨立 ``evaluate_deterministic`` 的數字摘要。持久化數字是 u0 packed eval。
+- 逐 frame 真死 bootstrap 值。
+- checkpoint 檔內的 teacher agreement／KL。它們在 report snapshot。
+- 原臂自己的時脈日誌，以及一份原臂產物中的手動鎖頻命令。
+- 獨立的 spawner 類型欄位。progress 有 ``scripted_survival_mean``，那是 on-policy rollout survival，不是 eval endpoint，也沒有拿來算 primary。
+- launch 紀錄裡的 CUDA ``driver_version`` 是 null。
+
+重現
+----
+
+- script：``/storage/hermes/home/dev_gpt_0/scratch/gamma_lambda_horizon_final_20261021/analyze_gamma_lambda_horizon_results.py``
+- script SHA-256：``eca7a3a1cec58c13239fc1dd36c65cdc01958320e4a72ccbd809b05ee9e204ae``
+- interpreter：``/storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python``
+- python：3.11.16 (main, Sep  1 2026, 14:18:37) [Clang 22.1.3 ]
+- torch 2.14.0+cpu，cuda_available false；scipy 1.17.1 裝在 scratch venv，沒有改既有 torch 環境。
+- 分析開始 2026-10-21T10:43:56.344044+08:00，組裝完成 2026-10-21T10:44:02.590585+08:00，組裝耗時 6.246530086995335 秒。
+- 命令：
+
+  PYTHONPATH=/storage/hermes/home/dev_gpt_0/scratch/gamma_lambda_horizon_final_20261021/venv/lib/python3.11/site-packages \
+  /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python \
+  /storage/hermes/home/dev_gpt_0/scratch/gamma_lambda_horizon_final_20261021/analyze_gamma_lambda_horizon_results.py
+
+既有 CPU torch 環境沒有 scipy，所以只在上述 scratch venv 安裝 scipy。checkpoint 先複製到該 scratch 的 ``copied_artifacts``，SHA-256 對上之後才 ``torch.load`` 到 CPU。
+
+自洽檢查 92 項的結果見 JSON ``acceptance_checks``。primary 由 ``d_s`` 即時公式與第二次呼叫比對。寫出 JSON 之後會再讀回，用其中的 ``d_s`` 重算 CI 與分類。
+
+Promotion
+---------
+
+promotion = false。官方分類不論是 support、contrary、indeterminate 或 invalid，都不構成 production 授權。
