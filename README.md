@@ -103,11 +103,11 @@ PYTHONPATH=. python3 -m qrokkun_env.sanity --policy flee --seeds 20 --compare
 
 `flee` (away from nearest bullet) vs scripted spawner; `--compare` also runs `idle`.
 
-### Train player (CPU)
+### Train PlayerV10 (120s cap, zero-inertia physics)
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements-train.txt
-PYTHONPATH=. .venv/bin/python -m qrokkun_ai.v0.train.player_v0 --episodes 800 --out dist/player_mlp.pt
+PYTHONPATH=. .venv/bin/python -m qrokkun_ai.v10.train.train_player_v10 --updates 300 --out-dir runs/player_v10
 ```
 
-Checkpoint metrics: `qrokkun_ai/v0/checkpoints/player_mlp_cpu_metrics.json`.
+Legacy `v0`..`v5` (inertia-era physics) are archived at git tag `legacy-inertia-physics-v5`.

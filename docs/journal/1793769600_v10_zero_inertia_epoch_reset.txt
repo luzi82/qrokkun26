@@ -1,0 +1,7 @@
+Epoch reset: inertia-era v0..v5 -> zero-inertia v10
+
+The inertia-era line v0..v5 is archived at git tag legacy-inertia-physics-v5
+(commit af3902958836ce296ac6095d03afaa5fb96428bb).
+
+Training continues as v10 under zero-inertia player physics, with the episode
+cap at 120s (7200-step).
