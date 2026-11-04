@@ -170,11 +170,8 @@ class Qrokkun26Env:
             self.pvx = 0.0
             self.pvy = 0.0
         else:
-            tx = dx * C.PLAYER_MAX_SPEED
-            ty = dy * C.PLAYER_MAX_SPEED
-            self.pvx, self.pvy = _move_toward(
-                self.pvx, self.pvy, tx, ty, C.PLAYER_ACCEL * self.dt
-            )
+            self.pvx = f32(dx * C.PLAYER_MAX_SPEED)
+            self.pvy = f32(dy * C.PLAYER_MAX_SPEED)
         self.px = f32(self.px + f32(self.pvx * self.dt))
         self.py = f32(self.py + f32(self.pvy * self.dt))
         self.px = f32(

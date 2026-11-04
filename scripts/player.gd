@@ -46,7 +46,7 @@ func _physics_process(delta: float) -> void:
 			dir.y += 1.0
 	if dir != Vector2.ZERO:
 		dir = dir.normalized()
-		velocity = velocity.move_toward(dir * MAX_SPEED, ACCEL * delta)
+		velocity = dir * MAX_SPEED
 		_set_look(dir)
 	else:
 		# Snap-stop on key release (no coasting slide).

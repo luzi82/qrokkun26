@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import math
+import struct
 
 from qrokkun_env import ACTIONS, Qrokkun26Env
 from qrokkun_env import constants as C
 from qrokkun_env.env import _move_toward, _spawn_interval
+from qrokkun_env.godot_rng import f32
 
 
 def test_actions_count():
@@ -20,6 +22,48 @@ def test_reset_centers_player():
     assert abs(obs["player"][1] - (C.FIELD_Y + C.FIELD_H * 0.5)) < 1e-6
     assert obs["dead"] is False
     assert obs["elapsed"] == 0.0
+
+
+def _f32_bits(x: float) -> int:
+    return struct.unpack("<I", struct.pack("<f", x))[0]
+
+
+def test_instantaneous_velocity_no_inertia():
+    """One frame reaches full speed in every direction; reverse has no coast."""
+    diag = f32(102.0 / math.sqrt(2.0))
+    # Godot Vector2(±1, ±1).normalized() * 102 and f32((±1/hypot(1,1))*102)
+    # share IEEE-754 binary32 ±72.12489318847656 (0x42903ff2 / 0xc2903ff2).
+    assert diag == f32((1.0 / math.hypot(1.0, 1.0)) * 102.0)
+    assert _f32_bits(diag) == 0x42903FF2
+    assert _f32_bits(f32(-diag)) == 0xC2903FF2
+    expected = {
+        "n": (0.0, -102.0),
+        "ne": (diag, f32(-diag)),
+        "e": (102.0, 0.0),
+        "se": (diag, diag),
+        "s": (0.0, 102.0),
+        "sw": (f32(-diag), diag),
+        "w": (-102.0, 0.0),
+        "nw": (f32(-diag), f32(-diag)),
+    }
+    assert len(expected) == 8
+    for action, (ex, ey) in expected.items():
+        env = Qrokkun26Env(seed=0)
+        env.reset()
+        assert env.pvx == 0.0 and env.pvy == 0.0
+        env.step(action)
+        assert env.pvx == ex, (action, env.pvx, ex)
+        assert env.pvy == ey, (action, env.pvy, ey)
+        assert _f32_bits(env.pvx) == _f32_bits(ex)
+        assert _f32_bits(env.pvy) == _f32_bits(ey)
+
+    env = Qrokkun26Env(seed=0)
+    env.reset()
+    env.step("e")
+    assert env.pvx == 102.0
+    env.step("w")
+    assert env.pvx == -102.0
+    assert env.pvy == 0.0
 
 
 def test_idle_snap_stop():
