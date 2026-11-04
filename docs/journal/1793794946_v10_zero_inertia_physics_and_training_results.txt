@@ -1,0 +1,60 @@
+2026-11-04 — Zero-Inertia Physics Fix, v10 Epoch Reset (120s Cap), and PlayerV10 Results
+========================================================================================
+
+1. Root-Cause Diagnosis of the Legacy v5 (~36–43s) Ceiling
+----------------------------------------------------------
+During initial RL exploration on GB10 (`ovm-hms-bot@192.168.0.41`), we isolated three compounding bottlenecks that held `PlayerV5` around ~36–43s under the old codebase:
+  (a) Shared Actor-Critic Backbone Interference: Under long horizons (`gamma=0.9995, lam=0.999`), shared-trunk value gradients washed out the policy representation (`EV <= 0`). Decoupling the Critic into an independent MLP (`reward_scale=0.05`) restored `EV` to `0.73–0.88`.
+  (b) Single-Frame Myopia & Static Teacher Anchoring: Anchoring to the static `PlayerV1` teacher (`35.5s`) prevented the policy from surpassing the teacher, while raw `(dx, dy, vx, vy)` coordinates required the 2-layer MLP to implicitly integrate 8-way multi-step collision geometry. Adding explicit discrete-step kinematic clearance features (`batch_kinematic_clearances`) immediately jumped single-forward-pass MLP survival to ~60s.
+  (c) Fatal Physics Defect — Velocity Turnaround Inertia (`PLAYER_ACCEL = 980.0`):
+      Inspection of `scripts/player.gd` and `qrokkun_env/env.py` revealed an unintended asymmetry:
+      - Releasing keys (`idle`) snapped velocity to `(0, 0)` in 1 frame.
+      - Pressing or reversing direction used `move_toward(..., ACCEL * delta)` with `ACCEL = 980.0` (`16.33 px/s` per frame vs `MAX_SPEED = 102.0 px/s`).
+      - Consequently, reversing direction (e.g., `e -> w`) took 12 frames (`0.20s`), during which the ship slid ~6 frames in the OLD direction before crossing zero speed.
+      Owner confirmed that player movement was intended to be strictly zero-inertia (instantaneous single speed `102.0 px/s` on key press or direction change, instantaneous stop on release, normalized diagonal speed equal to cardinal speed, and constant bullet velocity after spawn).
+
+2. Legacy Archival (`legacy-inertia-physics-v5`) and Zero-Inertia Physics Fix
+-----------------------------------------------------------------------------
+- Tagged and pushed `legacy-inertia-physics-v5` at commit `af3902958836ce296ac6095d03afaa5fb96428bb` to preserve all `v0`–`v5` code, checkpoints, and inertia-era journal records.
+- Removed obsolete `qrokkun_ai/v0`..`v5` modules and inertia-era `docs/journal/17*` files from `main`.
+- Updated `scripts/player.gd` and `qrokkun_env/env.py` (`commit 092f826`):
+  - Pressing any of the 8 directions sets velocity to `dir.normalized() * 102.0` on frame 1.
+  - Releasing (`idle`) sets velocity to `(0.0, 0.0)` on frame 1.
+  - Regenerated `qrokkun_env/tests/fixtures/monkey_seed42_120.jsonl` with headless Godot 4.7.2 (`monkey_verify.py`: 120 frames, `mismatches=0`) and added `test_instantaneous_velocity_no_inertia()` in `qrokkun_env/tests/test_env.py`.
+
+3. `qrokkun_ai/v10` Architecture & EGM Goldfish / Codex Review (`commit 3e4b519`)
+---------------------------------------------------------------------------------
+- Design specification documented in `docs/designs/v10_instant_physics_and_ai_reset.md` (audited by EGM Goldfish subagents `design_critic` and `implementation_readiness` on `gpt-6.1-sol`, and code-reviewed via `codex exec --model gpt-6.1-sol` -> `ACCEPTED`, 28/28 pytest tests passing).
+- Episode cap raised from 70s (`4200` frames) to **120s (`7200` frames)** across training, evaluation, and diagnostic rendering.
+- `qrokkun_ai/v10/obs_v10.py`:
+  - `PLAYER_FEAT_V10 = 6`: `[norm_x, norm_y, left_wall_dist, right_wall_dist, min(elapsed / 120.0, 1.0), float(spawn_acc)]` (redundant player velocity features removed under zero-inertia physics).
+  - `DEFAULT_TOP_K_V10 = 12` nearest bullets (`BULLET_FEAT_V10 = 9`: `dx/W, dy/H, vx/125, vy/125, r/4, kind_onehot[4]`).
+  - `batch_kinematic_clearances_v10`: Pure PyTorch batched 12-frame discrete lookahead under zero-inertia player kinematics with exact wall clamping, returning minimum signed surface clearance for all 9 actions.
+- `qrokkun_ai/v10/agents/player_v10.py`:
+  - `PlayerV10`: `in_dim = 6 + 12*9 + 12 + 18 = 144`, `hidden = 472`, fully decoupled `policy_body`/`policy_head` and `value_body`/`value_head` (zero shared weights), strict SHA-256 checkpoint verification (`save_v10_checkpoint`, `load_v10_checkpoint`).
+- `qrokkun_ai/v10/train/train_player_v10.py`:
+  - Strictly on-policy lockstep vectorized rollout collection (`collect_rollouts_v10`) with exact cap-boundary death precedence (`done` on step 7200 records `terminated=True, truncated=False, bootstrap_value=0.0`; survival through step 7200 records `truncated=True, censored=True, bootstrap_value=V(s_T)`).
+  - Hybrid online zero-inertia kinematic expert supervision (`compute_kinematic_expert_targets`) + Decoupled-Critic PPO.
+
+4. GB10 Training Results (`PlayerV10`, 120s Cap)
+------------------------------------------------
+Trained on GB10 (`/home/ovm-hms-bot/projects/qrokkun26/tmp/20261104_v10_run1`, `episodes_per_update=12`, `max_steps=7200`):
+  - `u =   0` (0.0m)  : `val_mean =   8.61s` (`med =   7.57s`, `censors =  0/30`)
+  - `u =  10` (3.0m)  : `val_mean =  96.74s` | `paired_eval =  92.24s` (`med =  90.24s`, `censors =  2/30`) | `agr = 0.819` | `EV = 0.875`
+  - `u =  25` (9.8m)  : `val_mean =  97.06s` | `paired_eval =  94.54s` (`med =  93.68s`, `censors =  5/30`) | `agr = 0.845` | `EV = 0.845`
+  - `u =  50` (21.2m) : `val_mean = 100.80s` | `paired_eval = 103.91s` (`med = 110.13s`, `censors = 13/30`) | `agr = 0.860` | `EV = 0.849`
+  - `u = 100` (44.5m) : `val_mean = 102.46s` | `paired_eval = 106.16s` (`med = 119.63s`, `censors = 15/30`) | `agr = 0.899` | `EV = 0.735`
+
+At `u = 100`, `PlayerV10` achieved **106.16s mean** and **119.63s median** on `PAIRED_EVAL_SEEDS_V10` (`3000..3029`), with **15 / 30 seeds (50%) surviving the full 120.0s cap**. Training was paused at `u = 115` per owner instruction, and the `u = 100` checkpoint was archived locally at `/storage/hermes/home/hms-dev-gi-argon/v10_ckpts/best_player_v10_u100.pt` (`file_sha256: 135d6b6c5e26822fdc99a7f2f98ccb31fa769a018b1bcfea64a5c522c284b472`).
+
+5. Diagnostic Renderer & Hit Animation (`commits 955ea7d`, `848dba8`)
+---------------------------------------------------------------------
+- Added `qrokkun_ai/v10/render_player_v10_demo.py` (fixed 120s / 7200-frame contract, preloaded canonical Godot bullet and directional player sprites, JSON identity sidecar).
+- Added a 0.5s (30-frame) player hit animation in both `scripts/player.gd` and `qrokkun_ai/v10/render_player_v10_demo.py` (screen red flash, red/yellow sprite blink + shake, dual expanding shockwave rings, 8 radial sparks, and HUD `[HIT!]` tag).
+- Rendered 5-seed diagnostic reel (`seeds 3000..3004`, total duration `460.22s`):
+  - Seed 3000: `100.15s` (hit)
+  - Seed 3001: `58.43s` (hit)
+  - Seed 3002: `60.37s` (hit)
+  - Seed 3003: `120.00s` (frame_cap / censored)
+  - Seed 3004: `119.27s` (hit)
+  - Saved to NAS `/mnt/minion/88_minion_rw/projects/qrokkun26/demo_videos/2026-11-04_1654_hit_anim/best_player_v10_u100_seeds3000_3004_hit_anim.mp4` and `/mnt/minion/88_minion_rw/owner_inbox/20261104-1654_qrokkun26_v10_u100_seeds3000_3004_hit_anim.mp4`.
