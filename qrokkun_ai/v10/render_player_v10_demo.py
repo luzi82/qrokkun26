@@ -24,6 +24,7 @@ from qrokkun_env.env import ACTIONS, Qrokkun26Env
 
 FIXED_SEED = 3000
 FIXED_FRAME_CAP = 7200  # 120.0s cap at 60 Hz
+HIT_ANIM_FRAMES = 30  # 0.50s hit animation tail at 60 Hz
 
 BULLET_SPRITE_FILES = {
     0: "bullet_small.png",
@@ -140,8 +141,10 @@ def render_frame(
     bullet_sprites: dict[int, Image.Image],
     player_sprites: dict[str, Image.Image] | None = None,
     seed: int | None = None,
+    hit_step: int | None = None,
 ) -> Image.Image:
-    """Draw one post-step canonical-environment frame."""
+    """Draw one post-step canonical-environment frame (with optional hit animation)."""
+    import math
     from PIL import ImageDraw
 
     width, height = int(C.VIEW_W) * scale, int(C.VIEW_H) * scale
@@ -169,18 +172,78 @@ def render_frame(
         p_sprite = _load_sprite(
             assets / player_files[action], int(C.PLAYER_RADIUS), (240, 240, 250)
         )
-    _paste_centered(
-        image,
-        p_sprite,
-        env.px,
-        env.py,
-        scale,
-    )
+
+    if hit_step is None:
+        _paste_centered(
+            image,
+            p_sprite,
+            env.px,
+            env.py,
+            scale,
+        )
+        status_suffix = f"act={action}"
+        hud_col = (220, 230, 255, 255)
+    else:
+        p = min(max(float(hit_step) / float(max(HIT_ANIM_FRAMES - 1, 1)), 0.0), 1.0)
+        # Screen flash (mirrors main.gd flash Color(1.0, 0.25, 0.35) over first 11 frames)
+        if hit_step < 12:
+            flash_alpha = int((1.0 - hit_step / 12.0) * 115)
+            flash_layer = Image.new("RGBA", (width, height), (255, 64, 89, flash_alpha))
+            image.alpha_composite(flash_layer)
+            draw = ImageDraw.Draw(image)
+
+        # Jittering, blinking tinted player sprite
+        shake = (1.0 - p) * 2.5
+        jx = env.px + math.sin(p * 55.0) * shake
+        jy = env.py + math.cos(p * 43.0) * shake
+        blink = (hit_step // 2) % 2 == 0
+        tint_rgb = (255, 64, 89) if blink else (255, 230, 95)
+        r_ch, g_ch, b_ch, a_ch = p_sprite.split()
+        tinted = Image.merge(
+            "RGBA",
+            (
+                r_ch.point(lambda v: (v * tint_rgb[0]) // 255),
+                g_ch.point(lambda v: (v * tint_rgb[1]) // 255),
+                b_ch.point(lambda v: (v * tint_rgb[2]) // 255),
+                a_ch,
+            ),
+        )
+        _paste_centered(image, tinted, jx, jy, scale)
+
+        # Expanding dual shockwave rings + 8 radial sparks around (env.px, env.py)
+        cx_px, cy_px = env.px * scale, env.py * scale
+        r1 = (4.0 + 22.0 * p) * scale
+        draw.ellipse(
+            (cx_px - r1, cy_px - r1, cx_px + r1, cy_px + r1),
+            outline=(255, 80, 95, 255),
+            width=max(2, scale),
+        )
+        if p > 0.10:
+            p2 = min((p - 0.10) / 0.90, 1.0)
+            r2 = (3.0 + 14.0 * p2) * scale
+            draw.ellipse(
+                (cx_px - r2, cy_px - r2, cx_px + r2, cy_px + r2),
+                outline=(255, 225, 90, 255),
+                width=max(1, scale - 1),
+            )
+        for k_ray in range(8):
+            ang = k_ray * (math.pi / 4.0) + p * 0.6
+            d_in = (3.0 + 10.0 * p) * scale
+            d_out = (6.0 + 18.0 * p) * scale
+            x0 = cx_px + math.cos(ang) * d_in
+            y0 = cy_px + math.sin(ang) * d_in
+            x1 = cx_px + math.cos(ang) * d_out
+            y1 = cy_px + math.sin(ang) * d_out
+            draw.line((x0, y0, x1, y1), fill=(255, 210, 110, 255), width=max(1, scale - 1))
+
+        status_suffix = f"act={action}  [HIT!]"
+        hud_col = (255, 110, 125, 255)
+
     seed_prefix = f"seed={seed}  " if seed is not None else ""
     draw.text(
         (6, 2),
-        f"{seed_prefix}t={env.elapsed:5.1f}s  bullets={len(env.bullets):3d}  act={action}",
-        fill=(220, 230, 255, 255),
+        f"{seed_prefix}t={env.elapsed:5.1f}s  bullets={len(env.bullets):3d}  {status_suffix}",
+        fill=hud_col,
     )
     return image.convert("RGB")
 
@@ -227,7 +290,11 @@ def render_demo(
         env = Qrokkun26Env(seed=seed)
         env.reset(seed=seed)
 
+        last_action_str = "idle"
+
         def write_frame(env: Qrokkun26Env, action: str, frame: int) -> None:
+            nonlocal last_action_str
+            last_action_str = action
             render_frame(
                 env,
                 action,
@@ -236,9 +303,23 @@ def render_demo(
                 bullet_sprites=bullet_sprites,
                 player_sprites=player_sprites,
                 seed=seed,
+                hit_step=None,
             ).save(local_frames_dir / f"f{frame - 1:06d}.png", compress_level=1)
 
         result = _run_loaded_rollout(net, device, env, seed=seed, on_frame=write_frame)
+        if result.get("hit"):
+            base_idx = int(result["frames"])
+            for h_idx in range(HIT_ANIM_FRAMES):
+                render_frame(
+                    env,
+                    last_action_str,
+                    assets,
+                    scale,
+                    bullet_sprites=bullet_sprites,
+                    player_sprites=player_sprites,
+                    seed=seed,
+                    hit_step=h_idx,
+                ).save(local_frames_dir / f"f{base_idx + h_idx:06d}.png", compress_level=1)
         command = [
             "ffmpeg",
             "-framerate",

@@ -22,10 +22,39 @@ var locked: bool = true
 var dead: bool = false
 var use_force_dir: bool = false
 var force_dir: Vector2 = Vector2.ZERO
+var hit_anim_t: float = 0.0
+var hit_origin: Vector2 = Vector2.ZERO
 
 
 func _ready() -> void:
 	area_entered.connect(_on_area_entered)
+
+
+func _process(delta: float) -> void:
+	if hit_anim_t > 0.0:
+		hit_anim_t = maxf(0.0, hit_anim_t - delta)
+		var p := 1.0 - (hit_anim_t / 0.45)
+		var blink := int(p * 18.0) % 2 == 0
+		modulate = Color(1.0, 0.25, 0.35, 1.0) if blink else Color(1.0, 0.9, 0.4, 1.0)
+		var shake := (1.0 - p) * 2.5
+		$Sprite2D.position = Vector2(sin(p * 55.0) * shake, cos(p * 43.0) * shake)
+		queue_redraw()
+		if hit_anim_t <= 0.0:
+			$Sprite2D.position = Vector2.ZERO
+			modulate = Color(1.0, 0.35, 0.4, 0.85)
+			queue_redraw()
+
+
+func _draw() -> void:
+	if hit_anim_t > 0.0:
+		var p := 1.0 - (hit_anim_t / 0.45)
+		var r1 := lerpf(4.0, 24.0, p)
+		var a1 := clampf(1.0 - p, 0.0, 1.0)
+		draw_arc(Vector2.ZERO, r1, 0.0, TAU, 24, Color(1.0, 0.3, 0.35, a1), 1.5)
+		if p > 0.12:
+			var p2 := clampf((p - 0.12) / 0.88, 0.0, 1.0)
+			var r2 := lerpf(3.0, 15.0, p2)
+			draw_arc(Vector2.ZERO, r2, 0.0, TAU, 20, Color(1.0, 0.88, 0.35, (1.0 - p2) * 0.85), 1.0)
 
 
 func _physics_process(delta: float) -> void:
@@ -64,6 +93,9 @@ func _on_area_entered(area: Area2D) -> void:
 	if area.is_in_group("bullets"):
 		dead = true
 		locked = true
+		hit_anim_t = 0.45
+		hit_origin = global_position
+		queue_redraw()
 		died.emit()
 
 
@@ -103,10 +135,13 @@ func _set_look(dir: Vector2) -> void:
 func arm() -> void:
 	dead = false
 	locked = false
+	hit_anim_t = 0.0
+	$Sprite2D.position = Vector2.ZERO
 	modulate = Color.WHITE
 	velocity = Vector2.ZERO
 	visible = true
 	_set_look(Vector2.ZERO)
+	queue_redraw()
 
 
 func freeze() -> void:
