@@ -7,7 +7,7 @@ import struct
 
 from qrokkun_env import ACTIONS, Qrokkun26Env
 from qrokkun_env import constants as C
-from qrokkun_env.env import _move_toward, _spawn_interval
+from qrokkun_env.env import _spawn_interval
 from qrokkun_env.godot_rng import f32
 
 
@@ -73,13 +73,6 @@ def test_idle_snap_stop():
     assert env.pvx != 0.0 or env.pvy != 0.0
     env.step("idle")
     assert env.pvx == 0.0 and env.pvy == 0.0
-
-
-def test_move_toward_godot_parity():
-    x, y = _move_toward(0.0, 0.0, 10.0, 0.0, 3.0)
-    assert abs(x - 3.0) < 1e-9 and abs(y) < 1e-9
-    x, y = _move_toward(0.0, 0.0, 2.0, 0.0, 3.0)
-    assert abs(x - 2.0) < 1e-9
 
 
 def test_spawn_interval_decreases():

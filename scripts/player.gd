@@ -4,7 +4,6 @@ extends Area2D
 signal died
 
 const MAX_SPEED := 102.0
-const ACCEL := 980.0
 const MARGIN := 6.0
 
 const TEX_IDLE := preload("res://assets/player.png")

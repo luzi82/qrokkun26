@@ -33,16 +33,6 @@ ACTION_TO_DIR = {
 }
 
 
-def _move_toward(x: float, y: float, tx: float, ty: float, delta: float) -> tuple[float, float]:
-    # Godot Vector2 uses float32 (real_t).
-    dx, dy = f32(tx - x), f32(ty - y)
-    dist = f32(math.hypot(dx, dy))
-    if dist <= delta or dist == 0.0:
-        return f32(tx), f32(ty)
-    s = f32(delta / dist)
-    return f32(x + dx * s), f32(y + dy * s)
-
-
 def _spawn_interval(elapsed: float) -> float:
     t = elapsed
     if t < 8.0:
