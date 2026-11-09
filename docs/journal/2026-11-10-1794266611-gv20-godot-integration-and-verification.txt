@@ -1,0 +1,104 @@
+Gv20 Godot integration and verification
+
+Record timestamp: 1794266611 = 2026-11-10 07:23:31 Asia/Hong_Kong
+(UTC+08:00), supplied from actual owner-turn tooling. The filename retains
+that owner-turn timestamp rather than substituting this documentation edit time.
+Implementation provenance: ab8cae3 (local main),
+"feat(gv20): integrate playable Godot rules with engine parity tests".
+The documentation commit hash is not yet known.
+
+Scope and delivered behavior
+
+Normal F5/project launch now runs scripted Gv20 in the existing main scene.
+Title, elapsed-time score, death animation, game-over UI, score persistence,
+and restart remain available. Player speed is 102 with immediate stopping.
+Bullets have radius 2.6 and constant velocity; player collision radius is 4.
+S spawns use uniform rays from (160,126) to the playfield boundary,
+independent Gaussian aim offsets (sigma 13.2 per axis), and uniform speeds
+30..200. The shifted accumulator begins at frames 0,27,53,79,104.
+At positive multiples of 60 frames, a directly aimed field bullet uses the
+mean S speed over [frame-60,frame), excluding same-frame S spawns.
+Spawning precedes player movement; overlap is resolved after movement.
+
+The existing Python Gv20/Pv21 training contract is preserved byte-identically.
+The implementation commit changes no qrokkun_env or qrokkun_ai files;
+Godot adapts to the existing Python behavior. Legacy environment, v10 models,
+and v21 observation/checkpoint contracts remain intact. No Sv22 implementation
+or training was performed, and u400 was not changed.
+
+Issues fixed in the delivered integration
+
+- Restored Python reset behavior after an intermediate drift; Godot's reset
+  bullet is stationary on the first counted step and moves on step 2.
+  Bullets spawned during a counted step first move on the following step.
+- Guarded frame-zero title/start/restart transitions so held movement cannot
+  move the player before the first counted step; the reset bullet also stays
+  still at frame zero.
+- Replaced delayed Area2D overlap timing with explicit current-pose collision
+  after movement, including newly spawned bullets.
+- Cleared death-flash timer and alpha on restart alongside player/UI state.
+- Bounded S history to the required field-speed window and made diagnostic
+  event collection opt-in. Production memory tests run without observer clearing.
+- Added engine InputMap entry-path coverage using physical key events,
+  including arrows/WASD, Enter/keypad Enter/Space/Z start and restart,
+  held movement, release, and resumed movement.
+- Removed a hardcoded test engine path: GODOT_BIN takes precedence, followed
+  by godot/godot4 on PATH; absence produces an explicit integration-test skip.
+- Isolated HOME and XDG data/config/cache roots for every engine subprocess,
+  including imports. Verified score writes and reload inside the isolated
+  profile while preserving a synthetic caller-profile sentinel.
+- Stripped inherited QROKKUN_* and GV20_* controls before explicit test
+  settings; hostile synthetic control/sentinel regressions verify isolation.
+
+Final verification and evidence
+
+The final independent parent verification ran the combined suite with actual
+Godot 4.7.2 headless and reported 65 passed in 50.26s, with no skips or failures:
+
+GODOT_BIN=/storage/hermes/tools/godot/godot PYTHONPATH=. /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python -m pytest tools/test_gv20_godot.py qrokkun_env/tests qrokkun_ai/v10/tests qrokkun_ai/v21/tests -q
+
+The documentation writer independently reran that exact command with Godot
+4.7.2.stable.official.ed1daf0bf: 65 passed in 66.51s (0:01:06), with no
+skips or failures. This supplementary rerun does not replace the delivered
+parent result of 65 passed in 50.26s.
+
+Coverage includes fresh asset import/parse checks, actual main-scene execution,
+three-seed (3,17,42) recorded-variate Python parity for idle and moving runs
+through death, exact Godot replay, restart trajectories, 7200-tick scheduling
+and field-speed windows, collision bounds, independent random streams,
+bounded production history/events, score persistence, and inherited-control
+stripping. Input tests inject InputEventKey.physical_keycode through
+Input.parse_input_event into the production InputMap in the headless engine.
+
+Evidence consulted locally:
+/storage/hermes/home/dev_gpt_1/gv20-godot-integration/disposition.md
+/storage/hermes/home/dev_gpt_1/gv20-godot-integration/delivered-tests.log
+These are local evidence paths, not shipped repository artifacts. Both were
+accessible when writing this record. The delivered log reports the result
+above. The disposition records accepted fixes and focused static reviews,
+followed by independent parent source inspection and engine execution; it does
+not claim earlier reviews covered later control changes. It also retains
+initial user-data write failures before isolation; no restoration of historical
+personal score state is asserted. README, project configuration, production
+integration sources, Python Gv20, and the engine tests were checked against
+these claims. Historical journals were not edited.
+
+Limits
+
+Python random.Random and Godot RNG are different implementations: the same
+numeric seed does NOT imply equivalent cross-language random streams. Parity
+uses recorded variates through production spawning; QROKKUN_SEED reproduces
+Godot runs only. Separate S, field, and player streams are tested independently.
+
+Long scheduling tests disable collision solely to reach 7200 ticks (120s).
+They do not demonstrate 120 seconds of ordinary gameplay survival. Ordinary
+parity/death runs retain collision.
+
+Physical key-event injection establishes headless engine/InputMap coverage,
+not OS keyboard delivery or manual keyboard play. UI state and animation
+activation assertions do not fully verify graphics. No rendered screenshot,
+manual play, or exported build validation was completed because a display was
+unavailable; rendering and export portability remain unverified.
+
+This documentation-only handoff adds this record and a README link. Git add,
+commit, and push are left to the parent; no documentation hash is invented.

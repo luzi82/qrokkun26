@@ -145,6 +145,8 @@ Legacy `v0`..`v5` (inertia-era physics) are archived at git tag `legacy-inertia-
 
 ## Project journal
 
+See the [Gv20 Godot integration and verification record](docs/journal/2026-11-10-1794266611-gv20-godot-integration-and-verification.txt) for delivered scope, fixes, verification, and limitations.
+
 Store durable project records in [docs/journal](docs/journal/README.md) as `yyyy-mm-dd-unixtimestamp-topic.txt`, with hyphen-separated topics, actual record creation Unix seconds, and the matching `Asia/Hong_Kong` calendar date. `README.md` is exempt; see the journal README for migration provenance.
 
 Gv20 diagnostic events are disabled by default; the parity harness opts in.
