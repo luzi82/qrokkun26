@@ -21,6 +21,7 @@ var state: int = State.TITLE
 var elapsed: float = 0.0
 var spawn_acc: float = 0.0
 var rng := RandomNumberGenerator.new()
+var gv = preload("res://scripts/gv20.gd").new()
 var monkey: Node = null
 var monkey_mode: bool = false
 
@@ -49,6 +50,11 @@ func _ready() -> void:
 		rng.seed = seed
 	else:
 		rng.randomize()
+	var collision := Node.new()
+	collision.set_script(preload("res://scripts/gv20_collision.gd"))
+	collision.game = self
+	add_child(collision)
+	player.monitoring = false
 	player.died.connect(_on_player_died)
 	player.freeze()
 	player.place_center()
@@ -134,6 +140,7 @@ func _physics_process(delta: float) -> void:
 				_start_run()
 		State.PLAYING:
 			elapsed += delta
+			gv.frame += 1
 			if hud_time != null:
 				hud_time.text = "%.1f" % elapsed
 			_spawn_step(delta)
@@ -145,7 +152,10 @@ func _physics_process(delta: float) -> void:
 
 
 func _start_run() -> void:
+	flash_t = 0.0
+	flash.color.a = 0.0
 	for c in bullets.get_children():
+		bullets.remove_child(c)
 		c.queue_free()
 	elapsed = 0.0
 	spawn_acc = -0.7
@@ -153,13 +163,16 @@ func _start_run() -> void:
 	player.arm()
 	state = State.PLAYING
 	_show_play()
+	gv.reset(self)
+	gv.spawn_step(self)
 
 
 func _on_player_died() -> void:
 	if state != State.PLAYING:
 		return
 	state = State.GAMEOVER
-	player.freeze()
+	# Keep impact-tick velocity observable; locked player stops next tick.
+	player.locked = true
 	for c in bullets.get_children():
 		c.set_physics_process(false)
 	var rank := GameState.record(elapsed)
@@ -170,76 +183,8 @@ func _on_player_died() -> void:
 	_show_gameover()
 
 
-func _spawn_step(delta: float) -> void:
-	spawn_acc += delta
-	var interval := _spawn_interval()
-	while spawn_acc >= interval:
-		spawn_acc -= interval
-		_spawn_one()
-		if elapsed > 18.0 and rng.randf() < 0.16:
-			_spawn_one()
-		interval = _spawn_interval()
-
-
-func _spawn_interval() -> float:
-	var t := elapsed
-	if t < 8.0:
-		return lerpf(0.48, 0.32, t / 8.0)
-	if t < 20.0:
-		return lerpf(0.32, 0.20, (t - 8.0) / 12.0)
-	if t < 35.0:
-		return lerpf(0.20, 0.12, (t - 20.0) / 15.0)
-	if t < 55.0:
-		return lerpf(0.12, 0.075, (t - 35.0) / 20.0)
-	if t < 80.0:
-		return lerpf(0.075, 0.048, (t - 55.0) / 25.0)
-	return 0.042
-
-
-func _bullet_speed() -> float:
-	return lerpf(46.0, 125.0, clampf(elapsed / 70.0, 0.0, 1.0))
-
-
-func _spawn_one() -> void:
-	var field: Rect2 = GameState.FIELD
-	var edge := rng.randi_range(0, 3)
-	var pos := Vector2.ZERO
-	match edge:
-		0:
-			pos = Vector2(rng.randf_range(field.position.x, field.end.x), field.position.y - 8.0)
-		1:
-			pos = Vector2(rng.randf_range(field.position.x, field.end.x), field.end.y + 8.0)
-		2:
-			pos = Vector2(field.position.x - 8.0, rng.randf_range(field.position.y, field.end.y))
-		_:
-			pos = Vector2(field.end.x + 8.0, rng.randf_range(field.position.y, field.end.y))
-	var speed := _bullet_speed() * rng.randf_range(0.88, 1.14)
-	var vel := Vector2.ZERO
-	var aim_p := clampf(0.22 + elapsed * 0.006, 0.22, 0.55)
-	if rng.randf() < aim_p:
-		var miss := rng.randf_range(8.0, 34.0)
-		var target := player.global_position + Vector2.from_angle(rng.randf() * TAU) * miss
-		vel = (target - pos).normalized() * speed
-	else:
-		var center := field.position + field.size * 0.5
-		var inward := (center - pos).normalized()
-		var jitter := deg_to_rad(rng.randf_range(-50.0, 50.0))
-		vel = inward.rotated(jitter) * speed
-	var kind := 0
-	var roll := rng.randf()
-	if elapsed > 25.0 and roll < 0.12:
-		kind = 2
-		vel *= 0.62
-	elif roll < 0.18:
-		kind = 3
-		vel *= 1.15
-	elif roll < 0.55:
-		kind = 1
-	else:
-		kind = 0
-	var b: Area2D = BULLET_SCENE.instantiate()
-	bullets.add_child(b)
-	b.setup(pos, vel, kind)
+func _spawn_step(_delta: float) -> void:
+	gv.spawn_step(self)
 
 
 func _show_title() -> void:

@@ -57,7 +57,7 @@ func _draw() -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if locked or dead:
+	if locked or dead or get_parent().gv.frame == 0:
 		velocity = Vector2.ZERO
 		return
 	var dir := Vector2.ZERO

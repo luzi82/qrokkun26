@@ -2,6 +2,7 @@ extends Area2D
 
 var velocity: Vector2 = Vector2.ZERO
 var kind: int = 0
+var first_move_frame := -1
 
 const TEX_SMALL := preload("res://assets/bullet_small.png")
 const TEX_MED := preload("res://assets/bullet_med.png")
@@ -32,6 +33,8 @@ func setup(pos: Vector2, vel: Vector2, p_kind: int) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if first_move_frame >= 0 and get_parent().get_parent().gv.frame < first_move_frame:
+		return
 	position += velocity * delta
 	if position.x < -24.0 or position.x > 344.0 or position.y < -24.0 or position.y > 264.0:
 		queue_free()

@@ -82,18 +82,49 @@ python3 -c "from qrokkun_env import Qrokkun26Env; e=Qrokkun26Env(seed=0); print(
 
 See [docs/ROADMAP.md](docs/ROADMAP.md).
 
-## Godot ↔ Python monkey parity
+## Playable Gv20 and engine parity
 
-Record a seeded monkey run in Godot, then replay it in `Qrokkun26Env`:
+Normal F5 / project launch now uses scripted Gv20. Title, score, hit animation,
+and restart remain available. Player speed is 102 with immediate stopping.
+All bullets have radius 2.6 and constant velocity. Spawns use a uniform ray
+from (160,126) onto x=0..320, y=12..240, independent Gaussian target offsets
+(sigma 13.2 per axis), and uniform speed 30..200. The shifted accumulator
+starts at frame 0,27,53,79,104; no legacy double spawn or kind effects apply.
+Every positive multiple of 60 adds a directly aimed field bullet using the
+mean S speed from [frame-60,frame), excluding same-frame S.
+
+Spawning precedes player movement. The reset bullet stays still on counted tick 1 and first moves on tick 2; bullets
+added during a tick first move on the following tick. Collision checks use
+current poses after movement, with player radius 4 plus bullet radius 2.6,
+including newly spawned bullets. Godot Area2D signals lag this rule, so Gv20
+resolves overlaps explicitly after movement.
+
+Python string-seeded random.Random and Godot RNG **do not produce equivalent
+streams**. Godot has separate S, field, and player RNG objects; QROKKUN_SEED
+reproduces Godot runs only. The engine tests record explicit random variates
+from real stochastic production spawns, replay them through Python Gv20, and
+can inject them into the same production Godot spawner. No learned Sv22 is used.
+
+Run with an existing Python environment containing pytest, numpy, and torch:
 
 ```bash
-# needs display / Xvfb; imports textures once via: godot --path . --headless --import
-QROKKUN_MONKEY=1 QROKKUN_SEED=42 QROKKUN_FRAMES=180 \
-  QROKKUN_OUT=$PWD/dist/monkey_seed42.jsonl \
-  godot --path . --fixed-fps 60
-
-PYTHONPATH=. python3 qrokkun_env/monkey_verify.py dist/monkey_seed42.jsonl
+GODOT_BIN=/path/to/godot PYTHONPATH=. python -m pytest tools/test_gv20_godot.py -q
 ```
+
+The tests use GODOT_BIN, then discover godot or godot4 on PATH; missing Godot
+produces an explicit integration-test skip. They import assets before running and
+check a fresh project import for parse errors. They run
+the actual main scene headlessly, covers three seeds, moving and idle deaths,
+actual input-driven title/restart with held movement, death and cleared restart
+UI/bullet state, a 7200-tick stochastic schedule, field windows, independent
+player draws, and explicit replay. Long schedule runs disable only the collision
+resolver in the harness to survive 120 seconds; ordinary replay runs retain it.
+The harness also supports GV20_CAPTURE for a real viewport PNG when a display
+is accessible. Headless physics tests provide no graphical/manual coverage.
+
+Python legacy Qrokkun26Env, v10 models, and v21 observation/checkpoint contracts
+remain intact. The historical monkey fixture and monkey_verify.py describe the
+legacy game and should not be used to validate new Gv20 recordings.
 
 ### Fixed-rule sanity check
 
@@ -115,3 +146,20 @@ Legacy `v0`..`v5` (inertia-era physics) are archived at git tag `legacy-inertia-
 ## Project journal
 
 Store durable project records in [docs/journal](docs/journal/README.md) as `yyyy-mm-dd-unixtimestamp-topic.txt`, with hyphen-separated topics, actual record creation Unix seconds, and the matching `Asia/Hong_Kong` calendar date. `README.md` is exempt; see the journal README for migration provenance.
+
+Gv20 diagnostic events are disabled by default; the parity harness opts in.
+Production speed history retains only the required 60-frame window. The memory
+regression runs 7200 ticks without observer clearing. Frame-zero transitions
+move neither Player nor the reset bullet. Python Gv20 matches HEAD unchanged.
+Fix-pass RED/GREEN evidence is in tmp/gv20/fixpass/; original evidence is retained.
+No display was available for this pass, so renderer/manual evidence is outstanding.
+
+Engine subprocesses, including imports, use temporary user-data, config, and
+cache directories. Score persistence is verified inside the isolated profile;
+input-driven restarts clear the flash timer and alpha at frame zero. Final
+RED/GREEN evidence and the concise report are in `tmp/gv20/finalfix/`.
+Run the full check with:
+
+```bash
+GODOT_BIN=/path/to/godot PYTHONPATH=. python -m pytest tools/test_gv20_godot.py qrokkun_env/tests qrokkun_ai/v10/tests qrokkun_ai/v21/tests -q
+```
