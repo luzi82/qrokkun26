@@ -31,7 +31,7 @@ The owner confirmed that the intended game design has **zero inertia**: pressing
    - Regenerate `qrokkun_env/tests/fixtures/monkey_seed42_120.jsonl` using Godot 4.7.2 (`/storage/hermes/tools/godot/godot`) and verify Godot ↔ Python replay parity (`ATOL = 0.05` in `qrokkun_env/monkey_verify.py` and `qrokkun_env/tests/test_monkey_parity.py`, plus exact float32 velocity tests in `qrokkun_env/tests/test_env.py`).
 3. **Clean Up Legacy Inertia AI & Docs**:
    - Remove `qrokkun_ai/v0`, `qrokkun_ai/v1`, `qrokkun_ai/v2`, `qrokkun_ai/v3`, `qrokkun_ai/v4`, `qrokkun_ai/v5`, `artifacts/`, and all `docs/journal/*` files except `docs/journal/README.md` from active `main` (preserved at git tag `legacy-inertia-physics-v5`).
-   - Update `qrokkun_ai/__init__.py`, `docs/AGENT_VERSIONS.md`, and `README.md`, and add `docs/journal/1793769600_v10_zero_inertia_epoch_reset.txt` documenting the physics fix, the `legacy-inertia-physics-v5` archive tag, and the `v10` (120s cap) baseline.
+   - Update `qrokkun_ai/__init__.py`, `docs/AGENT_VERSIONS.md`, and `README.md`, and add `docs/journal/2026-11-04-1793769600-v10-zero-inertia-epoch-reset.txt` documenting the physics fix, the `legacy-inertia-physics-v5` archive tag, and the `v10` (120s cap) baseline.
 4. **Bootstrap `qrokkun_ai/v10` under 120s Cap (`7200` frames)**:
    - Define `qrokkun_ai/v10` as the clean starting generation for zero-inertia physics.
    - Standardize the episode cap to **120 seconds (`7200` steps)**, using disjoint seed windows for training (`100000+`), validation/selection (`2000..2029`), and paired evaluation (`3000..3029`), targeting **>= 60.0s mean survival** on `PAIRED_EVAL_SEEDS` (`3000..3029`) against the scripted Spawner.
@@ -188,7 +188,7 @@ In `qrokkun_env/env.py`:
 6. **Update Documentation & Root Package**:
    - Modify `qrokkun_ai/__init__.py` to reference `qrokkun_ai.v10`.
    - Modify `docs/AGENT_VERSIONS.md` and `README.md` to document `v10` and the `legacy-inertia-physics-v5` archive tag.
-   - Create `docs/journal/1793769600_v10_zero_inertia_epoch_reset.txt`.
+   - Create `docs/journal/2026-11-04-1793769600-v10-zero-inertia-epoch-reset.txt`.
 7. **Create `qrokkun_ai/v10` Modules & Tests**:
    - Create `qrokkun_ai/v10/__init__.py`
    - Create `qrokkun_ai/v10/obs_v10.py`

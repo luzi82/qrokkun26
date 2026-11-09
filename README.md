@@ -111,3 +111,7 @@ PYTHONPATH=. .venv/bin/python -m qrokkun_ai.v10.train.train_player_v10 --updates
 ```
 
 Legacy `v0`..`v5` (inertia-era physics) are archived at git tag `legacy-inertia-physics-v5`.
+
+## Project journal
+
+Store durable project records in [docs/journal](docs/journal/README.md) as `yyyy-mm-dd-unixtimestamp-topic.txt`, with hyphen-separated topics, actual record creation Unix seconds, and the matching `Asia/Hong_Kong` calendar date. `README.md` is exempt; see the journal README for migration provenance.
