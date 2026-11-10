@@ -13,7 +13,7 @@ python -m qrokkun_ai.v22.supervise \
   --expected-player-sha256 b8466bb13972de62003e16b0b570567a016d0dab4dd5667e66a3666974cfd5f8 \
   --out-dir artifacts/sv22/formal-seed17 \
   --episodes-per-update 16 --eval-every 10 --eval-seeds 16 --final-seeds 64 \
-  --train-deadline-unix 1794305700 --deadline-unix 1794308400
+  --train-deadline-unix 1794320100 --deadline-unix 1794322800
 ```
 
 Default cap is exactly 7200 frames, 120 seconds. Death takes precedence at the
@@ -21,7 +21,7 @@ cap. `--quick` uses 120 frames and marks artifacts nonformal. Never compare its
 results to full-cap runs. `--updates` is an optional safety maximum. Deadlines
 are absolute Unix timestamps; `--end-time` aliases the hard deadline. The hard
 limit cannot exceed owner cutoff even if a later value is supplied. No launch
-after hard deadline. Training stops at 18:15 HKT, leaving time for automatic final evaluation before 19:00. Actual final runtime is unmeasured;
+after hard deadline. Training stops at 22:15 HKT, leaving time for automatic final evaluation before 23:00. Actual final runtime is unmeasured;
 parent must assess CUDA throughput and enforce cutoff independently.
 
 Validation diagnostic, using the same manifest seed counts and quick setting:
@@ -67,8 +67,7 @@ including deaths, censors, per-seed times, losses, gradient norm, parameter delt
 
 Atomic initial/latest/best/periodic snapshots retain optimizer and RNG plus
 manifest and frozen P hashes. latest may contain a partial PPO update after a
-signal; interrupted rollout data is discarded. **Automatic resume is deliberately
-unsupported.** Checkpoints are preserved for inspection/recovery engineering;
+signal; interrupted rollout data is discarded. **Automatic resume is unsupported.** Explicit frozen-input forks are described below. Checkpoints are preserved for inspection/recovery engineering;
 there is no silent optimizer reset. Each new run/variant requires an empty output
 directory. Final artifacts never overwrite a prior claimed heldout run. Training
 and validation use independent action generators; evaluation cannot consume train
@@ -119,7 +118,7 @@ The final count is configuration only: smoke never invokes final evaluation.
 
 Launch preparation: the parent deploys an isolated immutable snapshot, not the
 existing dirty remote clone. Run the supervisor command above remotely on GB10
-under a managed parent SSH session. No nohup, disown, setsid, or resume. The
+under a managed parent SSH session. No nohup, disown, or setsid. Explicit continuation uses a new snapshot and directory. The
 supervisor runs train then final only after successful training exit and a hash
 verified closed best checkpoint; manifest arguments and counts are reused.
 It exclusively claims `<out-dir>.launcher/`; an existing claim is inspected
@@ -129,7 +128,7 @@ directory (the trainer requires an empty output directory). Logs are fsynced at
 child exit; status reports PID, live child PID, stage, exit, time and log paths.
 
 The independent wall and monotonic watchdog checks at most every 0.2 seconds,
-starts TERM 10 seconds before the supplied hard deadline (at latest 18:59:50 HKT),
+starts TERM 10 seconds before the supplied hard deadline (at latest 22:59:50 HKT),
 waits at most 5 seconds, then kills and reaps its direct child. SIGINT/SIGTERM
 also clean up that child. This is an audited direct Python workload with no
 subprocesses; it is not containment against malicious descendants. Nonfinite,
@@ -143,3 +142,18 @@ seeds have no invented durations. Interrupted primary final writes terminal
 modes remain intact, and no partial mode is compared. The one-time claim remains.
 Launch-preparation tests use synthetic mocked final records and disposable CPU
 children only; evidence is in `tmp/sv22/launch-prep/`.
+
+
+Owner deadline amendment (2026-11-10): the only experimental budget change is
+training until 22:15 HKT and hard cutoff 23:00 HKT. The immutable original process
+retains its 19:00 cutoff. This code cannot hot-reload it. No learning claim follows
+from the extension. See `../../docs/journal/2026-11-10-1794272319-sv22-deadline-extension.txt` for the exact
+parent snapshot protocol and continuation command.
+
+Before the parent signals its old supervisor, run CPU restoration preflight:
+`CUDA_VISIBLE_DEVICES='' /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python -m qrokkun_ai.v22.resume --snapshot /ABSOLUTE/FROZEN_INPUT --config-json /ABSOLUTE/desired-effective.json`.
+The journal provides exact config preparation code. Keep the desired effective
+config's original device value; preflight always constructs CPU models, writes
+no files, and preserves caller global RNG. Require exit 0 and inspect update,
+best and hashes. A completed PPO boundary with pending scheduled validation is
+rejected; capture a complete validation or preferably a nonboundary update.

@@ -14,11 +14,15 @@ def execute(a, child_argv=None, poll=.2):
     """child_argv is a unit-test seam, never exposed by the CLI."""
     if not all(math.isfinite(v) for v in (a.deadline_unix,a.train_deadline_unix)):
         raise ValueError('finite deadlines required')
-    if not a.train_deadline_unix < a.deadline_unix <= run.HARD:
+    if not a.train_deadline_unix < a.deadline_unix <= run.HARD or a.train_deadline_unix>run.TRAIN_HARD:
         raise ValueError('training deadline must precede hard deadline, no later than owner cutoff')
     cutoff=a.deadline_unix-10
     if time.time()>=cutoff: raise ValueError('launch cutoff passed')
     out=Path(a.out_dir).resolve(); launch=out.with_name(out.name+'.launcher')
+    resume=getattr(a,'resume_from_run',None)
+    if resume:
+        from .resume import validate_output
+        validate_output(resume,out)
     # Exclusive launcher directory is the one-time launch claim, even after failure.
     try: launch.mkdir(parents=True)
     except FileExistsError:
@@ -55,7 +59,7 @@ def execute(a, child_argv=None, poll=.2):
                 if (out/'final-claimed.json').exists(): raise ValueError('final already claimed')
             args=[sys.executable,'-m','qrokkun_ai.v22.run',stage]
             for key,value in vars(a).items():
-                if key=='command': continue
+                if key=='command' or value is None or (key=='resume_from_run' and stage!='train'): continue
                 flag='--'+key.replace('_','-')
                 if isinstance(value,bool):
                     if value: args.append(flag)

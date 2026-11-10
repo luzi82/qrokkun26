@@ -1,0 +1,108 @@
+Sv22 owner amendment — 2026-11-10 Asia/Hong_Kong
+Original contract is retained unchanged. Owner explicitly extended today's GPU
+budget: HARD 1794322800 (23:00 HKT), TRAIN 1794320100 (22:15 HKT), 45min final.
+Only late budget and explicit source-lineage fork change. No learning claim.
+Original c4e322b process has HARD19 in memory; no hot reload or deployed edit.
+Implementer performs no live training, network, SSH, signals, commit or push.
+Healthy original need not pause during coding.
+
+Parent protocol (parent executes, implementer does not):
+1. While original is healthy, copy its atomic COMPLETE latest.pt to a new frozen
+   INPUT directory. Verify partial_update is false and update==attempted_update.
+   Scheduled validation at update 1 or N % eval_every == 0 must be complete
+   (current latest metrics.validation present). Prefer capture of a nonboundary N.
+   If partial or validation pending, wait for another complete checkpoint; never substitute best or
+   random initialization. Preserve this copy BEFORE signaling the original.
+2. Copy exactly initial.pt, latest.pt, best.pt, validation-controls.json,
+   manifest.json, progress.jsonl from that run. latest must be at least as new as
+   best; reject/rebuild inconsistent capture. Copy progress without inventing
+   history. Never copy/read original final artifacts. Parent must verify no
+   final claim and no actual heldout access; if either occurred, do not fork.
+3. Add provenance.json with these exact fields:
+   {"run_path":"ABSOLUTE ORIGINAL RUN", "source_commit":"c4e322b",
+    "frozen":true,"heldout_access":false,
+    "core_sha256":"SHA256 OF ORIGINAL SNAPSHOT qrokkun_ai/v22/core.py",
+    "hashes":{"initial.pt":"SHA256", "latest.pt":"SHA256",
+      "best.pt":"SHA256", "validation-controls.json":"SHA256",
+      "manifest.json":"SHA256", "progress.jsonl":"SHA256"}}
+   Hash file bytes after copying; make snapshot immutable/read-only. The parent
+   attestation is necessary: an omitted final claim cannot be inferred from the
+   six copied files. Source commit may also be full hash beginning c4e322b.
+4. Run the read-only CPU preflight below and require successful exit BEFORE
+   any signal to the old supervisor. If it fails, leave the original healthy
+   and fix/rebuild the frozen capture. Only after success, gracefully stop original supervisor, confirm it and child exited, then launch
+   from a NEW immutable source snapshot containing this reviewed change. Neither
+   input snapshot nor original run is ever written by continuation code.
+
+Exact command template (substitute paths; run from NEW source root):
+python -m qrokkun_ai.v22.supervise \
+  --device cuda --threads 1 --seed 17 \
+  --player-checkpoint /mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261109-1803-v21-exploratory/best_player_v21.pt \
+  --expected-player-sha256 b8466bb13972de62003e16b0b570567a016d0dab4dd5667e66a3666974cfd5f8 \
+  --out-dir ABSOLUTE_NEW_EMPTY_OUTPUT \
+  --resume-from-run ABSOLUTE_FROZEN_INPUT \
+  --updates 100000 --episodes-per-update 16 --eval-every 10 \
+  --eval-seeds 16 --final-seeds 64 --lr 0.0003 --entropy 0.001 --epochs 4 \
+  --train-deadline-unix 1794320100 --deadline-unix 1794322800
+Every non-deadline config must equal parent manifest, including P device/path,
+threads, seed, optimizer settings and total update maximum. If original used
+other settings, substitute its exact settings; do not change them for this fork.
+
+Resume restores CPU S model, Adam, train RNG, global torch/NumPy RNG, completed
+and attempted counters, initial stochastic baseline, old selected best and score,
+and validation controls. RNG restored after RNG-consuming constructors. Initial,
+best and controls copied byte-identically. Old best stays selected absent strict
+validation improvement. First new update N+1 uses original training seed index;
+new progress explicitly records inherited_updates and locally_completed_updates.
+New manifest records effective config and parent lineage/hashes/update. Input
+progress is audit evidence only, never copied into local progress as executed work.
+Only train receives resume argument. Final checks effective continuation manifest,
+reads only NEW output, requires training closure/hash lock, and retains exclusive
+one-time 64-seed 500000 window at full cap. No parent final read or reuse.
+
+Evidence: tmp/sv22/deadline-extension/. Deadline/parser tests ran RED before
+implementation (red.log). Synthetic parameter/Adam/RNG and rejection/integration
+tests were added subsequently; they use no actual heldout or original run.
+All validation is local CPU. This procedural distinction is explicit; the full
+resume suite was not written and run RED before implementation.
+
+Additional strict RED->GREEN: missing-Adam-state rejection failed in red-adam.log
+before enforcing complete finite moments/positive step for every parameter.
+The original 102-test suite plus the first 12 new tests passed (114); final
+expanded suite and final synthetic logs are recorded separately.
+
+Read-only parent CPU preflight (from NEW source root; no trainer invocation):
+Copy the desired effective config from the frozen manifest, preserving every
+non-deadline setting including device=cuda if that is the parent value. The
+helper constructs CPU models regardless of this config value, loads latest,
+initial, selected best, Adam and all RNG states, and preserves caller global RNG.
+It reads only the frozen input/config and does not write either run or snapshot.
+Both trainer and supervisor reject output OR its .launcher inside either the
+resolved snapshot or absolute resolved provenance.run_path, before mkdir.
+Both enforce train_deadline <= 1794320100 and hard deadline <= 1794322800;
+short synthetic deadlines remain allowed.
+
+Exact parent preparation code (replace the three absolute paths):
+python - <<'PREFLIGHT_CONFIG'
+import json
+from pathlib import Path
+snapshot = Path('/ABSOLUTE/FROZEN_INPUT').resolve()
+out = Path('/ABSOLUTE/NEW_OUTPUT').resolve()
+config = json.loads((snapshot / 'manifest.json').read_text())['config'].copy()
+config.update(command='train', out_dir=str(out), resume_from_run=str(snapshot),
+              train_deadline_unix=1794320100, deadline_unix=1794322800)
+# Write this NEW config outside snapshot and original run; never edit manifest.
+Path('/ABSOLUTE/desired-effective.json').write_text(json.dumps(config, indent=2))
+PREFLIGHT_CONFIG
+CUDA_VISIBLE_DEVICES='' /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python \
+  -m qrokkun_ai.v22.resume --snapshot /ABSOLUTE/FROZEN_INPUT \
+  --config-json /ABSOLUTE/desired-effective.json
+Require exit 0 and review reported update, best, latest_sha256 and all six hashes.
+Use exactly these effective vars for the subsequent supervisor launch.
+
+Finalfix RED evidence: finalfix/red.log captured failures for new boundary,
+provenance, missing preflight and protected-output checks. That initial run was
+interrupted: an insufficiently mocked deadline test entered a disposable local
+CPU baseline evaluation. No PPO update completed, no GPU/original run accessed.
+Disposable output was removed; test now blocks mkdir to prevent recurrence.
+No claim that the interrupted log is a complete RED suite.

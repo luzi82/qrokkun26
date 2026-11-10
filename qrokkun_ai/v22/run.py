@@ -14,7 +14,8 @@ from .core import (Spawner, LearnedEnv, load_player, PLAYER_PATH, PLAYER_SHA,
 from qrokkun_env.gv20 import Gv20Env
 from qrokkun_ai.v21.obs_v21 import encode_obs_v21
 
-HARD=1794308400
+HARD=1794322800
+TRAIN_HARD=1794320100
 class Stopped(Exception): pass
 class Guard:
     def __init__(self,deadline):
@@ -117,8 +118,9 @@ def parser():
     p.add_argument('--eval-every',type=int,default=10); p.add_argument('--eval-seeds',type=int,default=16)
     p.add_argument('--final-seeds',type=int,default=64); p.add_argument('--quick',action='store_true',help='NONFORMAL smoke: 120 frames only')
     p.add_argument('--nonformal',action='store_true',help='explicit nonformal reduced-count run')
-    p.add_argument('--deadline-unix','--end-time',type=float,default=HARD,help='absolute Unix hard deadline, capped at 1794308400')
-    p.add_argument('--train-deadline-unix',type=float,default=1794305700)
+    p.add_argument('--deadline-unix','--end-time',type=float,default=HARD,help='absolute Unix hard deadline, capped at 1794322800')
+    p.add_argument('--train-deadline-unix',type=float,default=1794320100)
+    p.add_argument('--resume-from-run',help='read-only frozen input snapshot (train only)')
     p.add_argument('--threads',type=int,default=1); p.add_argument('--lr',type=float,default=3e-4)
     p.add_argument('--entropy',type=float,default=.001); p.add_argument('--epochs',type=int,default=4)
     return p
@@ -128,6 +130,9 @@ def main():
     if not all(math.isfinite(x) for x in (a.deadline_unix,a.train_deadline_unix)): raise ValueError('finite deadlines required')
     if not (a.quick or a.nonformal) and (a.eval_seeds!=16 or a.final_seeds!=64): raise ValueError('formal requires 16 validation and 64 final seeds')
     if not 1<=a.eval_seeds<=16 or not 1<=a.final_seeds<=64: raise ValueError('seed counts exceed preregistered windows')
+    if a.updates>100000: raise ValueError('update safety maximum 100000')
+    if not a.train_deadline_unix<a.deadline_unix<=HARD or a.train_deadline_unix>TRAIN_HARD: raise ValueError('invalid deadlines')
+    if a.resume_from_run and a.command!='train': raise ValueError('resume is train only')
     if min(a.episodes_per_update,a.eval_every,a.epochs,a.updates)<=0: raise ValueError('positive counts required')
     torch.set_num_threads(a.threads)
     guard=Guard(a.deadline_unix)
@@ -135,10 +140,16 @@ def main():
     try: guard.check()
     except Stopped as e: print(json.dumps(dict(status='not_started',reason=str(e)))); return
     out=Path(a.out_dir); cap=120 if a.quick else 7200
+    snapshot=None
     if a.command=='train':
+        if a.resume_from_run:
+            from .resume import read_snapshot, validate_output
+            validate_output(a.resume_from_run,out)
+            snapshot=read_snapshot(a.resume_from_run,vars(a),cap)
+            if out.resolve().is_relative_to(snapshot['root']): raise ValueError('input must remain read only')
         out.mkdir(parents=True,exist_ok=True)
         if any(out.iterdir()): raise ValueError('new empty directory required; resume unsupported, use explicit new variant')
-        json_write(out/'manifest.json',dict(config=vars(a),cap_frames=cap,formal=not (a.quick or a.nonformal),player_state=STATE_SHA,protocol=1))
+        json_write(out/'manifest.json',dict(config=vars(a),cap_frames=cap,formal=not (a.quick or a.nonformal),player_state=STATE_SHA,protocol=1,**({'lineage':snapshot['lineage']} if snapshot else {})))
     else:
         manifest=json.loads((out/'manifest.json').read_text())
         original=manifest['config']
@@ -146,6 +157,10 @@ def main():
         cap=manifest['cap_frames']
         for k in ('quick','nonformal','seed','eval_seeds','final_seeds','player_checkpoint','expected_player_sha256'):
             if getattr(a,k)!=original.get(k,False if k=='nonformal' else None): raise ValueError(f'manifest mismatch: {k}')
+    if a.command!='train' and manifest.get('lineage'):
+        for k,v in original.items():
+            if k not in ('command','out_dir','resume_from_run') and getattr(a,k)!=v:
+                raise ValueError(f'continuation manifest mismatch: {k}')
     player,_=load_player(a.player_checkpoint,a.expected_player_sha256,a.device)
     torch.manual_seed(a.seed); net=Spawner(); initial=copy.deepcopy(net).eval()
     opt=torch.optim.Adam(net.parameters(),lr=a.lr); rng=torch.Generator().manual_seed(a.seed)
@@ -157,7 +172,7 @@ def main():
             wallclock=time.time(),elapsed=time.time()-started,metrics=metrics,**extra,formal=(not (a.quick or a.nonformal) if a.command=='train' else formal)))
     def progress():
         with (out/'progress.jsonl').open('a') as f:
-            f.write(json.dumps(dict(wallclock=time.time(),elapsed=time.time()-started,update=update,
+            f.write(json.dumps(dict(wallclock=time.time(),elapsed=time.time()-started,update=update,inherited_updates=inherited,locally_completed_updates=update-inherited,
                 loss={k:v for k,v in metrics.items() if k not in ('rollout','validation')},
                 rollout=metrics['rollout'],validation=metrics.get('validation')))+'\n')
             f.flush(); os.fsync(f.fileno())
@@ -167,6 +182,15 @@ def main():
             train_rng=rng.get_state(),torch_rng=torch.get_rng_state(),numpy_rng=np.random.get_state(),
             manifest=json.loads((out/'manifest.json').read_text()),status=status,metrics=metrics,
             player_sha=PLAYER_SHA,player_state=STATE_SHA,resume_supported=False))
+    inherited=0
+    if snapshot:
+        from .resume import restore, copy_controls
+        restore(snapshot,net,initial,opt,rng)
+        copy_controls(snapshot,out)
+        json_write(out/'parent-lineage.json',snapshot['lineage'])
+        latest=snapshot['checkpoints']['latest.pt']
+        update=attempt=inherited=latest['update']; best=snapshot['best']
+        metrics=latest['metrics']; status='resumed'
     evaluation_index=0
     def evaluate(model,seeds,mode='stochastic',label=None):
         nonlocal evaluation_index
@@ -192,13 +216,14 @@ def main():
             metadata('incomplete',str(e))
             raise
     if a.command=='train':
-        save('initial.pt'); save('latest.pt')
+        if not snapshot: save('initial.pt')
+        save('latest.pt')
         try:
             guard.deadline=min(a.train_deadline_unix,a.deadline_unix,HARD)
             report('baseline')
-            controls={mode:summary(evaluate(initial,range(400000,400000+a.eval_seeds),mode)) for mode in ('scripted','stochastic')}
-            json_write(out/'validation-controls.json',controls)
-            for attempt in range(1,a.updates+1):
+            controls=snapshot['controls'] if snapshot else {mode:summary(evaluate(initial,range(400000,400000+a.eval_seeds),mode)) for mode in ('scripted','stochastic')}
+            if not snapshot: json_write(out/'validation-controls.json',controls)
+            for attempt in range(update+1,a.updates+1):
                 report('rollout')
                 guard.check(); records,data=episodes(net,player,range(1000000+(attempt-1)*a.episodes_per_update,1000000+attempt*a.episodes_per_update),cap,a.device,guard,train_rng=rng)
                 report('ppo')
