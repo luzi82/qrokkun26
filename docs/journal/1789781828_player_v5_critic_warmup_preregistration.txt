@@ -1,0 +1,360 @@
+PlayerV5 critic-warmup 2×2（value-head-only × aux）— 預先登記
+==============================================================
+
+狀態
+----
+
+planned／not started。本文件是執行前的鎖定契約，不是結果報告。未曾以本
+preregistration 啟動訓練、收集資料、寫 checkpoint、改訓練程式或上 GB10。
+所有執行主機路徑、主機名稱、GPU 型號、runtime／wall-clock、Python／
+PyTorch／CUDA 版本及實際輸出目錄均為「啟動時記錄」欄位，在啟動前未知，
+絕不在此虛構。
+
+本輪交付只含本文件。現行 ``phase3_ranked_ppo_retention[_aux]`` 不足以執行
+本契約（缺 warmup 階段，且 snapshot 表不含 update 1）。實作與 GPU 執行須
+另立後續工作；實作不得改寫本契約的 knobs、seeds、臂、或判定規則。
+
+身份與範圍
+----------
+
+- 架構身份固定為 PlayerV5：code class ``PlayerRankedTopK``，checkpoint
+  architecture key ``player_ranked_topk``（top_k=8、hidden=472）。本實驗
+  成敗不是架構命名裁決。
+- promotion status：candidate。本實驗產生的 warmup checkpoint、所有 PPO
+  snapshot 與 final 一律 ``experimental=true``、
+  ``production_compatible=false``、``promotion=false``；不可作 production
+  初始化，不可晉升。
+- 對手固定為 scripted Spawner。
+- 單因子是 **進正式 PPO 前，是否對同一顆 seed-6 BC 做 value-head-only
+  warmup**。aux retention 是第二個 crossed factor，不是另一個可調 alpha。
+- 正式 PPO 仍鎖 Phase 3 knobs；warmup 不得改 policy／body，也不得改 PPO
+  的 truncation-as-terminal 契約。
+- 未來 PPO run 使用 schema v3。v2／v1／versionless ``run.json`` 不可
+  resume，也不可當作本實驗的執行契約。
+
+Owner 鎖定的需求（本文件的裁決來源）
+------------------------------------
+
+以下選項已由 owner 選定，不是事後可改的分析選擇：
+
+- 起點：只用 seed-6 BC（不用 seed-5，也不在本文件內做兩顆 seed）。
+- 臂：2×2，warmup {yes,no} × aux {yes,no}。
+- warmup 停止：固定 budget，不看 EV／survival 停。
+- warmup 資料：80 條 frozen-policy episodes 收一次，value head 4 epochs。
+- warmup target：只用真正 terminal trajectories；排除 censored episode。
+- 主對照：update-matched（四臂都跑 10 個正式 PPO updates）。
+  interaction-budget／frame-matched 只記帳，不進 PASS/FAIL。
+- 正式 PPO horizon：10 updates；snapshots 固定 0／1／10。
+- 本輪交付：只寫 preregistration，不改訓練程式、不上 GB10。
+- 主判定：兩個配對在 update 10 都必須出現 warmup 的 held-agreement 優勢，
+  才算整體 PASS。
+- agreement 規則：update 10 的 warmup 臂 held agreement **嚴格大於**
+  同 aux 條件下的 direct 臂（點估計，不用 CI）。
+- 進 PPO 前 held EV：只診斷；即使 warmup EV 沒贏，仍跑滿 10 updates。
+- terminal 下限：warmup 80 條中 ``n_terminal < 40`` 即 fail closed。
+- MC 折扣：γ=0.99；真正 terminal 後 bootstrap=0。
+- warmup 共用：只跑一次，寫出一顆 warmed checkpoint；兩個 warmup PPO 臂
+  都從這顆載入。
+- held EV 樣本：30 episodes，env seeds 45000–45029。
+
+目標與可否證假說
+----------------
+
+假說：從指定 seed-6 BC 出發，凍結 ``body`` 與 ``policy``，只用該政策自己
+的 on-policy sampled 軌跡、真正 terminal 上的 γ=0.99 Monte Carlo return
+訓 ``value`` 頭 4 epochs 之後，再跑鎖定的 10 個正式 PPO updates：
+
+- 未正則化配對：``warmup_unreg`` 在 update 10 的 held teacher agreement
+  **嚴格大於** ``direct_unreg``；且
+- aux 配對：``warmup_aux`` 在 update 10 的 held teacher agreement
+  **嚴格大於** ``direct_aux``。
+
+機制預期（診斷，不進 PASS/FAIL）：同一批 held trajectories 上，warmed
+critic 的 MC EV／MSE 應優於未訓 value 頭的 BC critic。這解釋「開局
+advantage 較不那麼未對齊」，但不單獨構成因果證明。
+
+明確不預測：不預測超過 PlayerV1 teacher 的 43.42 s；不預測長期 survival
+優勢；不預測可以取消 aux；不預測 10k-scale 穩定。那些是另立文件的問題。
+
+否證：任一個配對在 update 10 出現 ``agreement_warmup <= agreement_direct``
+（含相等）、任一方 agreement 缺失、任一臂 fail closed、或 freeze／identity
+檢查失敗，整體即 FAIL。不以中途 survival、held EV、alpha、cosine、或任何
+漂亮 snapshot 改寫判定。
+
+臂、階段與執行順序
+------------------
+
+五個具名階段。後四個是正式 PPO 臂；第一個是共享 warmup：
+
+=====  ==============  ===============================================
+ID     起始權重        正式 PPO
+=====  ==============  ===============================================
+warmup_fit  seed-6 BC      無。只訓 ``value``，寫 warmed checkpoint
+direct_unreg seed-6 BC     10 updates，無 retention loss
+warmup_unreg warmed ckpt   10 updates，無 retention loss
+direct_aux   seed-6 BC     10 updates，凍結-α hybrid retention
+warmup_aux   warmed ckpt   10 updates，凍結-α hybrid retention
+=====  ==============  ===============================================
+
+強制順序（任一 fail closed 即停整條 queue，不得跳過或改設定）：
+
+1. 本機 preflight（檔案／state-dict hash、clean checkout）。
+2. seed-6 BC 的 initial gate（det eval seeds 3000–3029）。
+3. 收集 canonical teacher dataset，核對 identity。
+4. ``warmup_fit``：收 80 episodes、terminal 過濾、4 epochs、freeze 檢查、
+   寫 warmed checkpoint、held-EV 診斷。
+5. ``direct_unreg``
+6. ``warmup_unreg``
+7. ``direct_aux``
+8. ``warmup_aux``
+
+禁止把 warmup 重跑成兩份獨立 fit。兩個 warmup PPO 臂必須載入 **同一顆**
+``warmup_fit`` checkpoint（檔案 SHA-256 與 state-dict SHA-256 都要在啟動
+該臂前重算並相符）。Direct 臂禁止載入 warmed checkpoint。
+
+啟動前必備本機檔案與雜湊
+------------------------
+
+只可使用已複製到執行主機本機磁碟的檔案；NAS 僅是唯讀來源，禁止
+NAS-direct 讀寫、評估或訓練。
+
+- PlayerV1 teacher：檔案 SHA-256
+  ``1951a8e7db1df6f2b5e5980c3d5930116c527bd52329f294da7873b428a965f1``；
+  state-dict SHA-256
+  ``39a6bdfc83f827c2c59a6bb0a46b730506b8aff7966e0072b7441cd6cc5a0a2f``。
+- seed-6 PlayerV5 BC：檔案 SHA-256
+  ``844e029a74fce418e1d97041e66cf5422a25d8f500628d1ff5526640a7a36ad9``；
+  state-dict SHA-256
+  ``a6f95c4621015c15f0e857d1ca0b5a9f561c3e50462472c553d5db7f960064e7``。
+- canonical teacher dataset identity 必須為
+  ``2521bd12ae8b630e65f2645132bde4952fe8f60783ad0e87648ed2af688e558a``；
+  不符即 fail closed。
+
+Teacher 資料集契約與既有 Phase 3 相同：``DATA_SEED=4``，240 episodes，
+環境 seed 20000–20239，每 episode 最多 4,200 frames，even-stride 最多
+700 frames，held-out fraction 0.12（應為 211 train／146,688 frames 與
+29 held／20,300 frames）。teacher TRAIN split 只供 aux 臂的 retention
+auxiliary；held split 只供 agreement／KL／gate 診斷。teacher frames 絕
+不可進入 warmup value 訓練、PPO batch、GAE、advantage、old_log_prob 或
+value loss。
+
+Seed 與資料窗（互不重疊）
+------------------------
+
+- Deterministic eval：3000–3029，argmax，cap 4,200。
+- Teacher 收集：20000–20239。
+- Warmup 收集（sampled policy）：40000–40079（80 條）。
+- Held-EV 收集（sampled policy）：45000–45029（30 條）。
+- 正式 PPO rollout：update u（1-based）使用
+  ``50000 + 8*(u-1)`` 至 ``50000 + 8*u - 1``，即 update 1 = 50000–50007，
+  update 10 = 50072–50079。四臂共用這條 window。
+- 全局 PPO torch seed = 0。Resume／跨臂不共享 optimizer RNG；每臂新 Adam。
+- Warmup minibatch shuffle 專用 seed = 42345（獨立 stream，不可與 PPO
+  permutation、aux retention 12345／22345／32345 共用）。
+
+Initial gate 與 update-0 身份
+-----------------------------
+
+先只對 seed-6 BC 做 30-seed deterministic eval。initial gate 為 mean
+>= 25.0 s 且 median >= 25.0 s；失敗則 ``failed_closed``、後面階段都不跑。
+若起點與已登記基準一致，應重得 mean 34.0906 s、median 36.7917 s；dataset
+收集後的 held agreement 應為 0.6999。這些是待核對基準，不是本輪結果。
+
+因為 warmup 凍結 policy，四個 PPO 臂在 update 0 必須有相同 policy：
+
+- 同一 30 eval seeds 的 per-seed elapsed 必須相同；
+- held teacher agreement 必須相同；
+- teacher-to-student KL 必須相同（同一 held tensors、同一 logits）。
+
+任一臂 update 0 與 ``direct_unreg`` update 0 不符，即視為 freeze／載入
+失敗，整體 fail closed。這是契約檢查，不是 survival gate。
+
+warmup_fit 契約
+---------------
+
+載入 seed-6 BC。凍結 ``body`` 與 ``policy``：optimizer 只收到
+``value.parameters()``。禁止對 freeze 參數設 ``requires_grad=True``，
+禁止把它們放進 Adam。
+
+收集：用凍結政策的 ``sample()``（非 argmax），80 episodes，seeds
+40000–40079，cap 4,200，scripted Spawner。記錄每條是否 true terminal
+（``env.dead``）或 censored（hit cap）。
+
+過濾：只保留 true terminal episodes 做 value 訓練。censored episode
+整條丟棄，不把 truncation 當 terminal，也不用尾端 frame 的不完整
+return。記錄 ``n_terminal``、``n_censored``、排除比例。
+
+Fail closed：
+
+- ``n_terminal < 40``；
+- 過濾後總 frames ``n_frames < 512``（無法形成至少一個完整 minibatch）。
+
+Target：對每條 retained episode 算 Monte Carlo return
+
+::
+
+    G_t = r_t + 0.99 * G_{t+1}
+    G_T = r_T     # true death；bootstrap = 0
+
+獎勵與既有 PPO 相同，重用 ``shaped_reward``，不得另寫 reward。不對
+return 做 normalization。不用 GAE、不用現行 critic bootstrap。
+
+更新：4 epochs，minibatch 512（最後一個 minibatch 可短於 512，語意與
+現行 PPO 相同），loss = ``MSE(value, G_t)``，無 policy loss、無 entropy、
+無 retention。Adam lr=3e-4、eps=1e-8、``max_grad_norm=1.0`` 只 clip
+``value`` 參數。optimizer steps、wall time、n_frames 必須記帳。
+
+Freeze 檢查（warmup 結束、寫檔前；任一失敗 fail closed）：
+
+1. ``body.*`` 與 ``policy.*`` 每個 tensor 與載入時 bitwise identical。
+2. teacher held-split 上的 policy logits 與 argmax 與載入時完全不變。
+3. 生存不得作為 freeze 證據的替代。
+
+通過後寫一顆 experimental warmed checkpoint，記錄 parent seed-6
+state-dict hash、n_terminal、n_censored、n_frames、optimizer steps、
+file／state-dict SHA-256。這顆檔不是 production-compatible，也不是
+PPO snapshot。
+
+Held value-fit 診斷（不進判定）
+------------------------------
+
+用凍結 BC policy（與 warmed policy 相同）在 seeds 45000–45029 收集
+一次 30 條 on-policy sampled episodes，cap 4,200。這批 trajectories
+對 unwarmed／warmed critic 是 CRN。
+
+在 **true-terminal subset** 上用與 warmup 相同的 γ=0.99 MC target，
+分別對 BC critic 與 warmed critic 報告 EV 與 MSE：
+
+::
+
+    EV = 1 - Var(G - V) / (Var(G) + 1e-8)
+
+其中 ``G`` 是 MC return、``V`` 是該 critic 在收集當時 obs 上的
+value。記錄 held ``n_terminal``／``n_censored``。held 的 terminal
+數不受 40 下限約束；若 held terminal 為 0，標 ``held_ev_missing``，
+仍繼續 PPO。
+
+此診斷即使顯示 warmup EV 沒有優於 BC critic，也不得停止或改臂。
+PPO jsonl 既有的 GAE／truncation-as-terminal EV 仍在 update 1 與 10
+報告，作為與歷史 -0.37 對照的診斷，同樣不進 PASS/FAIL。
+
+正式 PPO 契約（四臂相同，除 init 與 aux loss）
+--------------------------------------------
+
+除下列兩項外，四臂鎖定同一契約：
+
+- init：direct 臂 = seed-6 BC；warmup 臂 = ``warmup_fit`` checkpoint。
+- loss：unreg 臂無 retention；aux 臂在每個 PPO minibatch 加
+  ``alpha * hybrid_loss``（Phase 2 ``hybrid_loss``，hard 0.5／soft 0.5、
+  T=1），``TARGET_RETENTION_GRAD_RATIO=0.15``。
+
+其餘與校正 aux／control 相同：
+
+- Adam lr=3e-4、eps=1e-8、gamma=0.99、lambda=0.95、clip=0.2、
+  entropy=0.02、value=0.5、max_grad_norm=1.0；
+- PPO epochs=4、minibatch=512、normalized advantages=true；
+- value bootstrap=false，truncation 視為 terminal=true（這是 PPO，不是
+  warmup）；
+- updates=10；每 update=8 on-policy sampled episodes；每 episode max
+  4,200 frames；
+- snapshots **恰好** 為 updates 0、1、10。不得增刪後把結果當成同一
+  preregistration。現行 0／10／25／50／100／200 表不得拿來取代 update 1。
+- schema v3 run 目錄；``promotion=false``。
+
+Aux 的 alpha 必須 **每條 aux 臂各自** 在任何 optimizer step 前、用該臂
+update-1 rollout、8 個 matched gradient pairs、既有公式校準一次並凍結。
+禁止從另一臂複製 alpha，禁止看結果重調。因 warmup 不改 policy，兩條
+aux 臂在 update 1 開始時應面對同一條 seed window 上的同一政策；預期
+alpha 接近，但 GPU 不保證 bitwise，差異只記錄、不單獨 fail。
+
+Calibration window 仍是 update-1 的同一批 rollout：只收集一次、原樣
+重用。retention RNG streams 維持 training=12345、calibration=22345、
+diagnostic=32345。
+
+Update-matched 是 primary：四臂都完成 10 個正式 PPO updates 才可判定。
+Warmup 額外的 80 episodes／frames／optimizer steps／wall time 必須寫在
+``warmup_fit`` accounting，並在總表列出；不得為了 frame-match 讓
+direct 臂多跑 PPO，也不得讓 warmup 臂少跑 PPO。
+
+Gates 與判定
+------------
+
+判定只用 held teacher agreement 的 **單一標量**（held split、既有
+agreement 定義），在 update 10 比較同 aux 條件的兩臂。不是 30-eval-seed
+的 paired t-test。survival 的 paired t／CI 仍要記錄，只供解讀。
+
+整體 PASS 必須同時成立：
+
+1. queue 完整跑完：initial gate、dataset identity、``warmup_fit``、
+   四個 PPO 臂。
+2. freeze／update-0 policy 身份檢查通過。
+3. 每個 snapshot（0／1／10）四臂都有 held agreement；缺失 fail closed。
+4. ``agr(warmup_unreg, u10) > agr(direct_unreg, u10)``
+5. ``agr(warmup_aux, u10) > agr(direct_aux, u10)``
+
+否則 FAIL。相等不算優勢。aux 配對的 headroom 可能很小（校正 aux 在
+update 10 已把 agreement 留在 0.6779 vs 起點 0.6999）；這是接受的
+否證風險，不得因此改成只看未正則化配對。
+
+Update 1 的 agreement、held EV、survival、KL、frames、optimizer steps
+都必須報告，不進 PASS/FAIL。
+
+PASS 或 FAIL 都 promote nothing，並保留全部 experimental snapshots。
+禁止從曲線事後選 warmup 長度、checkpoint、alpha 或成功臂。
+
+每臂每 snapshot 必報
+--------------------
+
+- det eval seeds 3000–3029：mean／median／per-seed elapsed／censoring；
+  與 update 0 的 paired survival 差與 95% t CI（診斷）。
+- held teacher agreement、teacher-to-student KL。
+- PPO jsonl：approx_kl、clipfrac、entropy、explained variance、
+  optimizer steps、n_samples、rollout survival、censoring。
+- 累計 env frames、episodes、optimizer steps、wall
+  ``collect_wall_s``／``ppo_wall_s``／``total_wall_s``（schema v3）。
+
+``warmup_fit`` 另報：n_terminal、n_censored、n_frames、value-loss 曲線、
+optimizer steps、freeze 檢查、held EV／MSE（兩顆 critic）、warmed
+checkpoint hashes。
+
+預期實作入口（尚未存在，不得當成已可執行命令）
+----------------------------------------------
+
+本文件 **沒有** 可執行 CLI。未來實作若提供入口，行為必須等於本契約，
+建議（非授權）形如：
+
+- 共享 warmup：獨立工具／子命令，只寫 warmed checkpoint 與
+  ``warmup_fit`` report。
+- PPO 臂：``python -m qrokkun_ai.v5.tools.phase3_ranked_ppo_retention``
+  或 ``..._aux``，``--max-updates 10``、``--device cuda``、schema v3、
+  ``--init-checkpoint`` 指向 BC 或 warmed checkpoint。必須能在
+  update 1 寫 snapshot／held agreement；現行程式若不能，要先改到符合
+  本契約再執行，且不得順便改 PPO knobs。
+
+在該實作 freeze、CPU contract tests 通過、clean checkout 核對之前，
+禁止 GB10 正式 run。不得使用 ``--quick``，不得填 NAS path。
+
+明確禁止
+--------
+
+- 延長 10k trajectory、promote post-hoc best、事後調 alpha。
+- 改 entropy、gamma/lambda、reward、Spawner、self-play、DAgger、
+  random-start fraction。
+- 用 training EV 或 survival 選 warmup 長度。
+- 把 truncation-as-terminal 用在 warmup target 卻稱為無偏 MC。
+- 只訓完未正則化配對就宣布機制成立。
+- 在 dirty source 上開正式 run。
+- 把本文件當成授權去改 Phase 3 鎖定 knobs，或當成已完成的實驗結果。
+
+依據
+----
+
+- ``docs/journal/1789633301_player_v5_bad_critic.txt``
+- ``docs/journal/1789656611_player_v5_bad_critic_review.txt``
+- ``docs/journal/1789696064_player_v5_aux_control_10k_comparison.txt``
+- ``docs/journal/1789229713_player_v5_corrected_aux_round1_preregistration.txt``
+- ``docs/journal/1789233643_player_v5_corrected_aux_round1.txt``
+- ``docs/journal/1789225070_player_v5_recovery_roadmap.txt``
+- ``docs/journal/1789738128_phase3_schema_v3_timing_and_sparse_recovery.txt``
+- ``qrokkun_ai/v5/tools/phase3_ranked_ppo_retention.py``
+- ``qrokkun_ai/v5/tools/phase3_ranked_ppo_retention_aux.py``
