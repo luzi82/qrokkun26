@@ -14,10 +14,10 @@ from qrokkun_ai.v21.render_player_v21_demo import render_frame, load_bullet_spri
 
 SV_SHA='f9dd57396ac2ccf5ba5ea2c71c9272d710a6a98fe0e0b181c1bc346a24cd5325'
 
-def load_spawner(path):
-    if file_hash(path)!=SV_SHA: raise ValueError('Sv checkpoint identity mismatch')
+def load_spawner(path, *, expected_update=320, expected_spawner_sha256=SV_SHA):
+    if file_hash(path)!=expected_spawner_sha256: raise ValueError('Sv checkpoint identity mismatch')
     ck=torch.load(path,map_location='cpu',weights_only=False)
-    if ck['update']!=320 or ck['partial_update'] is not False:
+    if ck['update']!=expected_update or ck['partial_update'] is not False:
         raise ValueError('Sv update identity mismatch')
     net=Spawner(); net.load_state_dict(ck['model'],strict=True)
     return net.eval()
@@ -44,6 +44,8 @@ def main():
     p.add_argument('--output','--out',dest='output',required=True,type=Path)
     p.add_argument('--scale',type=int,choices=[3],default=3)
     p.add_argument('--seed',required=True,type=int)
+    p.add_argument('--expected-update',type=int,default=320)
+    p.add_argument('--expected-spawner-sha256',default=SV_SHA)
     args=p.parse_args(); torch.set_num_threads(1)
     if args.output.exists(): p.error('output already exists')
     if not args.assets.is_absolute(): p.error('--assets must be absolute')
@@ -52,7 +54,10 @@ def main():
     for action in ACTIONS:
         path=args.assets/('player.png' if action=='idle' else f'player_{action}.png')
         with Image.open(path) as im: sprites[action]=im.convert('RGBA')
-    net=load_spawner(args.spawner_checkpoint)
+    net=load_spawner(args.spawner_checkpoint,expected_update=args.expected_update,
+                     expected_spawner_sha256=args.expected_spawner_sha256)
+    actual_sha=file_hash(args.spawner_checkpoint)
+    actual_update=torch.load(args.spawner_checkpoint,map_location="cpu",weights_only=False)["update"]
     player,meta=load_player(args.player_checkpoint,device='cpu')
     args.output.parent.mkdir(parents=True,exist_ok=True)
     work=Path(tempfile.mkdtemp(prefix='sv22-render-'))
@@ -62,7 +67,7 @@ def main():
         last=(env,action)
         im=render_frame(env,action,args.assets,3,bullet_sprites=bullets,
                         player_sprites=sprites,seed=args.seed,hit_step=hit_step)
-        ImageDraw.Draw(im).text((12,28),'Sv22 u320 vs Pv21 u400 | diagnostic only',fill='white')
+        ImageDraw.Draw(im).text((12,28),f'Sv22 u{actual_update} vs Pv21 u400 | diagnostic only',fill='white')
         im.convert('RGB').save(work/f'{count:06d}.png',compress_level=1)
         count+=1
     try:
@@ -70,11 +75,11 @@ def main():
         if result['death']:
             for step in range(30): draw(*last,hit_step=step)
         subprocess.run(['ffmpeg','-n','-threads','2','-framerate','60','-i',str(work/'%06d.png'),
-            '-c:v','libx264','-threads','2','-crf','18','-pix_fmt','yuv420p',str(args.output)],check=True)
+            '-c:v','libx264','-threads','2','-crf','18','-pix_fmt','yuv420p','-movie_timescale','15360',str(args.output)],check=True)
         sidecar=dict(result=result,spawner_checkpoint=str(args.spawner_checkpoint.resolve()),
             player_checkpoint=str(args.player_checkpoint.resolve()),mode='stochastic',
             player_mode='deterministic argmax',fixed_cap_frames=7200,device='cpu',
-            python=__import__('sys').executable,spawner_sha256=SV_SHA,spawner_update=320,
+            python=__import__('sys').executable,spawner_sha256=actual_sha,spawner_update=actual_update,
             player_sha256=PLAYER_SHA,player_update=400,video_frames=count,hit_tail_frames=count-result['frames'],
             diagnostic_only=True,promotion_eligible=False,visualization_only=True,
             visualization='Python diagnostic visualization',spawner_partial_update=False,

@@ -83,8 +83,10 @@ def test_main_hit_tail_and_cleanup(tmp_path,monkeypatch):
     assets=tmp_path/'assets'; assets.mkdir()
     for name in ['bullet_med.png']+['player.png' if a=='idle' else f'player_{a}.png' for a in ACTIONS]:
         Image.new('RGBA',(8,8),'white').save(assets/name)
-    monkeypatch.setattr(r,'load_spawner',lambda p:object())
+    monkeypatch.setattr(r,'load_spawner',lambda p,**kw:object())
     monkeypatch.setattr(r,'load_player',lambda *a,**kw:(object(),{}))
+    monkeypatch.setattr(r,'file_hash',lambda p:r.SV_SHA)
+    monkeypatch.setattr(r.torch,'load',lambda *a,**kw:{'update':320})
     def fake_rollout(*a,on_frame,**kw):
         on_frame(object(),'idle')
         return dict(seed=3000,frames=1,seconds=1/60,death=True,censored=False,cap_frames=7200)
@@ -123,3 +125,27 @@ def test_missing_direction_art_fails_before_checkpoint_or_encoding(tmp_path,monk
                 Image.new('RGBA',(3,3),'red').save(art/('player.png' if action=='idle' else f'player_{action}.png'))
         monkeypatch.setattr(sys,'argv',['render','--spawner-checkpoint','s','--player-checkpoint','p','--assets',str(art),'--out',str(tmp_path/'out.mp4'),'--seed','3000'])
         with pytest.raises(FileNotFoundError): r.main()
+
+def test_explicit_new_checkpoint_identity(tmp_path):
+    from qrokkun_ai.v22.render_demo import load_spawner
+    from qrokkun_ai.v22.core import file_hash
+    path=tmp_path/'u880.pt'
+    torch.save(dict(update=880,partial_update=False,model=Spawner().state_dict()),path)
+    assert isinstance(load_spawner(path,expected_update=880,
+        expected_spawner_sha256=file_hash(path)),Spawner)
+
+def test_explicit_identity_rejections_and_old_default(tmp_path,monkeypatch):
+    import pytest
+    from qrokkun_ai.v22 import render_demo as r
+    path=tmp_path/'checkpoint.pt'
+    for update,partial in [(879,False),(880,True),(880,None)]:
+        torch.save(dict(update=update,partial_update=partial,model=Spawner().state_dict()),path)
+        with pytest.raises(ValueError,match='update'):
+            r.load_spawner(path,expected_update=880,expected_spawner_sha256=r.file_hash(path))
+    torch.save(dict(update=880,partial_update=False,model=Spawner().state_dict()),path)
+    with pytest.raises(ValueError,match='identity'):
+        r.load_spawner(path,expected_update=880,expected_spawner_sha256='0'*64)
+    with pytest.raises(ValueError,match='identity'): r.load_spawner(path)
+    torch.save(dict(update=320,partial_update=False,model=Spawner().state_dict()),path)
+    monkeypatch.setattr(r,'file_hash',lambda p:r.SV_SHA)
+    assert isinstance(r.load_spawner(path),Spawner)
