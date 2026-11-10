@@ -1,0 +1,76 @@
+Sv22 preregistration — 2026-11-10 Asia/Hong_Kong
+Owner-authorized local implementation only. Frozen deterministic argmax Pv21 u400,
+file b8466bb13972de62003e16b0b570567a016d0dab4dd5667e66a3666974cfd5f8,
+state 250f3c3f1053b18129f992e97cb9ae15139fc2e5fa962b5491db5dddb2eb8f91.
+Inspected original checkpoint: architecture player_v21_kinematic_decoupled v1,
+hidden472, top_k12, horizon12, update400. No v21/Gv20 changes.
+Train seeds >=1000000; selection validation400000..400015; FINAL500000..500063.
+Final seeds inaccessible until training closed and best-by-validation frozen.
+Primary stochastic learned S compared to scripted Gv20 and frozen update0 S;
+secondary deterministic diagnostic only, never select mode post hoc. Dedicated
+per-seed stochastic RNG, paired bootstrap95% CI learned minus each control
+capped survival seconds; negative CI upper bound <0 supports learning, otherwise
+inconclusive. Baselines once per window, retain each seed. 120s censor explicit;
+death takes precedence at frame7200. Historical2000/3000 windows unused.
+Five independent raw Gaussian coordinates: pi*(tanh(angle)+1), speed115+85*tanh,
+aim Gv20 learned_aim_delta(raw_s, raw_direction). Aim mean -3, angle std1.5,
+speed std0.6. Zero direction falls back +x. Exact raw log_prob PPO; no clipped
+samples. Public instantaneous position/velocity/time/top64 masked bullets only.
+S before movement, frame0 initialized callback. Separate actor and critic.
+Decision reward negative elapsed frames/7200, gamma=lambda=1 finite-horizon MC,
+zero continuation at death/cap. Rewards telescope to negative survival fraction
+(the sum of RETURNS does not; sum of interval REWARDS does). No timing changes.
+CPU simulation, batched P device inference; S callbacks CPU avoid GPU roundtrips.
+Hard stop1794308400; train stop1794305700 reserves45min final. Check each tick,
+minibatch/eval; incomplete episodes discarded, never promote incomplete eval.
+Atomic latest with optimizer/RNG; no automatic resume in initial implementation:
+restart requires new directory; checkpoints preserved, optimizer never reset silently.
+Quick caps explicitly nonformal. No CUDA run/deploy/SSH/commit/push by implementer.
+
+Implementation verification (local CPU only):
+First frame0/mapping and timed-return tests run RED before core existed
+(tmp/sv22/red.log), then GREEN. Additional integration tests added after core,
+not all vertical slices separately RED-first; this procedural limitation is
+explicit. Final v22 suite: 9 passed. Existing env/v10/v21/Godot:65 passed67.24s,
+GODOT_BIN=/storage/hermes/tools/godot/godot. Evidence tmp/sv22/*.log.
+Actual u400 quick CPU: update1, two120-frame episodes, both censored2s,
+value loss0.0107977632, policy loss-7.15e-8, grad norm2.06538,
+S parameter delta0.0206598. No heldout seeds accessed, no CUDA run.
+Signal smoke during full-cap baseline: exit0 stopped:signal-15; latest saved
+optimizer plus5056-byte train RNG. Deadline unit tests prove no post-hard launch
+and latest save while no-death evaluation interrupted. No measured formal
+throughput estimate; parent must measure CUDA and budget final before cutoff.
+Operational limit: no automatic resume; each restart requires new explicit
+variant directory. S callbacks CPU event inference rather than GPU queue;
+P inference batched each tick across live envs. No uniform random baseline
+(initial frozen stochastic control and scripted control implemented).
+
+Review amendment — 2026-11-10 (historical results above retained):
+Deadline inputs must be finite; Guard independently enforces the absolute owner
+HARD cutoff even with a corrupted configured deadline. Formal protocol is exactly
+16 validation +64 final seeds at7200 frames, gated by manifest; reduced counts
+require explicit --nonformal or --quick. One pair never supports learning.
+Primary stochastic learned +both controls persist final.json with comparisons
+and conclusion before optional deterministic diagnostic. Diagnostic interruption
+has its own incomplete file, preserves primary completion, and permits no rerun.
+Exclusive final claim and closed best hash remain mandatory before heldout access.
+Validate alone may open an immutable atomic best.pt snapshot during live training,
+without closure; it uses validation seeds only and separate diagnostic status.
+Atomic status reports baseline/rollout/PPO/validation and terminal states.
+progress.jsonl records each completed PPO update with wallclock/elapsed, loss,
+rollout and validation (null if absent). Partial PPO attempts never count completed;
+latest preserves changed parameters/optimizer/RNG; interrupted episodes discarded.
+Review regressions were run RED before implementation (11 failures); follow-up
+coverage additionally checks hash lock and manifest gating. Evidence directory:
+tmp/sv22/review-fixes/. Actual u400 smoke is nonformal CPU only, one update,
+two120-frame training episodes, two seeds per validation/control mode; no final
+evaluation or heldout access, no CUDA, deployment, remote, commit or push.
+Review validation completed: combined Sv22/env/v10/v21 61 passed (6.20s);
+Godot parity26 passed (55.49s). Additional snapshot-status regression was RED
+before fixing diagnostic status to report the loaded best snapshot update.
+Actual smoke: frozen P update400, no_grad true, S parameter delta0.09245046,
+finite policy/value losses -0.02381978/0.00386815, grad norm2.072911.
+Exactly8 actual120-frame episodes: 2 training +2 scripted validation control
++2 initial stochastic validation control +2 learned validation; all censored.
+One completed PPO update, four epochs, exactly one progress.jsonl record.
+No actual heldout evaluation. Exact commands in review-fixes/commands.txt.

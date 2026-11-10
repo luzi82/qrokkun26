@@ -165,3 +165,10 @@ Run the full check with:
 ```bash
 GODOT_BIN=/path/to/godot PYTHONPATH=. python -m pytest tools/test_gv20_godot.py qrokkun_env/tests qrokkun_ai/v10/tests qrokkun_ai/v21/tests -q
 ```
+
+Sv22 owner-authorized learning experiment: [protocol and local runner](qrokkun_ai/v22/README.md).
+
+Sv22 review operations: see [runner README](qrokkun_ai/v22/README.md) for finite
+deadline enforcement, exact formal seed counts, live validation snapshots,
+completed-update progress/status, and primary-result preservation before optional
+diagnostics. CPU review evidence is in `tmp/sv22/review-fixes/`.
