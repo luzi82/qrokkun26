@@ -1,0 +1,110 @@
+Sv22 historical training stop report
+Created: 2026-11-10T19:51:58.513094+08:00 (Asia/Hong_Kong); Unix seconds 1794311518
+
+Disposition and evidence
+Owner explicitly ordered STOP. Parent gracefully stopped supervisor and trainer,
+verified no remaining GPU processes, released GPU, and PAUSED monitor/cutoff jobs.
+These operational checks are parent attestations, not independently rerun here.
+No automatic restart or final evaluation is authorized. Preserve Sv22 (S22) for a
+future opponent pool; this report authorizes no Sv23 implementation.
+Owner extended the original 19:00 budget to 23:00 HKT (train 22:15), but then
+stopped early at 19:47 HKT. This was owner intervention, not deadline failure.
+Summary stopped_at_hkt: 2026-11-10T19:47:19.115225+08:00.
+Metadata capture STOP_TIME: 2026-11-10T19:47:38.449024+08:00.
+Trainer status stopped:signal-15; supervisor stopped, exit_code 0, child_pid null.
+
+Read evidence:
+/storage/hermes/home/dev_gpt_1/sv22-20261110/stopped-summary.json
+/storage/hermes/home/dev_gpt_1/sv22-20261110/owner-stop-metadata.txt
+Current qrokkun_ai/v22/README.md, core.py, run.py and original journal contracts.
+Original contracts remain unchanged. Documentation workspace baseline: 24fd8b6.
+
+Objective and immutable identity
+Train stochastic S to reduce capped survival of frozen deterministic argmax
+Pv21 update400, full 7200-frame (120-second) cap; P remains no_grad.
+P file SHA256: b8466bb13972de62003e16b0b570567a016d0dab4dd5667e66a3666974cfd5f8
+P state SHA256: 250f3c3f1053b18129f992e97cb9ae15139fc2e5fa962b5491db5dddb2eb8f91
+P source: /mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261109-1803-v21-exploratory/best_player_v21.pt
+Training seeds >=1000000, changing per update; validation 400000..400015.
+Future heldout 500000..500063 remains UNUSED: no heldout access, no final
+inference/evaluation, and metadata FINAL_FILES is empty.
+
+Lineage and continuation
+Source commits, in order:
+c4e322b4374bfe8c7d4bffab5837d0b46c67d842
+d6b2285b198db5f78d0da3e3ce6bb0d268283684
+Parent run: /mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261110-0831-sv22-seed17
+Continuation: /mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261110-0902-sv22-seed17-2300
+Fork boundary was completed update40. Old original update41 is excluded;
+it must not be counted as continuation work or merged into its history.
+Continuation restored S weights, Adam moments/steps, train RNG, global torch
+and NumPy RNG, counters, initial stochastic baseline, selected best and score,
+and validation controls. Original/input records and NAS checkpoints are retained.
+
+Stop boundary and checkpoint interpretation
+Exactly 1011 completed updates; attempted update1012 was interrupted in rollout.
+latest.pt update=1011, attempted_update=1012, partial_update=true.
+The flag is a pessimistic pending-attempt marker (attempt > update), not evidence
+that partial PPO actually ran. Do not label update1012 completed or latest a
+fully complete resumable boundary. Automatic resume is unsupported.
+u1000 snapshot exists: update-1000.pt, nonpartial, validation 84.759375 seconds.
+Checkpoint SHA256 values (from stopped-summary.json):
+best.pt: d736fe5a1baf9d2737ce3c1407e430a68be58a3bc854a8395ef7e2bcae658cf9
+latest.pt: fc6378d701c5a1820b8c5e8e9b649c3d7b49125dc3cfe08535211169ab5a0893
+update-1000.pt: 96a5ce5d9a5a52489b54c957d29c5997758979ca9f4de33478e537b6251efb81
+update-880.pt: c19e8504946b4567ea273022921490b20fb8b49260676e0f5b61354e3102e7d7
+best.pt and update-880.pt have different file hashes. Parent verified their
+model tensors exactly equal; summary records best_model_equals_u880=true.
+
+Observed results (mean capped P survival seconds; lower favors S)
+Final selected best: u880 71.12604166666667 (16 deaths, 0 censors).
+Latest validation: u1010 83.66250000000001 (15 deaths, 1 censor).
+u1000 validation: 84.759375 (15 deaths, 1 censor).
+Scripted validation control: 81.80520833333333.
+Initial stochastic S validation control: 89.55.
+There are 102 validation points, including inherited history.
+First20 rollout mean: 88.95869791666667.
+Last20 rollout mean: 81.9103125.
+Last completed rollout u1011: 76.68645833333333 (16 episodes, no censors).
+Rollout aggregates use changing training seeds, unlike the fixed validation
+window; these are not paired validation improvements. Validation backsliding
+from u880 to u1000/u1010 is explicit. Selecting the minimum over 102 looks
+introduces selection optimism. No statistical success, generalization, or
+promotion claim follows; the planned heldout comparison was never performed.
+
+Schema, owner observation, and future proposal only
+Existing S uses 325 public-state inputs, separate 325->128->5 actor and
+325->128->1 critic, five independent raw Gaussian actions and learned log_std[5].
+Inputs contain instantaneous P position/velocity/time and masked top64 bullets;
+there is no P internal state or current action. Existing coordinates represent
+birth angle, speed, aim magnitude and aim direction x/y, not owner's desired
+five mean coordinates. Angle mapping is pi*(tanh(a)+1): both saturated endpoints
+approach EAST (0 and 2*pi). Owner observed many east spawns; this is a possible
+mechanism, not a measured root cause or measured distribution diagnosis.
+Next Sv23 desired mean[5]: (birthdir x, birthdir y, speed, aimdx px, aimdy px).
+Desired learned std[4]: (birthangle radians, speed, aimdx px, aimdy px).
+Unit-vector normalization/near-zero handling and speed std space are unresolved.
+This is a future proposal only, with no authorization to implement from this
+report request. Preserve existing P identity and public-only information rule.
+
+Diagnostic media provenance
+These are Python diagnostic visualizations, not heldout Godot evidence.
+Both reels reuse seeds3000..3004; they cannot establish independent success.
+Delivery manifest: /storage/hermes/home/dev_gpt_1/sv22-u320-media/delivery.json
+Reel: /mnt/minion/88_minion_rw/projects/qrokkun26/demo_videos/2026-11-10_1233/sv22-u320-vs-pv21-u400-seeds3000-3004.mp4
+JSON: /mnt/minion/88_minion_rw/projects/qrokkun26/demo_videos/2026-11-10_1233/sv22-u320-vs-pv21-u400-seeds3000-3004.json
+Delivery manifest: /storage/hermes/home/dev_gpt_1/sv22-u880-media/delivery.json
+Reel: /mnt/minion/88_minion_rw/projects/qrokkun26/demo_videos/2026-11-10_1845/sv22-u880-vs-pv21-u400-seeds3000-3004.mp4
+JSON: /mnt/minion/88_minion_rw/projects/qrokkun26/demo_videos/2026-11-10_1845/sv22-u880-vs-pv21-u400-seeds3000-3004.json
+
+Verification and preservation
+Existing test records remain historical evidence, not new report-time tests:
+prior 126-test record and renderer 16-test record are separate scopes, not a
+new combined total. After this report was drafted, the parent independently ran:
+GODOT_BIN=/storage/hermes/tools/godot/godot PYTHONPATH=. OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python -m pytest -q
+Result: 136 passed in 61.70s, with no failures or skips. This CPU/local-engine
+regression run is not a training run or heldout evaluation. Raw output:
+/storage/hermes/home/dev_gpt_1/sv22-20261110/stopped-full-tests.log
+No GPU, SSH, training, evaluation, commit or push was performed by this writer.
+Only this journal and root README are changed. Source files/checkpoints remain
+preserved on NAS; no checkpoint or video is added to Git by this report.

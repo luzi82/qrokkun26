@@ -172,3 +172,5 @@ Sv22 review operations: see [runner README](qrokkun_ai/v22/README.md) for finite
 deadline enforcement, exact formal seed counts, live validation snapshots,
 completed-update progress/status, and primary-result preservation before optional
 diagnostics. CPU review evidence is in `tmp/sv22/review-fixes/`.
+
+Sv22 owner-stop outcome: [historical training stop report](docs/journal/2026-11-10-1794311518-sv22-training-stop-report.txt).
