@@ -157,3 +157,9 @@ config's original device value; preflight always constructs CPU models, writes
 no files, and preserves caller global RNG. Require exit 0 and inspect update,
 best and hashes. A completed PPO boundary with pending scheduled validation is
 rejected; capture a complete validation or preferably a nonboundary update.
+
+Diagnostic CPU video: `python -m qrokkun_ai.v22.render_demo --spawner-checkpoint /ABS/sv.pt --player-checkpoint /ABS/p.pt --assets /ABS/assets --seed 3000 --out demo.mp4 --scale 3`.
+The renderer checks the frozen update-320 Sv and update-400 P identities, uses
+stochastic per-seed Sv sampling and deterministic P argmax for a fixed 7200-frame
+cap, and adds a 30-frame hit tail after death. The 960×720, 60fps video has a
+`.mp4.json` diagnostic sidecar; local temporary PNGs are removed on completion.
