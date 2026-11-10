@@ -1,0 +1,118 @@
+Sv23 owner-stop training report
+Created: 2026-11-11T07:04:16+08:00
+
+Disposition
+Owner ordered interruption, reporting, and parent-managed git add/commit/push.
+This documentation task performs no commit or push.
+Target: 1000 PPO updates; owner stopped the run before target completion.
+Stop time: 2026-11-11 06:54:56 HKT (JSON: .919158 seconds).
+Exactly 750 PPO updates completed; attempted update counter is 750.
+The signal arrived during validation at completed update 750.
+Status records Stopped: signal-15; supervisor reason is owner signal.
+Parent stopped supervisor and trainer; owner-stop evidence verifies neither remains.
+The recorded GPU process query is empty: GPU resources were released and verified.
+Monitor 9bd239aad877 is paused; old Sv22 jobs remain paused.
+Owner stop overrides the original automatic-final plan.
+Do not launch automatic final, resume training, or infer authorization for a successor.
+
+Evidence and provenance
+Read-only evidence: /storage/hermes/home/dev_gpt_1/sv23-u1000/stopped-summary.json
+Read-only evidence: /storage/hermes/home/dev_gpt_1/sv23-u1000/owner-stop.txt
+Policy context: qrokkun_ai/v23/README.md; parent facts supplied with report request.
+Source commit: c47b10207ae67c6b9b895dec879a2217819f13c5
+Parent reports immutable GB10 source archive without .git; 141 source files verified.
+Code was reviewed and source hashes verified before launch.
+Run directory on GB10:
+/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261111-0008-sv23-seed17-u1000
+No GPU failure is evidenced at stop; this was an explicit owner cancellation.
+No giant logs, external history, SSH, training, evaluation, or GPU commands were used here.
+
+Policy and physical contract
+New S was initialized from scratch with 325 input components.
+Actor has eight outputs: five means and three state-dependent scale logits.
+Means represent birth x/y, speed raw, and direct player-relative aim dx/dy in pixels.
+Birth direction is normalized; exact zero maps east.
+Physical speed is a truncated Normal on 30..200 pixels/second.
+Speed mean is 115 + 85*tanh(raw); sampling is conditioned, not velocity-clamped.
+Aim targets the pre-movement player position plus direct pixel offsets.
+Angular firing noise is applied at spawn, conditional on the stored sampled birth.
+Wrapped angular densities and the speed normalizer enter PPO likelihood.
+Birth and firing scale units are radians; speed scale units are pixels/second.
+Scale bounds: birth .01..pi; speed .5..170; firing .01..pi.
+Zero entropy bonus is an engineering choice, not a learning guarantee.
+The design itself does not establish successful learning or an east-problem fix.
+Frozen baseline P is Pv21 update 400, no_grad=true.
+P file SHA256: b8466bb13972de62003e16b0b570567a016d0dab4dd5667e66a3666974cfd5f8
+P state SHA256: 250f3c3f1053b18129f992e97cb9ae15139fc2e5fa962b5491db5dddb2eb8f91
+Sv22 u880 comparator uses its original hash-locked artifact and original mapping.
+Original seed+7,000,000 raw Gaussian sampling is retained for that comparator.
+Manifest comparator SHA256:
+c19e8504946b4567ea273022921490b20fb8b49260676e0f5b61354e3102e7d7
+
+Validation results (lower player survival favors S)
+All controls and selected scores use the same NEW 16 seeds: 600000..600015.
+Best Sv23: update 150, 82.0 seconds, 16 deaths and zero censors.
+Scripted control: 84.0125 seconds, 15 deaths and one censor.
+Untrained Sv23 control: 91.2208333333 seconds, 15 deaths and one censor.
+Old Sv22 u880 control: 79.1635416667 seconds, 16 deaths and zero censors.
+Selected best is slightly better than scripted, but worse than Sv22 u880.
+Last COMPLETED validation: update 740, 99.40625 seconds.
+That validation had 11 deaths and five censors; it is worse than all three controls.
+Update 750 validation is INCOMPLETE and is not a score.
+Decline from the selected best to the latest completed validation is clear.
+These are selection comparisons, not formal confidence intervals or heldout proof.
+There are 75 completed validation points and 750 completed rollout records.
+Each batch uses 16 episodes with the full 7200-frame / 120-second cap.
+This is the episode cap, not a claim that every episode survived the cap.
+First 20 rollout mean: 89.99635416666666 seconds.
+Last 20 rollout mean: 100.87484375 seconds.
+Last rollout (750): 98.375 seconds, 13 deaths, three censors.
+Training seeds change from >=2,000,000; rollout means are not fixed-validation scores.
+Planned final seeds 700000..700063 (64 seeds) were never used.
+No heldout access, formal heldout learning claim, or promotion follows.
+
+Checkpoint boundary and preservation
+latest.pt and interrupted.pt both record completed=750, attempted=750.
+Both have partial_update=false and empty validation metadata.
+They have the same bytes/hash, SHA256:
+928f39b53c569551359fd9f7707ecb5f34a8a5d81df082df3f8aebc3b5545095
+This is complete PPO state at a pending validation boundary.
+It does not imply completed validation 750 or automatic resumability.
+best.pt is update 150, partial_update=false, SHA256:
+97ff6c1c3253d6d833cacea4d3c9d94d1002ce4b7f9645a83e49d3172bfaf038
+initial.pt is update zero, partial_update=false, SHA256:
+1626fe3e55e5bdd93a960899bbab4fb5aae3511eb5b869a5a0148ae0053cfe75
+No update-1000 checkpoint exists; no training-closed marker exists.
+Final files list is empty; no final evaluation was launched.
+Preserve best, initial, latest, interrupted, and logs for future analysis or pools.
+Preservation is not approval to resume, promote, or start another version.
+
+Last-rollout distribution: measured one batch only
+19999 decisions; scale order is birth radians, speed pixels/second, firing radians.
+Birth std min/mean/max: .030765553371144012 / 1.4704260886481444 / 3.1362638561705394
+Speed std min/mean/max: 1.4700646143352776 / 46.57270477166257 / 160.30993965637046
+Firing std min/mean/max: .010002612967552166 / .6561062916941608 / 3.1363882619584844
+24-bin birth histogram, in recorded bin order:
+674, 659, 642, 688, 690, 790, 781, 855,
+983, 1003, 1013, 1065, 1017, 1078, 1044, 926,
+950, 850, 843, 720, 705, 662, 676, 685.
+These measurements illustrate varying state-dependent scales within one batch.
+They do not identify a root cause of degradation or prove directional issues fixed.
+PPO optimization instability or exploration behavior are unverified hypotheses only.
+No proven implementation bug is inferred from these measurements.
+
+Verification and limits
+Parent's prelaunch Sv23 suite: 30 passed.
+After the draft, the parent reran the Sv23 suite: 30 passed in 19.92s.
+Command: OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTHONPATH=. /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python -m pytest qrokkun_ai/v23/tests -q
+Raw result: /storage/hermes/home/dev_gpt_1/sv23-u1000/stopped-new-tests.log
+This is a local CPU regression run, not training or heldout evaluation.
+Full project has known historical Sv22 deadline-dependent failures.
+There were 12 failures, then six additional failures after historic deadlines.
+Do not describe the whole project as green or mask those failures.
+Actual parent CUDA full-cap smoke completed one update, parameter delta .979497.
+P remained frozen; that two-seed smoke was nonformal, separate from the formal run.
+Smoke parameter movement does not establish learning or heldout performance.
+Formal run remained short of its 1000-update contract when the owner stopped it.
+This report records the stop and available evidence without reopening architecture.
+Historical journals are preserved; only this new report and root link are added.
