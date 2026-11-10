@@ -1,0 +1,159 @@
+Sv23 OWNER-AUTHORIZED implementation contract and handoff
+
+Source parent: fe28872816ec73453dd4bd8cd10c74517b04c059, originally clean.
+Owner task records /storage/hermes/home/dev_gpt_1/sv23-u1000 read only.
+Scope: new qrokkun_ai/v23/**, this journal, minimal root README link.
+All 130 original baseline files verified unchanged before README link; final
+preservation check excludes only authorized README. No changes to v22/v21/env,
+Godot sources or historical journals. No SSH, GPU, GB10 work, deployment,
+commit, push, PR, dependency installation, or other agents were used.
+The approved continuous-spawner-policy skill reference was not located in the
+accessible searched skill locations. Production v22 core/run/supervise and
+Gv20/Pv21 loaders were inspected as read-only references.
+
+Owner preregistration (provided before implementation trials): 1000 completed
+PPO updates, 16 episodes/update, seed17, full 7200-frame cap, training seed
+window >=2000000, validation600000..600015, final700000..700063. Stochastic S
+primary; deterministic secondary diagnostic. Controls scripted Gv20, saved
+initial Sv23 stochastic, frozen Sv22u880 stochastic. Minimum validation mean
+survival alone selects best. Final locked best once after clean u1000; no heldout
+selection. Optional secondary u1000 evaluation omitted. No actual final seed was
+executed during implementation. Explicit final mocks live only in unit fixtures.
+
+Implementation: public325 input; actor128hidden ->8 components, separate critic.
+Five mean outputs birthx/y,speedraw,aimdx/dypx; three state-dependent bounded
+positive scales. Physical executable action3 = wrapped birthbearing, truncated
+physicalspeed, wrapped firebearing. Birth exactzero EAST, otherwise exact forward
+normalization via max-abs scaling. Only singular derivative is bounded using
+1e-12 radius floor; no broad east fallback sector. Init bias(1,0), speed115,
+aim0; initial scales approximately3rad/50pxs/.10rad, state weights small nonzero.
+Bounds .01..pi rad/.5..170pxs/.01..pi rad; not diversity constraints.
+Speed mean115+85tanh(raw), conditional physical Normal30..200; float64 CDF,
+differentiable normalizer, inverseCDF with open52bit uniform, no velocity clamp.
+Aim is direct unbounded pixel offset on pre-movement player. Production ray
+spawn derives from sampled birthbearing; conditional firing mean is spawn to
+that target. Wrapped angular noise added at spawn; zero offset still explores.
+Production aim-at-spawn fallback +x retained. Both angular densities use stable
+periodic image logsumexp[-5,5]; sigma<=pi gives omitted mass<4e-28. Stored float64
+physical actions and exact old likelihood; PPO recomputes firing conditional on
+STORED sampled birth, never another birth draw or birthmean. Entropy coefficient
+zero, no raw Gaussian entropy surrogate. Adam clipping/minibatches/normalized
+advantages; MC gamma=lambda1 reward negative elapsedframes/7200.
+
+Gv20 inheritance supplies exact scripted schedule, Sspeedhistory, field direct
+aim with previous 60-frame window mean excluding sameframe, radius2.6, constantvelocity,
+reset firsttick delay, frame0 decision credit, public pre-movement observations.
+Frozen deterministic Pv21u400 batched across active episodes every60Hz tick;
+S events and PPO CPU, torchthreads1. Hashes are owner-authorized file/state
+identities. Frozen Sv22u880 comparator uses untouched old raw action mapping and
+seed+7million RNG. New Sv23 evaluation RNG seed+23million, training seed17
+separate stream. Validation controls evaluated once. Bounded 24-bin sampled
+birth histogram and scale min/mean/max recorded per rollout.
+
+No dated Sv22 constants or Guard/supervisor imports in new runner. Default
+updates1000 with no default deadline. Optional --deadline-unix only explicit.
+--quick cap120 is NONFORMAL; reduced-count full-cap --nonformal supported.
+No resume (explicit or implicit); fresh empty output required. All checkpoints
+store model/Adam/RNG/config/architecture/hashes/counters. Latest retains completed
+boundary on partial PPO interruption; interrupted.pt captures partial state.
+Status records attempted/completed/last_error. Completed progress survives even
+validation interruption. Best chosen by validation, ties keep earlier. Separate
+update-1000 snapshot saved before final validation. Closure locks best/u1000.
+Exclusive direct-child supervisor train->final; signal forwarding, cleanup,
+kill grace/reap, child nonzero preserved. Stopped supervisor never starts final.
+Final exclusive claim before seed use; per-mode completed records while running;
+paired learned-minus-control bootstrap95%CIs; nonformal always inconclusive.
+Primary persisted before diagnostics, preserved on diagnostic interruption.
+
+TDD actual RED/GREEN logs in tmp/sv23:
+01-birth: missing core then exactzero/nonzero/subnormal direction tests green.
+02-wrapped: missing sampler/density then integral/seam/circularmoment green.
+03-speed: missing truncated funcs then bounds/integral/moments/gradients green.
+04-scales: missing actor then scene variation,8outputs,3scale gradients green.
+05-conditional: missing conditional sample/score then exact recomputation and
+ratio1/fireexploration gradients green.
+06-env: missing public observation/override then schedule/reset/field/credit
+green. First green attempt exposed a test bullet killing stationary P; test
+changed to outward firing to isolate schedule, with that failed attempt logged.
+07-run: missing runner then real strict P loading/PPO delta/freeze/checkpoint
+schema rejection/default1000 guard green.
+08-lifecycle: missing main then actual quick train/checkpoint/counters and
+forbidden reduced-run final green.
+09-supervisor: missing module then exclusive directchild/failure propagation green.
+11-open-cdf: exact0 PRNG produced -inf RED; open52bit uniform GREEN.
+14-subnormal: float32 tiny-vector backward overflow RED; derivative floor GREEN.
+15-final-mock: interrupted diagnostic status lost primary completion RED;
+primary-complete diagnostic-incomplete status GREEN. All final trials mocked.
+16-progress: validation stop dropped completed progress RED; finally persistence
+GREEN. Additional regression tests check geometry, sigma edges, real update
+partial boundaries, signal forwarding/reaping, and exact1000 loop fixture.
+Exact1000 fixture explicitly mocks episodes/PPO/storage, and is not training data.
+
+Actual commands and CUDA preparation are in qrokkun_ai/v23/README.md.
+CPU command (executed, NONFORMAL, latest source):
+OMP_NUM_THREADS=1 /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python -m qrokkun_ai.v23.run train --out-dir tmp/sv23/cpu-quick-reviewed --device cpu --player-checkpoint artifacts/sv22-media-inputs/pv21-u400.pt --comparator-checkpoint artifacts/sv22-media-inputs/sv22-u880.pt --quick --updates 1 --episodes-per-update 2 --eval-seeds 2
+
+Smoke observed: one completed update,10 S decisions,2x120-frame censored episodes,
+2 validation seeds, finite loss -0.0072970110, gradnorm0.8872296810,
+parameterdelta0.1002031341; strict P file/state identities unchanged, no P grads.
+Scale min/mean/max and birth histogram persisted with actual rollout. This does
+not demonstrate learning, full-cap viability, CUDA viability or final performance.
+
+Tests executed:
+OMP_NUM_THREADS=1 /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python -m pytest qrokkun_ai/v23/tests -q
+OMP_NUM_THREADS=1 GODOT_BIN=/storage/hermes/tools/godot/godot /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python -m pytest -q
+OMP_NUM_THREADS=1 GODOT_BIN=/storage/hermes/tools/godot/godot /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python -m pytest -q --ignore=qrokkun_ai/v23
+Baseline136 separately:124passed,12failed (baseline136-tests.log). All12 are
+Sv22 deadline-sensitive tests after its fixed TRAIN_HARD expiry. Left unchanged.
+Initial full run collection failed due same test_core basename; new tests package
+fixed collection. Earlier full run139passed/12failed before final regressions.
+Final totals appended below after the final runs complete.
+
+Parent handoff: independently review, run fullcap CUDA smoke, commit locally if
+approved, deploy immutable archive preserving remote dirty clone, and launch
+formal supervisor1000 with no clock stop. No permission/deployment action was
+attempted here. No learning claims or fabricated experiment results.
+
+Final verification on latest source:
+- tmp/sv23/new-tests-final-v2.log: 17 passed in20.38s.
+- tmp/sv23/full-project-final-v2.log: 141 passed,12 failed in95.47s;
+  the same12 historical Sv22 cutoff-dependent failures as baseline136.
+- tmp/sv23/baseline136-tests.log:124 passed,12 failed in80.76s.
+- Godot regression executed via GODOT_BIN and passed within full suite.
+- tmp/sv23/cpu-quick-reviewed/status.json: updates_complete,completed1,
+  attempted1,formalfalse,last_errornull; no final-claimed file.
+- tmp/sv23/cpu-quick-reviewed.log contains the actual metrics quoted above.
+- tmp/sv23/preservation-check.json: all129 original files except the allowed
+  rootREADME remain byte-identical to owner baseline. git diff --check clean.
+Only README plus new v23 files and this new journal are changed/untracked.
+Parent review and full-cap CUDA smoke remain required before deployment.
+
+Launch-readiness fixes (2026-11-10): only new Sv23 code/docs/tests changed;
+root README existing edits preserved. Corrected field history wording above to
+previous 60-frame window, not minute; historical journals untouched.
+RED tmp/sv23/launch-fixes/red.log: explicit source option absent, missing-source
+resolver absent, formal seed18 accepted (3 failed,6 passed). GREEN green.log:
+9 passed. Full new Sv23 tests, including supervisor forwarding and explicit
+manifest/config consistency:27 passed (sv23-green.log).
+--source-commit is a validated literal40hex; when supplied it is provenance and
+requires no Git invocation. Without it Git HEAD discovery is optional local
+convenience; failure requires the actual SHA via --source-commit, never invented.
+Supervisor shared parser forwards the flag to both stages. Final requires same
+config flags. Formal requires seed17; alternate seeds require nonformal/quick.
+README has exact archive preparation and CUDA commands with SOURCE_COMMIT set
+by parent to actual reviewed commit containing Sv23. CUDA commands not executed.
+Actual CPU quick one-update smoke completed with strict frozen Pv21u400,
+source fe28872816ec73453dd4bd8cd10c74517b04c059 (current HEAD). Working tree is
+uncommitted: SHA names parent, source/production content hashes identify actual
+content, verified against smoke manifest. No claim this parent contains Sv23.
+Status updates_complete,completed1,formalfalse; parameter delta0.1002031341,
+loss-0.0072970110,gradnorm0.8872296810. No heldout/final evaluation.
+Exact executed commands saved in tmp/sv23/launch-fixes/commands.sh; smoke output
+and manifest under cpu-quick.log and cpu-quick/. RED/GREEN logs retained there.
+Regression command selects out exactly the12 previously proved expired Sv22
+failures, listed in regression-command.json; no global skipping or legacy fixes.
+No SSH/GPU/formal training/commit/push or extra features.
+Launch regression result:151 passed,12 deselected in82.19s, including Godot;
+regression.log. This is the explicitly filtered suite, not an all-green full
+suite claim. Existing full baseline failures already proved; not rerun/fixed.
+git diff --check passed. Existing dirty root README was not edited in this pass.
