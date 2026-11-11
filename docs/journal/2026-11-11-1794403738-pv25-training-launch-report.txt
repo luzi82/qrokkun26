@@ -1,0 +1,53 @@
+Pv25 C 正式訓練啟動證據（2026-11-11，HKT）
+
+本報告只整理凍結證據，不查詢較新進度、不執行 episodes 或訓練。
+正式啟動時間：2026-11-11T21:24:40.179055+08:00（formal.start_hkt）。
+狀態截止：2026-11-11T21:28:58.020301+08:00（captured_hkt）。
+
+執行來源與部署
+實際 execution SHA：754dc4cc76d0430d878baf6ad5b9b48cbae532cf。
+來源分支 main 已 push 並核實。GB10 使用此 SHA 的不可變 archive，171 個檔案已核對 hash，沒有 .git；未修改原有 dirty checkout。
+Archive：/home/ovm-hms-bot/projects/qrokkun26/pv25_execution/754dc4cc76d0430d878baf6ad5b9b48cbae532cf
+本次啟動後文件若另行 commit，其 SHA 將不同於 execution SHA；trainer 繼續使用上述 execution SHA，不隨文件變動。
+
+固定實驗
+P actor/critic 精確繼承原 Pv21 u400，重新建立 fresh Adam；S 為固定 Sv24 best u980，凍結於 CPU，維持 stochastic。P 訓練 stochastic，驗證與 final deterministic。
+正式 seed 17，預算為 1000 completed updates，每 update 12 episodes，每集最多 7200 frames；沒有日曆截止期限。u0 及每 10 updates 使用固定 16 seeds 驗證，最大化 canonical validation mean，平手留較早者。
+嚴格超過 66.63020833333333 秒才算 crossing；u500（含）是觀察門檻，不是 early stop。沒有預估完成時間或已證實學習改善的主張。
+只有正式訓練完整閉合且 terminal validation 完成後，才以 validation best 與原 Pv21 u400 在新 heldout 800000..800063 各跑 64 集，進行一次性比較；不依 final 重選或重跑。
+
+已完成的啟動驗證
+CPU release 測試：203 passed、26 skipped，52.24 秒，已 opt in 真實輸入 integration；26 項為既有 Godot skips，不計為通過。
+獨立靜態程式審查 clean PASS、無 findings；這是程式就緒判斷，不是 CUDA 或科學成果證明。審查當時尚未核實的 runtime 項目，由後續 smoke 與正式 u0 證據另行支持。
+非正式 CUDA smoke：完整 7200-frame cap、完成 1 update，P parameter delta L2 = 2.042726862185745；fresh optimizers 已核實，未存取 final heldout。
+S state 不變，SHA256：3db671ed476886b8e9640beff0e0724a66b1a72263b55be2e988078061e69b63。
+此 smoke 為 nonformal，不能當作正式更新、門檻達成或 final 結果。
+正式 u0：16 seeds 的 frames 與 death/censor/cap flags 全部精確符合歷史 reference；總計 63965 frames，canonical mean = 66.63020833333333 秒，沒有因浮點末位差異產生假 crossing。
+
+正式狀態（僅截至上述快照）
+status=running，phase=rollout，completed_updates=8，attempted_updates=9。
+last_complete_validation=0，validation_pending=true，partial_update=false，formal=true，error=null。
+best_mean=66.63020833333333，best_update=0；first_cross=null，first_cross_by500=null。
+supervisor stage=train，exit_code=null，reason=null。快照 PID（短暫程序識別，非持久狀態）：supervisor 831228、trainer 831229。
+final_artifacts=[]；截至快照 final 尚未執行。訓練仍未完成，是否跨越門檻及最終配對比較仍是未完成的科學工作，不能由 smoke 的參數變化推論已學會改善。
+
+輸出與唯讀監看
+正式 NAS run：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261111-2124-pv25-seed17-u1000
+啟動 stdout：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261111-2124-pv25-seed17-u1000.supervisor.stdout
+非正式 smoke：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261111-2123-pv25-nonformal-smoke
+唯讀 script monitor 823d91b5a645 每 15 分鐘檢查，只於 u500／完成或停止失敗時通知；不使用 LLM／GPU、不 restart，不發一般進度洗版通知。本次文件整理未執行監看或遠端操作。
+
+主要凍結證據
+目錄：/storage/hermes/home/dev_gpt_1/pv25-u1000/
+launch-capture.json：正式啟動時間、設定、程序與狀態快照、空 final_artifacts。
+formal-u0-verified.json：逐 seed 精確相符與 canonical mean。
+smoke-verified.json：nonformal CUDA update、P delta、S hash 與 fresh optimizers。
+deployment-verified.json、source-sha.txt：archive 檔案核對與 execution SHA。
+formal-command.txt：實際 CUDA supervisor 命令、輸入副本及輸出路徑。
+parent-release-tests.log：CPU release 測試結果。
+review-accepted.json、review-3.stdout：靜態審查結論與證據範圍；不把靜態審查升格為 runtime 證明。
+
+相關文件（相對 repository root）
+原合約：docs/journal/2026-11-11-1794400966-pv25-warm-start-contract.txt
+模組說明：qrokkun_ai/v25/README.md
+兩者保留原貌，其等待 review／smoke／launch 文字是啟動前紀錄，不是本快照的 pending 狀態。
