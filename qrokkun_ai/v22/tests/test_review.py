@@ -36,6 +36,7 @@ def test_one_pair_never_evidence():
     a=[dict(seed=1,seconds=1.)]; b=[dict(seed=1,seconds=2.)]
     assert run.compare(a,b)['interpretation']=='inconclusive'
 
+@pytest.mark.usefixtures("synthetic_deadlines")
 def test_primary_survives_diagnostic(tmp_path,monkeypatch):
     out,invoke=setup_run(tmp_path,monkeypatch,('--quick','--eval-seeds','1','--final-seeds','1'))
     monkeypatch.setattr(run,'episodes',records)
@@ -53,6 +54,7 @@ def test_primary_survives_diagnostic(tmp_path,monkeypatch):
     assert not (out/'final-incomplete.json').exists()
     with pytest.raises(FileExistsError): invoke('final')
 
+@pytest.mark.usefixtures("synthetic_deadlines")
 def test_live_validate_and_progress(tmp_path,monkeypatch):
     out,invoke=setup_run(tmp_path,monkeypatch,('--quick',))
     states=[]
@@ -70,6 +72,7 @@ def test_live_validate_and_progress(tmp_path,monkeypatch):
     assert json.loads((out/'validate-status.json').read_text())['update']==1
     with pytest.raises(FileNotFoundError): invoke('final')
 
+@pytest.mark.usefixtures("synthetic_deadlines")
 def test_partial_ppo_not_completed(tmp_path,monkeypatch):
     out,invoke=setup_run(tmp_path,monkeypatch,('--quick',))
     monkeypatch.setattr(run,'episodes',records)
@@ -78,6 +81,7 @@ def test_partial_ppo_not_completed(tmp_path,monkeypatch):
     assert torch.load(out/'latest.pt',weights_only=False)['update']==0
     assert not (out/'progress.jsonl').exists() or not (out/'progress.jsonl').read_text()
 
+@pytest.mark.usefixtures("synthetic_deadlines")
 def test_final_hash_lock_before_evaluation(tmp_path,monkeypatch):
     out,invoke=setup_run(tmp_path,monkeypatch,('--quick',))
     monkeypatch.setattr(run,'episodes',records)
@@ -87,6 +91,7 @@ def test_final_hash_lock_before_evaluation(tmp_path,monkeypatch):
     with pytest.raises(ValueError,match='locked best'): invoke('final')
     assert not (out/'final-claimed.json').exists()
 
+@pytest.mark.usefixtures("synthetic_deadlines")
 def test_nonformal_manifest_blocks_negative_ci_claim(tmp_path,monkeypatch):
     out,invoke=setup_run(tmp_path,monkeypatch,('--nonformal','--eval-seeds','2','--final-seeds','2'))
     monkeypatch.setattr(run,'episodes',records)

@@ -54,6 +54,7 @@ def assert_reaped(state,tmp_path):
     assert pid is None
 
 
+@pytest.mark.usefixtures("synthetic_deadlines")
 def test_supervisor_normal_idempotent(tmp_path):
     from qrokkun_ai.v22 import supervise
     a=supervisor_args(tmp_path)
@@ -67,6 +68,7 @@ def test_supervisor_normal_idempotent(tmp_path):
 
 
 @pytest.mark.parametrize('behavior',['fail','missing'])
+@pytest.mark.usefixtures("synthetic_deadlines")
 def test_supervisor_no_final(tmp_path,behavior):
     from qrokkun_ai.v22 import supervise
     a=supervisor_args(tmp_path); calls=[]
@@ -79,6 +81,7 @@ def test_supervisor_no_final(tmp_path,behavior):
 
 
 @pytest.mark.parametrize('behavior',['term','ignore'])
+@pytest.mark.usefixtures("synthetic_deadlines")
 def test_supervisor_timeout_reaps(tmp_path,behavior):
     from qrokkun_ai.v22 import supervise
     import os
@@ -95,6 +98,7 @@ def test_supervisor_timeout_reaps(tmp_path,behavior):
     with pytest.raises(ChildProcessError): os.waitpid(pids[0],os.WNOHANG)
 
 
+@pytest.mark.usefixtures("synthetic_deadlines")
 def test_primary_interrupt_metadata_synthetic(tmp_path,monkeypatch):
     from test_review import setup_run,records
     out,invoke=setup_run(tmp_path,monkeypatch,('--quick','--eval-seeds','2','--final-seeds','2'))
@@ -120,6 +124,7 @@ def test_primary_interrupt_metadata_synthetic(tmp_path,monkeypatch):
     with pytest.raises(FileExistsError): invoke('final')
 
 
+@pytest.mark.usefixtures("synthetic_deadlines")
 def test_supervisor_signal_cleanup(tmp_path):
     import os
     import signal
@@ -127,6 +132,9 @@ def test_supervisor_signal_cleanup(tmp_path):
     code='''
 import sys,time
 from qrokkun_ai.v22 import run,supervise
+# Test-only child bootstrap: caps only; all enforcement and clocks stay real.
+run.HARD=time.time()+3600
+run.TRAIN_HARD=run.HARD-2700
 a=run.parser().parse_args(['train','--out-dir',sys.argv[1],'--deadline-unix',str(time.time()+60),'--train-deadline-unix',str(time.time()+20)])
 supervise.execute(a,lambda stage:[sys.executable,'-c','import time; time.sleep(60)'])
 '''
@@ -151,13 +159,15 @@ supervise.execute(a,lambda stage:[sys.executable,'-c','import time; time.sleep(6
 
 
 @pytest.mark.parametrize('kind',['nan','inf','later','occupied'])
+@pytest.mark.usefixtures("synthetic_deadlines")
 def test_supervisor_fail_closed(tmp_path,kind):
     from qrokkun_ai.v22 import supervise
     a=supervisor_args(tmp_path)
     if kind=='occupied':
         p=tmp_path/'run'; p.mkdir(); (p/'keep').touch()
     else: a.deadline_unix={'nan':float('nan'),'inf':float('inf'),'later':run.HARD+1}[kind]
-    with pytest.raises(ValueError): supervise.execute(a,lambda s:pytest.fail('must not start'))
+    with pytest.raises(ValueError, match='occupied output' if kind=='occupied' else 'finite deadlines|owner cutoff'):
+        supervise.execute(a,lambda s:pytest.fail('must not start'))
 
 
 @pytest.mark.parametrize('cause',['signal','hard'])

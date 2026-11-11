@@ -28,6 +28,7 @@ def fixture_player():
     p=PlayerV21(top_k=2,hidden=8,lookahead_horizon=1)
     return p.eval().requires_grad_(False)
 
+@pytest.mark.usefixtures("synthetic_deadlines")
 def test_raw_ratio_and_finite_gradient():
     torch.set_num_threads(1); n=Spawner(); x=torch.zeros(8,325)
     d=n.distribution(x); raw=d.sample(); old=d.log_prob(raw).sum(-1).detach()
@@ -36,6 +37,7 @@ def test_raw_ratio_and_finite_gradient():
     m=ppo(n,torch.optim.Adam(n.parameters()),data,Guard(time.time()+30),1,.001)
     assert np.isfinite(list(m.values())).all() and m['parameter_delta']>0
 
+@pytest.mark.usefixtures("synthetic_deadlines")
 def test_replay_eval_isolation_and_frozen_player():
     torch.set_num_threads(1); torch.manual_seed(17)
     n=Spawner(); p=fixture_player(); before=state_dict_sha256(p.state_dict())
@@ -80,6 +82,7 @@ def test_zero_direction_and_extremes():
     with pytest.raises(ValueError): mapping([0]*4)
     with pytest.raises(ValueError): mapping([float('nan')]*5)
 
+@pytest.mark.usefixtures("synthetic_deadlines")
 def test_checkpoint_on_interrupted_rollout_and_no_final_access(tmp_path,monkeypatch):
     import sys
     import qrokkun_ai.v22.run as run

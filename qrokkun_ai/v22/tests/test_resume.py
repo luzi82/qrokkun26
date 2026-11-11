@@ -1,4 +1,5 @@
 """Synthetic only: never opens an actual run or heldout window."""
+import pytest
 import unittest
 from unittest.mock import patch
 from qrokkun_ai.v22 import run
@@ -24,6 +25,7 @@ import torch
 from qrokkun_ai.v22.core import Spawner, PLAYER_SHA, STATE_SHA, file_hash
 from qrokkun_ai.v22.resume import FILES, read_snapshot, restore
 
+@pytest.mark.usefixtures("synthetic_deadlines")
 class SyntheticResumeTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory(); self.root=Path(self.tmp.name)
