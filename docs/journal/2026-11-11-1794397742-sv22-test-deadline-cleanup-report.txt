@@ -1,0 +1,93 @@
+Sv22 歷史期限測試維護回顧
+建立時間：2026-11-11T19:49:02+08:00（Asia/Hong_Kong）
+建立 Unix 秒：1794397742；時間由本檔名的 Unix timestamp 換算。
+
+範圍與結論
+本紀錄回顧測試維護實作 commit 86040908404de0599f8d9794db59ec78740713dd（8604090）。
+Parent 獨立保存的全套 pytest 結果為 164 passed, 26 skipped in 35.26s。
+這是測試可重現性修復，不是新的 Sv22 或 Sv24 實驗結果，也不是真人難度證明。
+本次文件工作只修改 README.md 與本報告，未重跑測試、啟動子程序工作負載或改動 source/tests。
+Git add、commit、push 由 parent 處理；本報告不宣稱文件已推送，文件 commit SHA 尚未產生。
+
+根因與歷史快照
+真實 wall clock 已跨過 Sv22 固定歷史期限：
+TRAIN_HARD=1794320100，即 2026-11-10 22:15:00 HKT；
+HARD=1794322800，即 2026-11-10 23:00:00 HKT。
+既有 synthetic 測試仍沿用這些 production caps，造成 Guard.check 的 Stopped('deadline')、
+supervisor 拒絕超過 owner cutoff 的期限，或 not_started/reason=deadline 後缺少 latest.pt/final.json。
+這是日曆時間與測試前提耦合；不能藉此放寬正式期限或授權新實驗。
+
+先前 Sv24 文件 commit 50e0633a40b6079b46703f6aad4772d43d9cc304（50e0633）保存：
+18 failed, 134 passed, 26 skipped in 41.46s。
+原始證據：/storage/hermes/home/dev_gpt_1/sv24-u1000/report-tests.log。
+18 個失敗均位於 qrokkun_ai/v22/tests。該結果是報告當時的真實全套快照，應保留。
+舊報告 docs/journal/2026-11-11-1794395723-sv24-training-completion-report.txt 未修改；
+現在的維護結果與當時失敗結果均準確，不能用新結果抹去舊 gate。
+
+實作與保留的安全契約
+8604090 修改的六個路徑如下：
+qrokkun_ai/v22/tests/conftest.py（新增）
+qrokkun_ai/v22/tests/test_core.py
+qrokkun_ai/v22/tests/test_deadline_isolation.py（新增）
+qrokkun_ai/v22/tests/test_launch.py
+qrokkun_ai/v22/tests/test_resume.py
+qrokkun_ai/v22/tests/test_review.py
+
+既有測試沒有刪除；原 test IDs 與 assertions 保留，僅 fail_closed 的 ValueError 增加更嚴格訊息 match。
+沒有新增 skip 或 xfail。新增的是 12 個參數化案例，不代表新增 12 個測試函式：
+test_synthetic_caps_across_calendars：3 個 calendar 值。
+test_historical_hard_boundary：cutoff 前一秒、當刻、後一秒，共 3 個。
+test_historical_supervisor_rejects_before_claim：equal、reversed、train_cap、nan、inf、cutoff，共 6 個。
+
+synthetic_deadlines fixture 由測試逐項 opt-in，沒有 autouse 或全套 clock patch。
+deadline_caps 只替換 run.HARD、run.TRAIN_HARD 及 run.parser 的 deadline defaults，離開 context 即還原。
+base=max(真實 time.time() 或明確測試 now, 歷史 HARD)，synthetic hard=base+3600、train=base+900。
+parser 的 train deadline 原為 literal default，因此不能只改常數。
+calendar 回歸案例以私有 module clock 模擬日期，不修改共享 time.time；並驗證 context 後常數及 parser 還原。
+歷史 cutoff 案例不啟用 synthetic fixture，仍驗證正式常數及到期拒絕行為。
+
+signal cleanup 的獨立 Python 子程序明確 bootstrap 測試 caps，且以參數傳入兩個期限；
+真實 wall clock、monotonic、程序 timeout、SIGTERM 與子程序回收 assertions 保留。
+既有 timeout 的 term/ignore 分支、idempotence、partial checkpoint、claim 與 seed 隔離等檢查保留。
+Production Guard、supervisor 與 resume 的驗證邏輯未改；歷史 cutoff 仍 fail closed。
+
+證據分層與重現方式
+以下是讀取既有紀錄，並非本次文件工作重新執行測試。
+作者原始執行紀錄：/storage/hermes/home/dev_gpt_1/sv22-test-cleanup/author.log。
+作者曾因指定目錄唯讀而改存 /tmp/sv22-test-cleanup/；本次可讀到該目錄的 commands.txt、
+red.log、sv22.log 與 red.exit/sv22.exit/full.exit，並核對以下摘要。
+這些是作者保存的測試證據，與 parent 獨立 full-suite 驗證分列。
+
+作者 RED（修改前，50e0633）：18 failed, 43 passed in 18.90s；red.exit=1。
+作者 Sv22 維護後：73 passed in 11.80s；sv22.exit=0。
+作者 full：164 passed, 26 skipped in 36.27s；full.exit=0。
+Parent 獨立 full：164 passed, 26 skipped in 35.26s。
+Parent 證據路徑：/storage/hermes/home/dev_gpt_1/sv22-test-cleanup/verified-full.log。
+兩次 full 的耗時不同，不能混成同一次執行；本報告以 parent 保存的 35.26s 作主要全套結果。
+
+工作目錄為 repository root；作者 commands.txt 保存的完整命令如下。
+RED（僅供在修改前版本重現）：
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTHONPATH=. /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python -m pytest qrokkun_ai/v22/tests -q > /tmp/sv22-test-cleanup/red.log 2>&1
+Sv22：
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTHONPATH=. /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python -m pytest qrokkun_ai/v22/tests -q > /tmp/sv22-test-cleanup/sv22.log 2>&1
+Full：
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTHONPATH=. /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python -m pytest -q > /tmp/sv22-test-cleanup/full.log 2>&1
+Parent verified-full.log 只含 pytest 輸出，沒有命令標頭；對應重現命令為：
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTHONPATH=. /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python -m pytest -q
+此行不是聲稱 parent shell history 有保存逐字命令或 redirect。
+
+Production bytes 核對
+Baseline：/storage/hermes/home/dev_gpt_1/sv22-test-cleanup/baseline.json。
+Parent 已獨立以 byte hash 核對其中七個 Sv22 非測試檔案未變；本次文件整理也只讀 bytes 核對一致。
+七檔為 README.md、__init__.py、core.py、render_demo.py、resume.py、run.py、supervise.py，
+均位於 qrokkun_ai/v22/。Baseline 另含四個舊測試檔案的 hash，不把它們算入七個 production 核對。
+這支持正式期限及實作 bytes 未改，並不構成所有行為皆已窮盡驗證的證明。
+
+限制與交接
+26 skips 是跳過，不是 passes；不能由此聲稱 skipped engine parity 已覆蓋。
+此次維護沒有 GPU 訓練、遠端工作負載或 heldout 重跑。既有測試包含真實 LOCAL synthetic
+子程序與短 CPU fixture（包括 episode、梯度及 optimizer 檢查），因此不宣稱完全沒有 episodes 或計算。
+測試通過只支持所測契約；不增加實驗樣本、不證明學習效果或人類對戰表現。
+未重啟、延長或授權任何新正式實驗；Sv24 完成報告與本次 retrospective 測試維護分開保存。
+文件交接路徑：README.md 與 docs/journal/2026-11-11-1794397742-sv22-test-deadline-cleanup-report.txt。
+文件 whitespace 檢查命令：git diff --check；提交與推送狀態由 parent 後續記錄。
