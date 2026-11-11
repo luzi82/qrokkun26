@@ -1,0 +1,138 @@
+{
+  "source": "/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261111-1040-sv24-seed17-u1000/progress.jsonl",
+  "source_sha256": "735c4aeecb893d8a6ef0a39fb7953a1a8e05bcbc3120cf694607973d325214df",
+  "update": 980,
+  "mean_seconds": 66.63020833333334,
+  "deaths": 16,
+  "censors": 0,
+  "per_seed": [
+    {
+      "seed": 600000,
+      "frames": 4327,
+      "seconds": 72.11666666666666,
+      "death": true,
+      "censored": false,
+      "cap_frames": 7200
+    },
+    {
+      "seed": 600001,
+      "frames": 3498,
+      "seconds": 58.3,
+      "death": true,
+      "censored": false,
+      "cap_frames": 7200
+    },
+    {
+      "seed": 600002,
+      "frames": 4391,
+      "seconds": 73.18333333333334,
+      "death": true,
+      "censored": false,
+      "cap_frames": 7200
+    },
+    {
+      "seed": 600003,
+      "frames": 2614,
+      "seconds": 43.56666666666667,
+      "death": true,
+      "censored": false,
+      "cap_frames": 7200
+    },
+    {
+      "seed": 600004,
+      "frames": 4227,
+      "seconds": 70.45,
+      "death": true,
+      "censored": false,
+      "cap_frames": 7200
+    },
+    {
+      "seed": 600005,
+      "frames": 4360,
+      "seconds": 72.66666666666667,
+      "death": true,
+      "censored": false,
+      "cap_frames": 7200
+    },
+    {
+      "seed": 600006,
+      "frames": 3201,
+      "seconds": 53.35,
+      "death": true,
+      "censored": false,
+      "cap_frames": 7200
+    },
+    {
+      "seed": 600007,
+      "frames": 3067,
+      "seconds": 51.11666666666667,
+      "death": true,
+      "censored": false,
+      "cap_frames": 7200
+    },
+    {
+      "seed": 600008,
+      "frames": 5418,
+      "seconds": 90.3,
+      "death": true,
+      "censored": false,
+      "cap_frames": 7200
+    },
+    {
+      "seed": 600009,
+      "frames": 5226,
+      "seconds": 87.1,
+      "death": true,
+      "censored": false,
+      "cap_frames": 7200
+    },
+    {
+      "seed": 600010,
+      "frames": 4353,
+      "seconds": 72.55,
+      "death": true,
+      "censored": false,
+      "cap_frames": 7200
+    },
+    {
+      "seed": 600011,
+      "frames": 3110,
+      "seconds": 51.833333333333336,
+      "death": true,
+      "censored": false,
+      "cap_frames": 7200
+    },
+    {
+      "seed": 600012,
+      "frames": 5158,
+      "seconds": 85.96666666666667,
+      "death": true,
+      "censored": false,
+      "cap_frames": 7200
+    },
+    {
+      "seed": 600013,
+      "frames": 3171,
+      "seconds": 52.85,
+      "death": true,
+      "censored": false,
+      "cap_frames": 7200
+    },
+    {
+      "seed": 600014,
+      "frames": 3307,
+      "seconds": 55.11666666666667,
+      "death": true,
+      "censored": false,
+      "cap_frames": 7200
+    },
+    {
+      "seed": 600015,
+      "frames": 4537,
+      "seconds": 75.61666666666666,
+      "death": true,
+      "censored": false,
+      "cap_frames": 7200
+    }
+  ]
+}

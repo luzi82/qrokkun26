@@ -1,0 +1,65 @@
+Pv25 C owner 授權實驗合約（2026-11-11）
+
+狀態：實作交付，等待 parent 獨立 review、核實 smoke 與 GB10 launch。
+沒有 Pv25 真實訓練或 heldout 結果，不宣稱已跨越門檻。
+本次只寫 v25 package/tests/README、本合約與 root README；Gv20 與 v21–v24 source、舊 journals 全部不變。
+
+假說：從原始 Pv21 u400 actor 和 critic 精確 warm start，以固定 Sv24 best u980 為對手，繼承原版 observation、architecture、reward、GAE、teacher 和 PPO，可能提高 P 存活時間。是否在 u500（含）前首次嚴格超過原始 66.63020833333333 秒，只作觀察；不保證達成，不據此 early stop 或 tuning。
+
+輸入 P：
+/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261109-1803-v21-exploratory/best_player_v21.pt
+file SHA256 b8466bb13972de62003e16b0b570567a016d0dab4dd5667e66a3666974cfd5f8
+state SHA256 250f3c3f1053b18129f992e97cb9ae15139fc2e5fa962b5491db5dddb2eb8f91
+metadata update 400；player_v21_kinematic_decoupled version 1；hidden 472、top_k 12、horizon 12、in_dim 84。
+
+輸入 S：
+/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261111-1040-sv24-seed17-u1000/best.pt
+file SHA256 554290b6c17a280dbfb8bb4076583a1230b278bf73a24a701f66fca76e5bfcc0
+architecture sv24_global_scale_physical_v1 version 1；completed/attempted updates 980；partial_update false。
+S metadata source P file/state 必須等於上列原 Pv21 identity。CLI 只准換成本地副本路徑，hash 不准改。
+S 在 CPU、eval、requires_grad false、no_grad callback，週期性查 state hash 與 grad。
+P actor/critic 全部精確繼承，建立兩個新 Adam，optimizer 初始 state 必須空；新 lineage update 0，記錄 parent update 400、原 file/state hash。
+checkpoint type pv25_warm_start_v1，architecture 如實保持 PlayerV21，strict state 可用原 loader；保存 CPU/CUDA RNG、numpy RNG、optimizers，但不支援 resume。
+
+正式預算：1000 個完整 PPO updates，seed 17，每 update 12 集，不設日曆截止。
+gamma .9995、lambda .999、reward scale .05、actor lr .0003、critic lr .001、Adam eps 1e-8、PPO epochs 4、clip .2、minibatch 512、norm 1、entropy .005、dagger 1、PPO weight .3。沿用 clearance expert hard/soft .65/.35，不 retune、不加 B filter。
+P training stochastic on-policy；驗證/final P deterministic argmax；S stochastic。
+7200 frames /120 秒完整 cap；cap frame 真死亡優先，censored 才以 P value bootstrap。
+訓練 seeds 100000+(u-1)*12 至 100000+u*12-1；每 seed S CPU generator seed+25000000。
+驗證/final 每 seed S CPU generator seed+24000000，eval 保存／還原 training torch CPU/CUDA RNG；場景 seed/reset 不變。
+
+u0 及每 10 updates 至 terminal 1000，用固定 600000..600015 共16 seeds。
+直接重用 v24.run.episodes/player_actions/physical mapping/動態 active ordering。
+正式 u0 必須在第一個 training step 前，逐 seed 精確等於指定 Sv24 progress 的 u980 validation frames/death/censor/cap。只比 mean 或容差均不接受。若 CUDA near-argmax batch 造成差異，fail closed，不能修 weights/actions 或放寬 gate。
+歷史 reference 已唯讀擷取至 qrokkun_ai/v25/reference.json：
+source progress SHA256 735c4aeecb893d8a6ef0a39fb7953a1a8e05bcbc3120cf694607973d325214df
+reference bytes SHA256 af7638d6606cb4e9041f9746d73ec075c54d21ada0e8357f6ee6cb2fd083ae59
+frames 依 seed 順序：4327,3498,4391,2614,4227,4360,3201,3067,5418,5226,4353,3110,5158,3171,3307,4537，全部死亡，無 censor。
+選模 mean 以整數 frames sum/(60*n) 算，避免歷史 numpy 平均末位差造成假的 u0 crossing。
+最大化 P survival，平手留較早，u0 可當 best，initial.pt 永久保留原始 P。
+嚴格 mean>66.63020833333333 才 crossing，記 first_cross、first_cross_by500（含500）。
+u500 summary 保留 best/latest hashes 與 checkpoint；u1000 保存 terminal 與 best，兩者不可混淆。
+
+在任何新 heldout 存取前，工程預設鎖定全新 window 800000..800063，共64個 unique seeds。
+clean formal 1000 updates 且 terminal validation 完整後才鎖定 validation best。
+learned Pv25 與原 Pv21 u400 使用 deterministic P，同 seed 相同 S API 與 CPU generator +24000000，各自完整64集 batch 動態 active。
+不得重用 Sv24 700000 window，不執行原 v21 3000 pair diagnostics。
+保存逐集 frames、death/censor flags、completed/unfinished seeds 與 completion seals。
+paired mean 差為 Pv25 秒數減 original 秒數，以固定 bootstrap seed17、10000 次配對重抽樣產生95% CI；CI含0為 indistinguishable。不得依 heldout 重選、重跑。
+
+runner：python -m qrokkun_ai.v25.run train|final；supervisor：python -m qrokkun_ai.v25.supervise。
+完整 parent launch 與 smoke 命令、所有 flags 見 qrokkun_ai/v25/README.md。
+source archive 無 .git 時必須 --source-commit 實際 archive 的40hex SHA，包含 reference.json 與未修改依賴。可 --player-checkpoint/--spawner-checkpoint 指 GB10 local copies，仍固定 hashes。
+正式 fail closed：1000/12/7200/16/64/17；unknown flags、錯 hash、stale metadata 不接受。
+--nonformal 才允許小預算／reduced cap，metadata 明確標示，單獨輸出，歷史 gate 繞過不能算正式；fullcap smoke 1 update、1 training episode、2 eval seeds，不可 final 或 u500 promotion。只有 synthetic test functions 注入替代模型，無 CLI hash override。
+全新空 out-dir + exclusive train claim，sibling launcher exclusive claim；不 resume、不 heuristic restart。
+status/progress/manifest/training-closed/checkpoints durable，JSON/checkpoint 原子 replace，fsync parent directory。
+記錄 attempted/completed、last complete validation、validation_pending、partial flags；中斷 snapshot 不升為 best。
+SignalGuard 在 rollout env step、S callback、optimizer step 與 eval 內，deadline-unix 只接受有限值。shutdown/deadline/smoke 不可進 final。
+supervisor 僅正向擁有一個 direct child，SIGTERM、10秒後 kill、wait/reap；final preflight 後 Popen 前再查 cancellation。
+直接 final 亦驗閉合 config/source/input/reference/checkpoint hashes；episode 前 exclusive final claim。失敗不移除 claim，不可覆蓋重跑。
+
+Implementer 只讀指定 task contract、baseline、實際 trainer/run/core/supervise 與指定歷史 validation，僅 CPU synthetic pytest/optimizer steps。沒有 remote/SSH/network、真實 checkpoint training/full rollout、heldout、commit/push 或 agents。
+證據放 repo ignored tmp/pv25-implementation/，TMPDIR 同目錄，Python /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python，OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTHONPATH=.
+RED→GREEN 採逐特性切片，完整 pytest 與 diff check 結果以 evidence summary.json 為準，不捏造實驗結果。
+parent 負責最終獨立 review、fix/re-review、commit/push、verified smoke 與 GB10 launch。
