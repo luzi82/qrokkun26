@@ -73,6 +73,8 @@ Made by Grok Bot. Tribute to 特訓99.
 
 ## RL environment (Python)
 
+遊戲與 AI 版本速查及後續追加約定：[版本目錄](docs/AGENT_VERSIONS.md)（Gv20、Pv21、Sv22–Sv24、Pv25 與歷史 v10）。
+
 `qrokkun_env/` is a Godot-free reimplementation of the playfield logic for training:
 
 ```bash
