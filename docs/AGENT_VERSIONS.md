@@ -76,6 +76,8 @@
 - 有日期的狀態：2026-11-11 啟動報告已證實正式啟動；其快照尚無 final。此處不推定目前進度或已完成，結案須另附可查證報告。
 - 來源：[README](../qrokkun_ai/v25/README.md)、[training](../qrokkun_ai/v25/training.py)、[run](../qrokkun_ai/v25/run.py)、[core](../qrokkun_ai/v25/core.py)；[2026-11-11 合約](journal/2026-11-11-1794400966-pv25-warm-start-contract.txt)、[同日啟動報告](journal/2026-11-11-1794403738-pv25-training-launch-report.txt)。
 
+- 結案（2026-11-12）：已完成 1000 updates，validation best **u670**；一次性全新 heldout 約 **69.44 秒 vs 原 Pv21 u400 70.20 秒**，配對差 95% CI [−5.31592, 3.88388] 包含 0，未證實改善或變差。見[完成報告](journal/2026-11-12-1794433829-pv25-training-completion-report.txt)；Nov 11 啟動敘述保留為歷史快照。
+
 ## 後續追加約定
 
 每次建立／訓練新的 G／P／S 版本，都在本目錄依時間追加新條目，保留既有條目與歷史結果；不另建重複目錄。新 checkpoint／update 不自動構成新版本，也不逐 checkpoint 新增條目。

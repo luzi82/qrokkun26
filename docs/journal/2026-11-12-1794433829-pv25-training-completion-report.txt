@@ -1,0 +1,81 @@
+Pv25 訓練完成與一次性 heldout 結案報告（2026-11-12，HKT）
+
+結論：正式 1000 updates 已完成，validation crossing 目標曾被觀察到。
+一次性 heldout 結果為 indistinguishable；未證實玩家實力改善，也未證實變差。
+本報告只整理已保存且經驗證的結果，沒有重跑訓練、episodes、final 或 bootstrap。
+這是既有 Pv25 實驗結案，不是新版本或新訓練。
+
+完成狀態與執行來源
+實際完成時間：2026-11-12T05:48:37.424340+08:00。
+completed_updates=1000，attempted_updates=1000，last_complete_validation=1000。
+status=complete，validation_pending=false，partial_update=false，formal=true，error=null。
+supervisor stage=complete、exit_code=0、child_pid=None；formal-exit returncode=0。
+保存的 GPU／程序查核顯示訓練程序已釋放；這是完成驗證快照，非即時查詢。
+execution source SHA：754dc4cc76d0430d878baf6ad5b9b48cbae532cf。
+不可變 archive：/home/ovm-hms-bot/projects/qrokkun26/pv25_execution/754dc4cc76d0430d878baf6ad5b9b48cbae532cf
+此執行來源與後續文件 HEAD 分開；文件變動不改寫實際訓練來源。
+正式 NAS run：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261111-2124-pv25-seed17-u1000
+run_id：1228dcfe083c4b7b8dd180df43670ed9。
+
+固定契約與可重現設定
+輸入為原 Pv21 u400 actor/critic 與凍結 stochastic Sv24 best u980。
+正式輸入 IDs、原始 NAS 路徑、鎖定 file/state hashes 與完整超參數見原合約。
+兩個 Adam 均 fresh，Pv25 從 update 0 起算；架構、觀察、reward、teacher、PPO 沿用 Pv21，不包含新子彈篩選設計。
+P training stochastic；validation/final P deterministic argmax；S 全程 stochastic 且凍結。
+training seed=17，每 update 12 episodes，每集 cap=7200 frames（120 秒）。
+training seeds=100000..111999；S generator 使用 seed+25000000。
+validation seeds=600000..600015；u0 加每 10 updates 至 u1000，共 101 點。
+validation/final S generator 使用 seed+24000000；eval 保存並還原 training RNG。
+u0 gate：16 seeds 逐集 frames/death/censor/cap 精確相符，合計 63965 frames。
+canonical u0 mean=66.63020833333333 秒；嚴格超過才 crossing，u0 本身不是 crossing。
+
+訓練與固定驗證觀察（玩家存活越久越好）
+首次 crossing 為 u10；沒有以 crossing 提前停止，也不能解讀為穩定改善。
+截至 u500 的 best 為 u410、77.29166666666667 秒。
+u500 當下 latest validation=60.846875 秒，低於 66.63020833333333 秒門檻。
+兩者必須一併呈現，不能以歷史 best 隱藏當下退步。
+完整 validation 選出 best u670，mean=77.36875 秒；best checkpoint 實際 metadata 為 u670。
+terminal u1000 validation=71.56666666666666 秒；terminal 並非 heldout 使用的 checkpoint。
+training rollout 前／後 20 updates 均值為 68.92756944444181／69.80333333333066 秒。
+rollout 使用變動 seeds 與 stochastic P，這些均值不能作為成功或泛化改善證明。
+
+一次性全新 heldout（選模閉合後使用 best u670）
+800000..800063 共 64 unique seeds，learned 與 original 各完整 64 集。
+兩組按相同場景 seed 與相同 S seed+24000000 mapping 配對，P 均 deterministic。
+learned Pv25 best u670 mean=69.44244791666667 秒；64 deaths、0 censors。
+original Pv21 u400 mean=70.19765625 秒；64 deaths、0 censors。
+配對平均差 Pv25-original=-0.7552083333333339 秒。
+95% paired bootstrap CI=[-5.315924479166669, 3.8838802083333333] 秒。
+依事前契約 bootstrap seed=17、10000 samples；此處引用保存結果，未重新計算 bootstrap。
+CI 包含 0，interpretation=indistinguishable：沒有已確認較好或較差的證據。
+validation crossing 曾發生，但 heldout strength improvement 未被證實。
+Sv24 原 heldout 是 700000 window，不是本次 800000 window。
+本次 original=70.19765625，舊 Sv24 報告為 69.76848958；不同 window 不可直接比較。
+僅單一 training seed；沒有真人驗證、新架構成果或因果性的 overfitting 證明。
+
+保存的閉合識別與 SHA256
+best.pt：a06ad2424188caedeb5d0df36c125eb541a11135eb708fdbd0d58bf36d343b20
+latest.pt：20463044ca89c305cbac155392c69d639870ca6ca0275a62d808c1f478926ce3
+initial.pt：68392a7d23c10784cd9551177b065047960c4797a792b9b067b6bd1db39c018a
+update500.pt：e6761cf61c8b3c1dbc4d2e833417b8694ea08ff26740c46e0a140ae2e5fac877
+update1000.pt：20463044ca89c305cbac155392c69d639870ca6ca0275a62d808c1f478926ce3
+closure manifest_sha：4e58fe1f297ee231a0fcd28c2e4f44074cdc5d8a28fd2bfb47cb399eca01ec88
+保存驗證已核對 checkpoint hashes、每組 64 筆 per-seed、cap 與 mean。
+閉合 manifest SHA 已另行讀回原檔 bytes 核對一致，final exclusive claim 的 manifest／closure hashes 及 seed window 亦相符；1000 個 progress records 均記錄同一凍結 S state。
+
+驗證範圍與結案操作
+啟動前 CPU release 測試為 203 passed、26 既有 Godot skipped，52.24 秒；不是本次新跑測試。
+既有三輪靜態 review 的最終結果為 PASS；不構成所有 runtime 或科學主張的普遍證明。
+monitor 823d91b5a645 於完成驗證後已 paused；不自動 restart、resume 或 repeat final。
+本次僅新增結案紀錄，不改變訓練來源或策略權重。
+
+保存證據與既有文件
+證據根目錄：/storage/hermes/home/dev_gpt_1/pv25-u1000/
+formal-completion-verified.json：閉合、checkpoint SHA、heldout 逐集與比較、程序／GPU 快照。
+completed-stats.json：完成時間、101 validation points、u500 與完整最佳／終點、rollout 均值。
+formal-run.json、formal-u0-verified.json、formal-exit.json：來源／設定、u0 精確 gate、退出碼。
+parent-release-tests.log：啟動前測試；archive 與靜態 review 證據範圍另見啟動報告。
+原合約（同目錄）：2026-11-11-1794400966-pv25-warm-start-contract.txt
+啟動快照（同目錄）：2026-11-11-1794403738-pv25-training-launch-report.txt
+版本目錄：../AGENT_VERSIONS.md；runner 與正式命令：../../qrokkun_ai/v25/README.md。
+舊合約與 Nov 11 啟動快照保留歷史狀態；本 dated closure 記錄已完成結果。
