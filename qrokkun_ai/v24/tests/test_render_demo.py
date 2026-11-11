@@ -51,3 +51,27 @@ def test_synthetic_assets_use_existing_helpers(tmp_path):
     rollout(net, player, 3000, cap=1, on_frame=lambda e,a: images.append(
         render_frame(e, a, tmp_path, 3, bullet_sprites=bullets, player_sprites=sprites)))
     assert images[0].size == (960, 720)
+
+
+def test_loader_u980_identity(tmp_path):
+    path = Path('artifacts/sv24-media-inputs/sv24-u980.pt')
+    sha = '554290b6c17a280dbfb8bb4076583a1230b278bf73a24a701f66fca76e5bfcc0'
+    _, ck = load_spawner(path, expected_update=980, expected_spawner_sha256=sha)
+    assert ck['completed_updates'] == 980 and ck['partial_update'] is False
+    with pytest.raises(ValueError):
+        load_spawner(path, expected_update=980, expected_spawner_sha256='0'*64)
+    for update in (100, 979, 1000):
+        with pytest.raises(ValueError):
+            load_spawner(path, expected_update=update, expected_spawner_sha256=sha)
+    with pytest.raises(ValueError):
+        load_spawner(path, expected_spawner_sha256=sha)
+    for key, value in [('completed_updates', 1000), ('partial_update', True),
+                       ('partial_update', None), ('player_sha', 'bad'),
+                       ('player_state_sha', 'bad'), ('architecture', 'bad'), ('model', {})]:
+        bad = dict(ck); bad[key] = value
+        bad_path = tmp_path / 'bad980.pt'; torch.save(bad, bad_path)
+        with pytest.raises((ValueError, RuntimeError)):
+            load_spawner(bad_path, expected_update=980,
+                         expected_spawner_sha256=core.file_hash(bad_path))
+    _, old = load_spawner(S, expected_spawner_sha256=SHA)
+    assert old['completed_updates'] == 100

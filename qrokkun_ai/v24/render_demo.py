@@ -17,7 +17,7 @@ def load_spawner(path, *, expected_update=100, expected_spawner_sha256):
     if file_hash(path) != expected_spawner_sha256:
         raise ValueError('Sv checkpoint identity mismatch')
     net, ck = production_load_spawner(path)
-    if expected_update != 100 or ck.get('completed_updates') != expected_update or ck.get('partial_update') is not False:
+    if ck.get('completed_updates') != expected_update or ck.get('partial_update') is not False:
         raise ValueError('Sv completed update/partial identity mismatch')
     if ck.get('player_sha') != PLAYER_SHA or ck.get('player_state_sha') != STATE_SHA:
         raise ValueError('Sv frozen player identity mismatch')
