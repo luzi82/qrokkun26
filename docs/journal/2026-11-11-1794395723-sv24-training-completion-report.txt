@@ -1,0 +1,194 @@
+Sv24 訓練完成與正式最終結果報告
+記錄識別時間：2026-11-11 19:15:23 HKT（1794395723；檔名採日期與 Unix timestamp）
+
+結案判定
+Sv24 已完成原定 1000 次 PPO updates，並完成正式 primary heldout 與獨立標示的 deterministic 診斷。
+這次是 updates_complete，不是 owner stop。completed 與 attempted updates 均為 1000。
+training-closed.json、status.json、supervisor.json、final-status.json 及各 final completion marker 相互支持此結論。
+Supervisor 最終 stage=complete、exit_code=0、reason=null、child_pid=null。
+final-status 為 primary_and_diagnostic_complete；其中 completed_updates=980 指被選中的模型，不代表訓練只做了 980 次。
+保存的 completion verification 顯示原始程序清單及 GPU 使用程序查詢為空；這是當時的查核紀錄，本次沒有重新查詢設備。
+Sv23 曾由擁有人在 750 updates 取消；那是另一場實驗，不能套用到本次 Sv24。
+
+正式 stochastic primary 結果：Sv24 u980 的平均玩家存活 69.76848958333332 秒。
+同一批 64 heldout seeds 下，Sv22 u880 為 77.72630208333332 秒，scripted 為 86.1796875 秒，initial Sv24 為 86.84583333333333 秒。
+對 S 而言玩家存活越短越好；保存的三組配對差值 95% bootstrap CI 均完全低於零。
+因此，在本次固定 P、單一訓練 seed 與預定 heldout 協定內，存在優於三組對照的學習證據。
+這不等同跨訓練 seed 的穩健性、對真人的優勢，或某一架構修改的因果證明。
+
+執行時間與來源
+formal-live-verified.json 保存 supervisor 進入 train 的時間 1794364814.0308194：
+2026-11-11 10:40:14.030819 HKT。這是保存的啟動階段時間，不能當成未保存的 shell 精確啟動時刻。
+同檔 verified_hkt 為 10:40:48.517944；當時正執行 validation_controls。
+u1000 rollout/validation 記錄時間為 1794391848.6066933，即 18:10:48.606693 HKT。
+訓練 status 的 updates_complete 時間為 1794391848.6633055，即約 18:10:48.663305 HKT。
+final-status 時間為 1794392149.2111769，即約 18:15:49.211177 HKT。
+Supervisor 完成時間為 1794392149.8778636，即 18:15:49.877864 HKT。
+以上分別描述訓練結束與整個 final 流程結束，沒有用資料夾名稱猜測精確時刻。
+
+正式來源 commit：57ecfd148da4640672c44cfd976cab108fa94068。
+GB10 使用此 commit 的不可變 source snapshot；deployment-verified.txt 記錄 source_files_verified=150、CUDA=true、device=NVIDIA GB10。
+正式 run 的 manifest 同樣鎖定此 source commit，並保存 Sv24 與 production 檔案雜湊。
+Run directory：
+/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261111-1040-sv24-seed17-u1000
+Supervisor metadata 位於同層的 20261111-1040-sv24-seed17-u1000.launcher/supervisor.json。
+本次按保存資料整理；未更改實作、超參數或既有行為，未重啟或延長訓練，未重新評估 heldout。
+
+策略及實驗契約
+P 固定為 Pv21 u400，deterministic argmax，no_grad=true；1000 筆訓練紀錄的 frozen-player 證據一致。
+訓練 RNG seed=17；每次 update 16 episodes，訓練 episode seeds 由 2000000 起依 update 推進。
+驗證固定 16 seeds：600000..600015。正式 final 固定 64 seeds：700000..700063。
+全部使用完整 7200 frames / 120 秒 cap；quick=false、nonformal=false、formal=true。
+完整 cap 是每局可運行的上限，並不表示每一局都活到 120 秒。
+PPO epochs=4、lr=0.0003、gamma=1、gae_lambda=1、entropy coefficient=0。
+Reward 為負 elapsed frames/7200，MC 至死亡或 cap；deadline_unix=null，按固定 updates 結束。
+沒有在途中調參、重啟、重選 seed 或以 heldout 結果延長訓練。
+
+Sv24 使用 325 維 observation、hidden=128；actor 輸出五個 mean components，另有三個全域、與狀態無關的 std 參數。
+五個輸出為 birth_x、birth_y、speed_raw、aim_dx_raw、aim_dy_raw。
+Birth vector 正規化，精確零向量指東；speed mean=115+85*tanh(raw)，實體 Normal 截斷於 30..200 px/s。
+Aim 為移動前玩家位置加 48*tanh(raw) 的 x/y 像素偏移；fire 使用以 sampled birth 為條件的 wrapped Normal。
+三個 std 的單位依序為 birth rad、speed px/s、fire rad。
+初值為 2.8、42、0.04；下界為 0.05、2、0.01；上界為 pi、80、0.25。
+Sv23 actor 曾輸出八個值，包含三個 state-dependent scale logits；Sv24 將這些 scale 改為全域參數，並改動 aim 尺度等設計。
+Manifest 的 provenance 用語描述了設計動機，並不是已證實「修好 noise explosion」的科學結論。
+多項設計同時不同，且 Sv23 提前取消；不能由本次結果單獨歸因於 global std。
+
+訓練與固定驗證
+Frozen snapshot 的 progress 有 1000 個完整紀錄，updates 連續為 1..1000，沒有忽略不完整尾行。
+Rollout 共 16000 episode rows；驗證共 1616 rows。
+本次直接核對 progress 中 metrics.validation：共 101 個點，為 u1 加 u10、u20、…、u1000。
+不能簡化成只有 100 個點，也不能把 u1 當成 u0。
+前 20 updates（1..20）rollout 平均：88.3915625 秒。
+後 20 updates（981..1000）rollout 平均：70.31244791666667 秒。
+u1000 rollout：74.72291666666666 秒，16 deaths / 0 censors。
+Rollout seeds 隨訓練改變；前後均值是訓練趨勢描述，並非同 seed 配對驗證或正式 CI。
+
+固定驗證 best：u980，66.63020833333333 秒，16 deaths / 0 censors。
+固定驗證 latest：u1000，70.50625 秒，16 deaths / 0 censors。
+best.pt metadata 的 66.63020833333334 與 CSV 聚合尾數差異屬浮點表示；對應同一驗證結果。
+固定驗證對照（全部是 600000..600015）：
+scripted：84.0125 秒，15 deaths / 1 censor。
+initial Sv24：85.38541666666667 秒，16 deaths / 0 censors。
+Sv22 u880：79.16354166666666 秒，16 deaths / 0 censors。
+79.1635 是固定驗證 Sv22 對照，不是正式 final Sv22 的 77.7263；兩批資料不可混用。
+選模規則是最低 stochastic validation mean，平手保留較早 checkpoint。
+因此正式 final 使用驗證選出的 best u980，不是終點 u1000，也不是以 final 結果重新選模。
+
+u1000 rollout 的全域 std 均值依序為：
+0.6031452167344435 rad、12.876569073278313 px/s、0.016855119916897223 rad。
+同批的 std min/max 幾乎一致，符合與狀態無關的全域參數設計。
+這只是訓練後分布的測量，不證明探索已達最優或所有方向性問題已解決。
+
+正式 heldout primary
+以下均取自已保存的 final.json；本報告沒有運行 evaluation、bootstrap 或 RNG。
+每組恰好 64 seeds（700000..700063），同一 frozen Pv21 u400、同一完整 cap。
+Sv24 u980 stochastic：mean=69.76848958333332，deaths=64，censors=0。
+Sv22 u880 原始映射：mean=77.72630208333332，deaths=63，censors=1。
+Scripted：mean=86.1796875，deaths=59，censors=5。
+Initial Sv24：mean=86.84583333333333，deaths=62，censors=2。
+Censor 指活到 120 秒上限、其後死亡時間未知；不能算成死亡，亦不能推斷無限存活。
+這些 mean 使用 cap 限制的觀察時間，並非未截尾的終身存活期估計。
+
+配對差值定義為「Sv24 primary 秒數減去同 seed 對照秒數」。
+對 scripted：mean difference=-16.41119791666667 秒。
+保存的 ci95=[-21.687044270833336, -11.25063151041667]。
+對 initial：mean difference=-17.07734375 秒。
+保存的 ci95=[-21.935123697916666, -12.474082031250001]。
+對 Sv22：mean difference=-7.9578125 秒。
+保存的 ci95=[-13.105579427083333, -3.025540364583337]。
+以上是 paired mean difference 的 95% bootstrap intervals，不是每個策略均值各自的 CI。
+全部上界仍小於零；final.json 的 conclusion 為 evidence of learning against all controls。
+解讀範圍限於本次事先指定的比較，不把選模集分數當成 heldout 證據。
+
+final-learned、final-scripted、final-initial、final-sv22 各 completion.json 均為 complete。
+本次核對各檔 completed_seeds 恰為上述 64 seeds，unfinished_seeds=[]、last_error=null。
+另有 final-claimed.json 與最終 final-status，保留一次性 final 的流程痕跡。
+Deterministic 診斷獨立存於 final-deterministic.json：66.0390625 秒，64 deaths / 0 censors。
+其 completion marker 同樣完成 64 seeds；它是 primary 保存後的診斷，不是新的 primary、不構成再次選模。
+本次不以診斷較低的均值取代 stochastic primary，也沒有重新訪問 heldout 執行任何 episode。
+
+Checkpoint 身分與保存
+best.pt（u980，partial_update=false）檔案 SHA256，本次只讀 bytes 計算雜湊並核對：
+554290b6c17a280dbfb8bb4076583a1230b278bf73a24a701f66fca76e5bfcc0
+update-1000.pt 檔案 SHA256，本次實際計算並核對 training-closed.json 的 u1000_sha：
+4aa8d05c75f933963619828b6c53041fc6a5ba38a4d828284d640e6166de7295
+重要身分區別：上述 4aa8… 是 update-1000.pt，不是目前 latest.pt 的檔案雜湊。
+目前 NAS latest.pt（snapshot metadata 指 completed=1000、partial_update=false）實際檔案 SHA256：
+58dd88b83f18ba578863c8fed7c6e228c6e3a6a84416920ec6cf0fe465e1f595
+latest.pt 為 1043377 bytes；update-1000.pt 為 1042353 bytes，兩個檔案 bytes 不同。
+不能將 closure 的 u1000_sha 直接重新命名成 latest file SHA；本次未載入二進位模型，未據此宣稱兩者 state 完全相同。
+Snapshot 分別將 best/latest 的 validation metadata 與對應 update 的紀錄核對為一致。
+
+Manifest 鎖定 frozen P 檔案 SHA256：
+b8466bb13972de62003e16b0b570567a016d0dab4dd5667e66a3666974cfd5f8
+Frozen P state SHA256：
+250f3c3f1053b18129f992e97cb9ae15139fc2e5fa962b5491db5dddb2eb8f91
+Sv22 u880 comparator 檔案 SHA256：
+c19e8504946b4567ea273022921490b20fb8b49260676e0f5b61354e3102e7d7
+Sv24 run.py 的實際 evaluation RNG：mode=old（Sv22）使用 episode seed+7000000；Sv24 使用 episode seed+24000000。
+保留 initial、best、latest、update checkpoints、manifest、closure、final 及 completion metadata 以供稽核。
+保存不等同授權續訓、升版、重跑 heldout 或改動遊戲預設行為。
+
+示範影片：獨立診斷證據
+使用 best u980 與同一 frozen Pv21 u400，在 CPU Python 診斷視覺化中製作，不是 Godot 錄影。
+五個 seeds 為 3000..3004，沿用 u100 示範的診斷 seeds；不是 heldout 700000..700063。
+3000：85.2 秒；3001：81.4166666667 秒；3002：69.2 秒；3003：67.8166666667 秒；3004：62.45 秒。
+五局皆死亡；每段附加 30 frames 死亡展示，因此總影片 22115 frames / 60 fps = 368.583333 秒。
+影片時長包含共 150 frames 的死亡展示，不等於五局純存活時間總和。
+Batch 與 master sidecar 標記 diagnostic_only=true、promotion_eligible=false。
+CPU torch stochastic sampling 與正式 CUDA 的實際 RNG 路徑不可僅因相同 episode seed 就假定逐幀一致。
+影片用於觀察已保存策略行為，不能取代 primary CI、Godot parity 或真人遊玩證明。
+
+NAS 不可變交付目錄：
+/mnt/minion/88_minion_rw/projects/qrokkun26/demo_videos/2026-11-11_1840/
+以下為 delivery.json 保存的交付檔案 SHA256：
+sv24-u980-vs-pv21-u400-seeds3000-3004.mp4（33898095 bytes）：
+7d7fbd543f40cadbc4dc33a88a5c05406014a8fec2f19bc0625e689259c02eaf
+sv24-u980-vs-pv21-u400-seeds3000-3004.mp4.json：
+6a4d60f7a198833be2816ae02243cb68d4a284e81cb594791eca516c18199202
+sv24-u980-vs-pv21-u400-seeds3000-3004_discord_small.mp4（5860289 bytes）：
+5f4e798c60aa78bcec0d97b427c97bc53a909d926be27133cf2e871acfedb1e9
+sv24-u980-vs-pv21-u400-seeds3000-3004_discord_small.mp4.json：
+3c7bb24048e0c2667f6db85355fa541b4a1bcabcb3f740c3f77d3e7faad9d8f1
+batch.json：ae5ba192a8154a4e23f8f05f9dcb691fb259dfa487d877aefd1e79381f617d9f
+sv24-u980-representative.png：fa3b2903ca61a903dfb5a06e141c640ce181dc397a21094d4defff9fea7a5d22
+沒有將影片、checkpoint 或大型逐 seed dump 加入 Git。
+
+測試與限制
+本次整理文件前已實測 Sv24 focused suite：12 passed in 4.62s；撰寫文件時沒有再次重跑。
+當前保存的全套 pytest 結果：18 failed, 134 passed, 26 skipped in 41.46s。
+原始 log：/storage/hermes/home/dev_gpt_1/sv24-u1000/report-tests.log。
+保存的 log 沒有命令列標頭；以下列出對應的明確重現命令，不冒充未保存的逐字 shell 歷史：
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTHONPATH=. /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python -m pytest qrokkun_ai/v24/tests -q
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTHONPATH=. /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python -m pytest -q
+
+18 個失敗均列在 qrokkun_ai/v22/tests；實際 trace 有 Guard.check 的 Stopped('deadline')、
+supervisor 的 training deadline must precede hard deadline, no later than owner cutoff，
+以及 status=not_started/reason=deadline 後缺少 latest.pt 或 final.json 的 FileNotFoundError。
+Sv22 run.py 固定 TRAIN_HARD=1794320100（2026-11-10 22:15 HKT）、HARD=1794322800（23:00 HKT）。
+本次已是 11 月 11 日，這些歷史期限已過；不能把此全套結果說成全綠，也沒有為報告去修無關測試。
+26 skips 亦不是 26 passes。測試結果與實驗成效是不同證據，focused 通過不會抹去 full-suite 失敗。
+
+科學限制：只有一個 training seed=17；對手只有固定 Pv21 u400，不能推廣到其他 P 或人類。
+101 次驗證用於選模，會有選擇偏差；heldout 結果只支持預定條件內的比較。
+CI 描述固定訓練產物的 episode-seed 不確定性，不包含重新訓練的變異。
+Sv24 與 Sv23 的 global/state-dependent noise、aim mapping 等差異並非受控單因子實驗。
+因此不宣稱 noise 修改是改善的唯一原因，不宣稱真人難度提升，也不因結果好看重新評估 heldout。
+本次只完成文件與圖表封存，原遊戲、訓練器、測試與預設行為皆未修改；文件檢查後另行提交並推送。
+
+圖表與證據索引
+圖一（相對本 TXT）：assets/sv24-completed/progress.png
+圖二（相對本 TXT）：assets/sv24-completed/final.png
+兩圖直接複製既有 frozen chart 輸出，沒有重新產生或調整數據。
+圖一 rollout y 軸 55..105 秒、validation y 軸 60..100 秒，均為非零起點放大軸。
+圖二均值軸 65..90 秒，差值軸 -25..5 秒；CI 為配對差值，不能誤看成均值 CI。
+Frozen snapshot captured_hkt：2026-11-11T18:18:47.145768+08:00。
+Snapshot SHA256：7c6684b8e158868775a50b6b15eb165ce045b46403f3f242176ea9b5042ca129。
+統計來源為 snapshot 與 CSV readback，原目錄：tmp/sv24-completed-20261111-181847/。
+主要本機來源：/storage/hermes/home/dev_gpt_1/sv24-u1000/ 下的 formal-run.json、formal-live-verified.json、
+formal-completion-verified.json、deployment-verified.txt 及 report-tests.log。
+NAS 來源：run 的 manifest.json、status.json、training-closed.json、final-status.json、final.json、
+final-deterministic.json、final*completion.json，以及 launcher/supervisor.json。
+Demo 來源：tmp/sv24-u980-media/batch.json 與 sv24-u980-vs-pv21-u400-seeds3000-3004.mp4.json；
+交付索引：/storage/hermes/home/dev_gpt_1/sv24-u980-media/delivery.json。

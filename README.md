@@ -178,3 +178,13 @@ Sv22 owner-stop outcome: [historical training stop report](docs/journal/2026-11-
 Sv23 fixed-u1000 owner contract: [policy, tests, and launch handoff](qrokkun_ai/v23/README.md).
 
 Sv23 owner-stop outcome: [training stop report](docs/journal/2026-11-11-1794351856-sv23-training-stop-report.txt).
+
+Sv24 已完成 1000 updates：[訓練完成與正式最終結果報告](docs/journal/2026-11-11-1794395723-sv24-training-completion-report.txt)。固定驗證選出 **best u980**（66.6302 秒），u1000 驗證為 70.50625 秒；正式 heldout 使用 u980，平均玩家存活 69.7685 秒，低於三組對照（對 S 而言越低越好）。
+
+![Sv24 完成 1000 updates 的 rollout 與固定驗證曲線，best 為 u980](docs/journal/assets/sv24-completed/progress.png)
+
+訓練與驗證圖採非零起點放大 y 軸：rollout 55–105 秒、validation 60–100 秒。Best u980 與終點 u1000 為不同 checkpoint。
+
+![Sv24 best u980 的正式 heldout 均值及對照配對差值 95% CI](docs/journal/assets/sv24-completed/final.png)
+
+正式 heldout：每組 64 seeds；均值軸放大為 65–90 秒，差值軸為 −25–5 秒。CI 表示 Sv24 減對照的配對平均差，三組均低於零。這是單一 training seed、固定 Pv21 u400 的結果；全套測試保存結果為 18 failed、134 passed、26 skipped，詳見報告。
