@@ -93,3 +93,11 @@
 預算／選模／final：updates、seeds、閉合規則。
 狀態／結果（日期）：可核實摘要；來源／合約／報告連結。
 ```
+
+## Pv26c／Pv26t — 執行逐位元等價診斷（2026-11-12）
+
+- Pv26c 為 serial workers1；Pv26t 為相同中央 batch／每 frame barrier 的 env.step thread pool，預設 workers4。沿用 Pv21 架構／觀察／reward／teacher／PPO；Pv21 u400 actor/critic warm start、fresh Adam，固定 stochastic CPU Sv24 best u980。
+- 正式 u20、12 episodes/update、7200 cap、seed17；固定 validation u0/u10/u20，無 heldout／選模／promotion。新增每 episode P generator seed+26000000，兩臂相同；不宣稱重播歷史 Pv25。
+- full lossless streaming trace／RNG／gradients／Adam／每 update checkpoints；離線報首差異及 actor＋critic raw bits。只回答執行等價，沒有強度結論。random-init Pv27+ 與 B filter 延後且未實作。
+- 狀態（2026-11-13）：本地 bounded synthetic CPU 驗證與測試套件精簡完成（`v26` 41 passed、全套 244 passed / 26 skipped，生產模組未變）；GB10 正式 `u20` 尚未啟動，無正式結果。
+- 來源：[README](../qrokkun_ai/v26/README.md)、[runner](../qrokkun_ai/v26/run.py)、[comparator](../qrokkun_ai/v26/compare.py)、[事前合約](journal/2026-11-12-1794460557-pv26-thread-bitwise-contract.txt)、[測試精簡紀錄](journal/2026-11-13-1794502979-pv26-test-consolidation-report.txt)。

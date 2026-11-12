@@ -1,0 +1,68 @@
+Pv26c／Pv26t 測試套件精簡與維護紀錄
+建立時間：2026-11-13T00:56:19+08:00（Asia/Hong_Kong）
+建立 Unix 秒：1794502979；時間由本檔名的 Unix timestamp 換算。
+
+範圍與結論
+本紀錄記錄在 Pv26c／Pv26t 正式提交與部署至 GB10 前，經 owner 審閱批准的 v26 測試套件精簡維護。
+1. qrokkun_ai/v26/*.py 十個正式執行、追蹤、驗證與比較模組（__init__.py、child_exec.py、
+   cli.py、compare.py、kernel.py、run.py、supervise.py、trace.py、training.py、validation.py）
+   全部維持 100% 原封不動（SHA256 與 tmp/pv26-fixes4/source-inventory.json 完全一致）。
+2. qrokkun_ai/v26/tests 測試項目由 286 個精簡為 41 個，單執行緒 CPU 執行時間由約 513 秒
+   （約 8.5 分鐘）降至 101.66 秒（41 passed, 0 warnings）。
+3. 完整 repository 測試（pytest --ignore=tmp，含 PV25_TEST_REAL_INPUTS=1）為
+   244 passed, 26 skipped, 0 warnings in 151.33s（26 skips 為既有 opt-in／引擎跳過，不算通過）。
+4. 同步清除 ignored 目錄 tmp/pv26-fixes*/*-tmp 共約 3.25 GiB 的一次性 pytest 暫存副本；
+   所有既有 .log 與 .json 歷史驗證紀錄均完整保留。
+5. 本次為測試維護與正式入庫前整理，並未執行 GPU／正式 u20 實驗，不構成正式執行等價結論。
+
+問題診斷與被取代的舊決策（Superseded Decisions）
+在 Pv26 初版實作（pv26-implementation）後，後續四輪修補（pv26-fixes 至 pv26-fixes4）新增了四個
+防禦性測試檔：
+- test_completeness.py（106 個測試）
+- test_fixes3.py（80 個測試）
+- test_readiness.py（41 個測試）
+- test_cancel_finalize.py（34 個測試）
+
+這使 v26 單一模組測試量膨脹至 286 個（佔全 repo 515 個測試的 55.5%），主要原因為：
+1. 將 validation.tensor()、validation.snapshot()、validation.schema() 與 validation.Scientific
+   內部的單行 dict 型別／缺欄位檢查，以「整包複製目錄 + gzip 解壓重壓 + 重算 SHA256 + 雙臂環境重播」
+   做笛卡兒積展開（共 192 個重封裝案例），且對約 65 個欄位變異重複測試 joint=[False, True]。
+   由於 compare.py 架構本來就會先對左右兩臂各自獨立跑完 bundle.events() 完整驗證才進入比對，
+   僅需代表性的單邊與雙邊（joint=True）重封裝案例即可驗證封裝接線，無須將每個欄位檢查乘以兩倍重播。
+2. test_cancel_finalize.py 以 14 個獨立 Python+PyTorch 子程序測試寫入 closed.json 及恢復
+   SIGINT/SIGTERM handler 前後微秒級縫隙的訊號注入，並另開 12 個子程序測試標準庫 argparse 錯誤碼，
+   與行程內的 cli.boundary() 測試高度重疊。
+
+經 owner 確認後，上述四個笛卡兒積膨脹測試檔正式被本次精簡結構取代。
+
+精簡後的測試架構（共 8 個測試模組、41 個測試）
+1. 完整保留 6 個核心測試模組（25 個測試）：
+   - qrokkun_ai/v26/tests/test_trace.py（2）：CAS 原始位元保真（含 -0.0、NaN payload）、gzip 截斷與 shape 錯誤阻擋。
+   - qrokkun_ai/v26/tests/test_kernel.py（3）：episode 專屬 RNG 與全域 RNG 隔離、Spawner／PythonRNG 抽樣一致性、Env 子彈 ID／出生／越界移除／碰撞與原版環境對齊。
+   - qrokkun_ai/v26/tests/test_training.py（4）：workers=1/2/4 完整 rollout+PPO 的 trace 與權重逐位元一致、故意注入偶數 seed worker 延遲打亂完成順序後仍 100% 一致、與原版 v21 PPO 數值／權重對齊、teacher 軟目標記錄。
+   - qrokkun_ai/v26/tests/test_run_compare.py（5）：正式邊界檢查、純架構容量上界估算（829,905,218,304 bytes/arm）、差異路徑定位、NAS 輸入 hash opt-in 核對、缺檔 CLI exit 3。
+   - qrokkun_ai/v26/tests/test_supervise.py（4）：c->t->compare 順序執行、差異 exit 2 不重試、兩臂間中斷、SIGTERM 回收子程序。
+   - qrokkun_ai/v26/tests/test_integrity.py（7）：缺 SQLite blob／未閉合阻擋、完整配對一致（complete_pair 改用 --cap 20 加速 4 倍並保留多幀 G/S 生成與 bootstrap）、RNG／action 篡改拒絕、單一位元權重變異回報 complete_different、缺具名權重阻擋，並補齊 Reader.db 顯式關閉。
+
+2. 新增 2 個收斂後的合約與訊號測試模組（16 個測試，取代原 4 個膨脹檔）：
+   - qrokkun_ai/v26/tests/test_validation_contracts.py（10）：
+     * 記憶體內直接驗證 schema()／CUDA 靜態要求、tensor()／snapshot() 梯度與 Adam 狀態型別契約（含 maximize bool 嚴格型別）、Scientific 前向欄位與損失分量檢查。
+     * 因果差異優先順序（sampler pre-state 與模型前向優先於抽樣結果）、capture_forward 例外時 hook 清理。
+     * 跨 21 個 update 權重逐位元獨立檢查（中間 update 差異、最終收斂仍為 exit 0 並保留 earliest_weight_difference），以及僅診斷指標差異時權重維持 PASS。
+     * 3 個代表性端到端 reseal 整合測試（單邊 stage 亂序拒絕、雙邊 joint 缺權重位元拒絕、偽造死亡終止狀態拒絕）。
+     * 真實不同死亡幀數（--updates 2 --episodes 1 --cap 90）跨 update SQLite 事件對齊與結構差異歸屬驗證。
+   - qrokkun_ai/v26/tests/test_cli_and_signals.py（6）：
+     * 行程內驗證 run／supervise／compare 三個模組的 CLI 例外映射（3／130）、未知參數（3）、--help（0）與顯式 SystemExit 保留，以及既有 claim.json／pair-claim.json 搶佔保護。
+     * Supervisor 發射視窗（status／publication）訊號攔截、子程序 SIGTERM 遮罩解除驗證、wait 例外時子程序回收與遮罩還原。
+     * 3 個代表性真實子程序測試：arm 執行中 SIGTERM 保持未閉合（130）、收尾階段 SIGTERM 阻止啟動下一臂（130）、compare CLI 對最終權重差異回傳 exit 2（SQLite 連線以 contextlib.closing 顯式關閉）。
+
+驗證命令與獨立審查
+1. v26 模組測試：
+   PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 GIT_CEILING_DIRECTORIES="$TMPDIR" PV25_TEST_REAL_INPUTS=1 PYTHONPATH=. /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python -m pytest qrokkun_ai/v26/tests -p no:cacheprovider --basetemp="$TMPDIR/pv26-consolidated2" -q
+   結果：41 passed in 101.66s。
+2. 完整 repository 測試：
+   PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 GIT_CEILING_DIRECTORIES="$TMPDIR" PV25_TEST_REAL_INPUTS=1 PYTHONPATH=. /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python -m pytest --ignore=tmp -p no:cacheprovider --basetemp="$TMPDIR/pv26-full-repo-verify" -q
+   結果：244 passed, 26 skipped in 151.33s。
+3. 獨立 Codex gpt-6.1-sol 審查：核實 10 個 qrokkun_ai/v26/*.py 正式檔案 SHA256 完全未變，並確認補齊 SQLite 連線顯式關閉後無資源洩漏。
+4. 當前 source_tree_sha（涵蓋 qrokkun_ai/**/*.py 與 qrokkun_env/**/*.py）：
+   0876fcc49688b83e821fc932f5bf7d846ac09f5a5e9684c41dd1253d3e2771c2。

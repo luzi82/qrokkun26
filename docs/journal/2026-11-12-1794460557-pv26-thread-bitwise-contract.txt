@@ -1,0 +1,197 @@
+Pv26c／Pv26t u20 工程診斷事前合約與實作補記（2026-11-12）
+
+Owner contract：/storage/hermes/home/dev_gpt_1/pv26-u20/contract.json
+Base：262033f5e73a5ac2285aa7f2c840e6d717f2e8a9
+授權範圍：僅 qrokkun_ai/v26/**、本檔、root README 最小連結、AGENT_VERSIONS 追加。
+已讀 GB10 guideline 與實際 v21/v24/v25。未變更舊 env／v21-v25 source/tests／舊 journals。
+
+目的：純 execution equivalence 與首次可觀測差異。權重成功必須 actor＋critic 全 named tensor raw bits 相同，不能用 allclose。full trace 相同另列。不能將診斷解讀為 P 強度、promotion、泛化或未加儀器的效能提升。名稱精確為 Pv26c（serial workers1）／Pv26t（thread 預設 workers4，工程預設）；不是 random-init。Pv27+ random-init 與 B filter 延後，未實作。
+
+輸入鎖定與 hyperparameters 詳見 qrokkun_ai/v26/README.md 及 run.py。P 為原 Pv21 u400，file SHA b8466bb13972de62003e16b0b570567a016d0dab4dd5667e66a3666974cfd5f8，state 250f3c3f1053b18129f992e97cb9ae15139fc2e5fa962b5491db5dddb2eb8f91。S 為 Sv24 stochastic best u980，file SHA 554290b6c17a280dbfb8bb4076583a1230b278bf73a24a701f66fca76e5bfcc0，state 3db671ed476886b8e9640beff0e0724a66b1a72263b55be2e988078061e69b63；CPU frozen readonly。fresh Adam，保留 v21 architecture／obs／reward／clearance teacher／PPO。
+
+正式兩臂順序執行 c→t，u20／12 episodes／7200 cap／seed17，u0/u10/u20 固定16 validation seeds 600000..600015，無 heldout 或 final。P 中央 active batch shape／order 保留，每 episode 專屬 generator seed+26000000；S train+25000000／validation+24000000 不變，PPO generator 27000017 獨立。這個新 P mapping 不等於歷史 Pv25 replay。每 frame 全 barrier，只有 env.step 在 worker，完成後穩定 episode-index 合併；12 episodes 全完才更新。c 不建 ThreadPool。no_grad 放在 worker callback 內，torch threads1 啟動時設定。
+
+完整追蹤採 lossless rawbytes CAS＋gzip bounded shards；每 blob 實值可重建，非 hash-only。保存全 global／episode RNG、每個抽樣呼叫 pre/post/output、P／teacher、S 三次抽樣與物理 action、G before/after／stable birth IDs／來源／出生／offscreen／collision、reward／termination／censor／bootstrap；完整 rollouts／GAE batch、permutation／minibatch、clip前後 gradients、actor/critic Adam step前後、u0與每 completed update checkpoints。時間、thread IDs、labels 僅 audit，不進科學比較。
+
+磁碟先做 architecture-only 保守上界 preflight，執行中 watermark fail closed；不 drop trace。當前正式估算每臂 829905218304 bytes、pair 1659810436608 bytes（零壓縮收益，optimizer 已知相同 tensors 作 CAS reuse）。本機 free 約172GiB，不符合正式預算。parent 可在 GB10 NVMe 保存重 trace，NAS canonical metadata 指向 live 路徑；完成 NAS copy＋逐檔 readback hash＋blob/closure 檢驗前不能宣稱 entire durable bundle。當前 manifest 明列 trace_durable_bundle=false。
+
+離線 comparator 只有完整兩臂才作 complete 判定；驗證 semantic identity、manifest／checkpoint／shard／blob hashes、每 update／episode／P/G frame barrier／optimizer substeps／validation seed coverage。差異不提前停止正式 u20，不調參、不重跑 control。CLI 0=完整 fulltrace 相同，2=完整但不同，3=不完整／invalid；同時獨立報 final named actor＋critic memcmp 與每 update 首差異。首差異是 observed，不承諾已證明 ultimate cause。supervisor 保存真實 child exitcodes、counters、closure；signal stop reap direct child，不啟動下一臂／compare。
+
+本輪責任界線：只做 bounded synthetic CPU tests／PPO steps。無 agents、network、SSH、GPU、真 checkpoint EP／training、commit／push。owner 指定 Codex gpt6.1sol；本實作不呼叫模型切換工具或虛構模型切換證據。parent 負責獨立 Codex high readiness review、修正後 fresh review、local commit、GB10 部署／launch／比較。正式 source SHA 應使用 parent 審核後 commit，archive 仍須明填40hex並另保存 source-tree digest。
+
+TDD 證據與精確測試結果：實作完成後追加於下方。所有 binary／logs 只在 ignored tmp/pv26-implementation；TMPDIR 保持批准實際環境（非 /tmp），pytest --ignore=tmp，GIT_CEILING_DIRECTORIES=$TMPDIR。README 提供 parent smoke／formal／estimate／compare 命令。未產生正式結果。
+
+最終實作驗證補記：
+- 完整 repo：OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 GIT_CEILING_DIRECTORIES=$TMPDIR /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python -m pytest --ignore=tmp -q
+  結果 226 passed、28 skipped，121.61 秒。log：tmp/pv26-implementation/20-final-full-suite.log。
+  skip 包含既有 opt-in 整合與 v26 NAS metadata opt-in；不將 skip 宣稱為實際輸入／CUDA 驗證。
+- 最終真實 CPU pair smoke：1 update、2 train episodes、80 cap、2 validation seeds、hidden8；c→t→compare child exitcodes 0／0／0，complete_equal，full_trace_equal=true、weights_bitwise_equal=true。
+  trace bytes：Pv26c=11241605；Pv26t=11239157。含儀器 wall：8.773244723／8.875368744 秒，不解讀成未儀器化效能比較。
+  log：tmp/pv26-implementation/21-review-pair-smoke.log；pair metadata/report：tmp/pv26-implementation/review-pair/；lossless traces：tmp/pv26-implementation/review-traces/。
+- 架構估算：tmp/pv26-implementation/08-storage-estimate.json；單臂829905218304 bytes，雙臂1659810436608 bytes，最高2073600 episode-frames／13520 optimizer minibatches per arm。CLI 與 parent smoke／formal 命令見 v26 README。
+- RED/GREEN：01 trace CAS／bits，02 episode RNG與原 S parity，03 真實 collector/PPO，04 runner／compare，05 supervisor，09 reset ID／collision／cull，10 nested state completeness，13 named model coverage，14 descriptor shape，19 teacher soft-target probabilities。RED 失敗與 GREEN 成功各有獨立 log；11-full-suite-collection-red.log 保存同名 test module collection 問題，僅新增 v26 tests/__init__.py 修正。
+- 額外覆蓋：traced/untraced global RNG 不變、原 v21 PPO 與新 tracing train 的數值／權重 parity、serial／workers2／workers4（含故意改 completion order）一致；lossless ±0／NaN payload、CAS 解析、缺 blob／shard corruption／無 closure、RNG／action／weight 注入首差異、nested field與named model缺漏 failclosed、fresh manifest／正式 bounds、純架構 estimate、c/t/compare cancellation 與 live child reap。
+- 範圍檢查：git diff --check 通過；只有授權四類路徑有修改／新增，無 giant binary 入 Git，無 commit／push。
+
+尚待 parent 的工作／限制：本輪沒有 CUDA／正式 u20／真實 checkpoint episode 證據，不能宣稱正式等價。parent 必須完成獨立 high readiness review（修正後 fresh review）、local commit、GB10 環境與當下容量重查、用新 source SHA launch、兩臂正式閉合與 offline 比較。重 trace 的 NAS copy／逐檔 readback hashes／完整 blob 驗證亦未執行，當前 bundle 為 live local trace，不宣稱 durable NAS bundle。本地結果僅證明已執行的 bounded synthetic fixture。
+
+2026-11-12 dated technical amendment — accepted PV26-R01..R05 readiness fixes
+The earlier implementation claims are historical, not evidence that the accepted
+findings were absent. All old logs remain untouched. This amendment authorizes no
+formal launch; fresh parent review is still required.
+
+R01: raw references are mandatory at every weight/gradient/Adam tensor position;
+all references resolve even for equal descriptors. Named shapes/dtypes, first-step
+Adam emptiness and stage-specific gradient None legality are checked. Final named
+actor/critic PASS uses explicit resolved byte comparisons. Actual CPU bundles are
+resealed after joint and unilateral omissions, including descriptor-only models,
+missing gradients, empty Adam state and missing nested moments.
+
+R02: exact active episode order, one train P draw per active frame, zero validation
+P draws, contiguous counters, initial/pre/post/G/end states and output/action
+binding are reconciled. CPU P draws are regenerated. CPU environment replay uses
+the actual traced frozen S tensors and recorded P actions to verify reset rng_init,
+S birth/speed/fire draws, S outputs, Python uniform outputs, births (including
+frame0), IDs/origins, bullet history, removals/collisions, state transitions, current
+RNG states, counters and unused sources. No fake entropy or invented trace events
+are added. Full raw states compare exactly, without allclose. CUDA P initial state
+uses seed/zero-offset serialized layout; CUDA draw execution itself is not replayed
+on CPU. CUDA behavior remains unverified.
+
+R03: required typed semantic schema includes provenance, architecture, RNG mapping,
+runtime, limits and flags; resume=false and heldout=[] are required. Actual u0 P
+and opponent S tensors reconstruct state_dict_sha256 identities. Both producer and
+comparator bind to the actual Python code-content digest of all files present under
+qrokkun_ai and qrokkun_env, covering inherited dependencies and package initializers.
+The comparator MUST come from the same frozen archive. Parent supplies actual
+40-hex commit provenance and independently checks deployment archive inventory and
+hashes; archive Git metadata is neither required nor fabricated. --expected-commit
+optionally binds offline comparison to the parent's reviewed provenance; supervisor
+passes it. Synthetic tests use current actual tree digests and explicit synthetic
+commit provenance; malformed-schema tests deliberately violate those identities.
+
+R04: stable kind/key alignment uses a streaming SQLite index under approved TMPDIR,
+not model/trace directories or the immutable evidence seal. It realigns after
+actual differing death frames and preserves chronological source positions for
+first differences, including per-update attribution. Missing required producer
+coverage is invalid; legitimate differing episode lengths remain complete_different.
+RAM retains live episode state and per-update coverage, not the full u20 trace.
+Additional scratch provision: at least twice combined uncompressed event JSON plus
+SQLite index/sort headroom; formal scratch capacity has not been certified. CLI
+paths and source-binding commands are documented in qrokkun_ai/v26/README.md.
+
+R05: stop received during status writing/log opening prevents launch. Linux signal
+blocking protects launch commit through handle publication; pending requests are
+checked before committing. A stop queued after commit terminates/reaps the published
+child when delivery resumes. This cooperative boundary does not promise a wall-clock
+transaction between signal generation and process creation. A stdlib child wrapper
+restores the caller's original signal mask before exec/torch imports, avoiding
+preexec_fn with threaded torch. Masks/handlers restore on exceptions. Exit codes
+remain 0 equal / 2 different / 3 runtime-invalid / 130 stopped. Tests inject stop
+at status/log/Popen publication, verify no next arm/comparator, child reap, parent
+mask restoration, child TERM delivery, and launch-exception cleanup.
+
+Evidence to date: tmp/pv26-fixes/01-red.log records 18 failed / 7 passed against
+initial omission regressions. The first focused fix run (02-focused.log) recorded
+48 passed / 2 failed because existing RNG/action tamper tests expected acceptance
+as complete_different; these now correctly expect invalid evidence. Those raw logs
+are retained. 03-alignment-signal.log records 2 passed, including actual different
+death frames/event counts across two updates and real child signal-mask checks.
+The corruption-free CPU pair (06-pair.log; pair/comparison.json) is complete_equal,
+full_trace_equal=true, weights_bitwise_equal=true, 721 events per arm, c/t/compare
+exitcodes 0/0/0. It used 1 update, 2 train episodes, cap80, 2 validation seeds,
+hidden8; trace bytes 11241134 / 11242064. These are synthetic CPU fixtures only.
+Final suite results and any unresolved issues are appended below after completion.
+
+Additional vertical regression: 08-endflags-red.log records 2 failed / 37
+deselected for resealed unilateral and joint false episode-end termination claims.
+The fix binds end flags/frame count to replayed final G state and requires exact
+integer counters/active IDs. Child trampoline explicitly unblocks INT/TERM while
+restoring other inherited mask entries; the parent always restores its own full
+original mask.
+
+Intermediate full validation 05-full.log: 264 passed / 26 skipped / 1 failed.
+The inherited v23 archive test found repository Git because this invocation put
+pytest --basetemp under the checkout. No old source was changed. The final full
+invocation instead uses --basetemp="$TMPDIR/pv26-fixes-final-full", preserving the
+approved TMPDIR and GIT_CEILING_DIRECTORIES=$TMPDIR. Those are disposable runtime
+fixtures, not published evidence; logs remain only in tmp/pv26-fixes. Earlier test
+and smoke logs/bundles are preserved. The final full/focused/smoke reruns bind to
+the final code digest, and their results will be recorded below.
+
+Evidence correction and final freeze: the original endflags corruption sometimes
+assigned the already-present values, so 08-endflags-red.log is NOT valid evidence
+of an actual corrupted flag being accepted. The fixture now explicitly flips flags;
+a separate actual cap-1 censored CPU pair is jointly resealed to claim false death,
+and must reject. The earlier 09-focused-final.log (61 passed / 3 failed) and
+10-full-final.log (266 passed / 26 skipped / 1 failed) are intermediate, not final
+acceptance results: they include that fixture error; the focused run also detected
+source changing during a producer run. No failed log was overwritten or hidden.
+14-structural-red.log used a fixture path before it existed and is not evidence.
+15-structural-red.log is the meaningful structural-report RED: 1 failed / 2 passed /
+36 deselected, actual different death frames/events, rejected missing report field.
+The fix adds bounded missing-event counts and first structural differences per
+update, preserving numeric first differences and streaming memory behavior.
+A real published-child wait-exception cleanup regression is now included too.
+Only whitespace at EOF changed in v26/training.py; numerical code is unchanged.
+19-frozen-diff-check.log: all 19 authorized files (including new source) whitespace
+PASS; tracked git diff --check exit0. Tests now run against the final frozen source.
+
+2026-11-12 final frozen validation results (all earlier failed logs preserved):
+- Focused: 66 passed / 2 warnings, 294.59 s, tmp/pv26-fixes/16-frozen-focused.log.
+- Full: 269 passed / 26 skipped / 2 warnings, 354.72 s,
+  tmp/pv26-fixes/17-frozen-full.log. PYTHONDONTWRITEBYTECODE=1,
+  OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 GIT_CEILING_DIRECTORIES=$TMPDIR,
+  PV25_TEST_REAL_INPUTS=1, approved CPU Python, pytest --ignore=tmp,
+  -p no:cacheprovider --basetemp="$TMPDIR/pv26-fixes-frozen-full" -q.
+  Skips are not CUDA/real-episode evidence. The two warnings are inherited torch.var
+  on the single-sample cap-1 fixture; its math was deliberately preserved.
+- Real CPU control/PPO parity and serial/workers2/workers4 trace equivalence pass,
+  including reordered worker completion and original numerical PPO comparison.
+- Frozen pair: tmp/pv26-fixes/18-frozen-pair.log and frozen-pair/comparison.json;
+  complete_equal, full_trace_equal=true, weights_bitwise_equal=true, 721 events per
+  arm, child codes0/0/0. 1 update / 2 train episodes / cap80 / 2 validation seeds /
+  hidden8, synthetic only. Trace bytes11241044/11241016; instrumented wall seconds
+  9.082296050000878/9.35436859499896, not uninstrumented speed evidence.
+- Frozen CLI regressions: 20-frozen-cli-checks.log; equality0, jointly stripped
+  checkpoint/event weight bytes3, wrong expected parent commit3.
+- Actual different death-frame CLI: 22-frozen-death-alignment.log and
+  frozen-death-report.json, complete_different exit2, events1067/1191. Missing keys
+  left179/right55 are explicitly reported with first structural key per update.
+  Update2 first difference is corresponding P[2,train,0], not an update1 event.
+- Source inventory: 21-frozen-source-inventory.json, 90 actual Python files,
+  source_tree_sha=44d1691f3dccd7ef31eb56b985684087e7b3f30e0bdf49b6f0391bc787547044.
+  Synthetic fixture provenance a*40 is explicitly nonformal; parent must supply
+  actual reviewed commit SHA. No archive Git metadata is fabricated.
+- Whitespace/diff checks include new untracked authorized files, not only Git's
+  tracked diff. 19-frozen-diff-check.log passed all19 files plus git diff --check;
+  final documentation-only check is recorded separately below in evidence.
+
+No known failing implementation regression remains in the executed CPU scope.
+Unverified/outstanding: fresh parent readiness review after fixes; actual parent
+commit/archive deployment inventory/hash verification; CUDA serialized-state and
+execution behavior; formal u20; current formal trace AND alignment-scratch capacity;
+NAS durable copy and independent readback. CPU replay requires matching CPU numeric
+runtime, and CUDA P draws are checked for raw state continuity, not executed on CPU.
+No agents/network/SSH/GPU/real-checkpoint episodes/training/commit/push were used.
+Formal is still NOT launched. All source/document edits by this fix task are confined
+to qrokkun_ai/v26/** and this appended journal; pre-existing root README/catalog
+changes were left alone. All previous raw logs remain preserved.
+
+2026-11-13 dated amendment — owner-approved v26 test-suite consolidation
+Supersedes the earlier 286-test Cartesian-product reseal/subprocess expansion across
+test_completeness.py (106), test_fixes3.py (80), test_readiness.py (41), and
+test_cancel_finalize.py (34) (~513 s on CPU), as well as 3.25 GiB of disposable
+tmp/pv26-fixes*/*-tmp pytest scratch directories.
+- Production modules under qrokkun_ai/v26/*.py are 100% untouched.
+- Core test modules (test_trace.py, test_kernel.py, test_training.py,
+  test_run_compare.py, test_supervise.py, test_integrity.py) are retained; the four
+  review-fix test files are consolidated into test_validation_contracts.py and
+  test_cli_and_signals.py (in-memory schema/snapshot/Scientific unit checks,
+  representative unilateral/joint/false-termination reseals, real differing
+  death-frame SQLite alignment, in-process CLI boundary/claim checks, and
+  representative mid-run/finalize signal subprocess checks).
+- Result: qrokkun_ai/v26/tests now has 41 tests (41 passed, 0 warnings in ~101.7 s on
+  single-thread CPU); updated source_tree_sha is
+  0876fcc49688b83e821fc932f5bf7d846ac09f5a5e9684c41dd1253d3e2771c2.
+- All historical .log and .json evidence files under tmp/pv26-* remain preserved.

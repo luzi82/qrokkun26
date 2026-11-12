@@ -198,3 +198,5 @@ Pv25 C warm-start 實驗：[owner 合約](docs/journal/2026-11-11-1794400966-pv2
 Pv25 已正式啟動：[啟動證據與快照狀態](docs/journal/2026-11-11-1794403738-pv25-training-launch-report.txt)。截至 2026-11-11 21:28:58 HKT，已完成 8 updates、attempted 9，最近完整驗證為 u0，尚無 final 結果。上述合約與模組 README 的等待 review／smoke／launch 文字是啟動前紀錄，不代表目前仍待啟動；狀態以本次凍結快照為準。
 
 Pv25 完成紀錄（2026-11-12）：已完成 1000 updates，validation best 為 **u670**；一次性全新 heldout 為 69.44245 秒，原 Pv21 u400 為 70.19766 秒，配對差 −0.75521 秒、95% CI [−5.31592, 3.88388] 包含 0，未證實改善或變差。見[訓練完成報告](docs/journal/2026-11-12-1794433829-pv25-training-completion-report.txt)。上述 Nov 11 進度為當時快照，原合約與啟動紀錄保留。
+
+Pv26c／Pv26t 執行等價診斷：[操作與合約](qrokkun_ai/v26/README.md)、[事前合約](docs/journal/2026-11-12-1794460557-pv26-thread-bitwise-contract.txt)、[測試套件精簡紀錄](docs/journal/2026-11-13-1794502979-pv26-test-consolidation-report.txt)（`v26` 測試由 286 項收斂至 41 項通過，全套 `244 passed, 26 skipped`，尚未啟動 GB10 正式 `u20`）。
