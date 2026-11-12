@@ -10,11 +10,12 @@
 
 - 工作區：`/storage/hermes/project/qrokkun26`
 - CPU 測試 Python：`/storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python`
-- 執行 pytest 時設定：
+- 執行 pytest 時設定（加上 `--ignore=tmp` 與 `GIT_CEILING_DIRECTORIES` 避免收集歷史暫存快照）：
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTHONPATH=. \
-  /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python -m pytest
+PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+  GIT_CEILING_DIRECTORIES="$TMPDIR" PYTHONPATH=. \
+  /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python -m pytest --ignore=tmp -q
 ```
 
 ### GPU 訓練機（`GB10`）
@@ -65,9 +66,9 @@ PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTHONPATH=. \
 - 共用同一驗證迴圈或同一個 helper 的多個欄位／階段：挑 **1～2** 個代表值。
 - 程式碼裡沒有交叉條件分支時，禁止多層 `parametrize` 相乘（例如幾十個欄位 × 單邊／雙邊 × 多種壞值）。
 
-數量與時間硬門檻：
+數量與時間預算（適用於新增版本模組 `v27+`，不強制追溯重寫既有已封存模組）：
 
-- 新增單一版本模組（如 `qrokkun_ai/vXX/tests`）預設 **15～45** 項。
+- 單一版本模組（`qrokkun_ai/vXX/tests`）測試數量控制在 **15～45** 項以內。
 - 單執行緒 CPU 目標 **< 30 秒**，硬上限 **90 秒**。
 - fixture 的 `--cap`、`--episodes`、`--hidden` 壓到能觸發目標行為的最小規模。
 
@@ -97,6 +98,6 @@ CLI 參數解析（`argparse`、`--help`、錯誤回傳碼）與例外轉換，�
 
 ### 守則 5：程式碼指紋隔離與暫存衛生
 
-計算 `source_tree_sha` 等程式碼指紋時，只納入影響執行與數值的生產程式碼。排除 `**/tests/**` 與文件檔案，避免維護測試時破壞實驗封條。
+新模組（`v27+`）若計算 `source_tree_sha` 等程式碼指紋，只納入影響執行與數值的生產程式碼，排除 `**/tests/**` 與文件檔案，避免維護測試時破壞實驗封條（既有 `v26` 已定義的指紋範圍維持原契約，不追溯改動）。
 
 Pytest `--basetemp` 與大型中繼暫存寫入核准的 `$TMPDIR`，驗證後清理；或遵守 `guideline.md` 的暫存規範。嚴禁污染 `${HOME}`。禁止在 `<repo>/tmp/` 殘留數 GB 或數萬個測試暫存檔。
