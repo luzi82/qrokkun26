@@ -8,14 +8,15 @@
 
 ### 本機（`ovm-hms-26a`）
 
-- 工作區：`/storage/hermes/project/qrokkun26`
-- CPU 測試 Python：`/storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python`
+- 跨 profile 共用專案目錄：`/storage/hermes/project/qrokkun26`
+- 專案共用 CPU Python venv：`/storage/hermes/project/qrokkun26/.venv/bin/python`（含 `torch==2.14.0+cpu`、`numpy`、`pillow`、`pytest`、`matplotlib`）
+- **跨 profile 隔離原則**：一律使用專案共用目錄（`/storage/hermes/project/qrokkun26` 與 `.venv`）或 NAS 共用路徑，**禁止**引用或依賴 `/storage/hermes/home/<profile>/` 下的個別 profile 私有目錄。
 - 執行 pytest 時設定（加上 `--ignore=tmp` 與 `GIT_CEILING_DIRECTORIES` 避免收集歷史暫存快照）：
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
   GIT_CEILING_DIRECTORIES="$TMPDIR" PYTHONPATH=. \
-  /storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python -m pytest --ignore=tmp -q
+  /storage/hermes/project/qrokkun26/.venv/bin/python -m pytest --ignore=tmp -q
 ```
 
 ### GPU 訓練機（`GB10`）

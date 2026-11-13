@@ -59,7 +59,7 @@ No new trace fields or manifest version are introduced by these validation rules
 ```bash
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
 export GIT_CEILING_DIRECTORIES="$TMPDIR"
-PY=/storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python
+PY=/storage/hermes/project/qrokkun26/.venv/bin/python
 SOURCE=<actual-parent-reviewed-40-hex-commit>
 $PY -m pytest qrokkun_ai/v26/tests --ignore=tmp -q
 $PY -m pytest --ignore=tmp -q
@@ -186,7 +186,7 @@ must be fresh):
 ```bash
 export PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
 export GIT_CEILING_DIRECTORIES="$TMPDIR" PV25_TEST_REAL_INPUTS=1
-PY=/storage/hermes/home/dev_grok_0/venv-qrokkun-cpu/bin/python
+PY=/storage/hermes/project/qrokkun26/.venv/bin/python
 $PY -m pytest qrokkun_ai/v26/tests --ignore=tmp -p no:cacheprovider --basetemp=tmp/pv26-fixes/frozen-focused-tmp -q
 $PY -m pytest --ignore=tmp -p no:cacheprovider --basetemp="$TMPDIR/pv26-fixes-frozen-full" -q
 SOURCE=<actual-parent-reviewed-40-hex-commit>
