@@ -1,0 +1,90 @@
+Pv26c／Pv26t u20 執行逐位元等價診斷結案報告（2026-11-14，HKT）
+建立時間：2026-11-14T12:07:46+08:00（Asia/Hong_Kong）
+建立 Unix 秒：1794629266；時間由本檔名的 Unix timestamp 換算。
+
+結論摘要
+1. 正式兩臂順序執行（Pv26c serial workers=1 ➔ Pv26t thread workers=4 ➔ 離線完整重播比較）已於 GB10 CUDA
+   完整執行並正常閉合：supervisor 與三個子程序結束碼均為 0（Pv26c=0、Pv26t=0、compare=0），
+   status=complete_equal，formal=true，final_update=20。
+2. 權重逐位元結果（主判定）：
+   - weights_bitwise_equal=true：終點 u=20 的 Actor＋Critic 全部 12 個具名參數張量經 CAS 實際解壓後逐位元完全相同。
+   - all_updates_weights_bitwise_equal=true：u=0 至 u=20 全部 21 個檢查點（含 model、gradients、Adam exp_avg／exp_avg_sq、
+     training_rng、global_rng）SHA256 與解析後位元 100% 一致，earliest_weight_difference=null。
+3. 完整因果追蹤（Full Trace）結果：
+   - full_trace_equal=true，trace_status=equal。
+   - 兩臂總事件數均為 1,346,718（各 11,363 個 gzip shards），missing_event_counts=[0, 0]，
+     first_difference=null，first_difference_per_update={}，structural_first_difference_per_update={}。
+   - 涵蓋 u0／u10／u20 固定 16-seed 驗證與 u1..u20 每輪 12 集訓練回合的逐幀 P 抽樣、S 抽樣、G 物理狀態轉移、
+     子彈出生／越界／碰撞、GAE batch、permutation／minibatch、clip 前後梯度與 Adam 更新，無任何差異。
+4. 科學解讀邊界：
+   - 本實驗僅證明「中央 P batch 推論 + 每 episode 獨立 RNG + 每 frame 全 barrier 派發 env.step 並按 episode index 合併」
+     在相同執行環境下與單執行緒 serial 具備逐位元可重現性。
+   - 不構成玩家實力提升、模型選拔／promotion，亦不構成未加追蹤儀器之執行加速結論。
+
+執行來源與環境快照
+- Execution source SHA（--source-commit）：59968ead127195765e0f4c382a99cca735624d3e
+- source_tree_sha：0876fcc49688b83e821fc932f5bf7d846ac09f5a5e9684c41dd1253d3e2771c2
+- GB10 不可變 archive（196 個檔案逐一核對 SHA256，無 .git，未改動既有 checkout）：
+  /home/ovm-hms-bot/projects/qrokkun26/pv26_execution/59968ead127195765e0f4c382a99cca735624d3e
+- 執行環境（GB10B）：Python 3.11、torch 2.11.0+cu128、numpy 2.5.3、device=cuda、threads=1、
+  OMP_NUM_THREADS=1、MKL_NUM_THREADS=1、matmul_precision=highest、cuda_matmul_allow_tf32=false、
+  cudnn_allow_tf32=true、deterministic=false（兩臂執行設定完全一致）。
+- 鎖定輸入副本（GB10 本地 /home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/）：
+  * pv21-u400.pt：b8466bb13972de62003e16b0b570567a016d0dab4dd5667e66a3666974cfd5f8
+    （state_dict_sha256：250f3c3f1053b18129f992e97cb9ae15139fc2e5fa962b5491db5dddb2eb8f91）
+  * sv24-u980.pt：554290b6c17a280dbfb8bb4076583a1230b278bf73a24a701f66fca76e5bfcc0
+    （state_dict_sha256：3db671ed476886b8e9640beff0e0724a66b1a72263b55be2e988078061e69b63，CPU frozen readonly）
+
+前置非正式全幀上限 CUDA Smoke（啟動前閘門）
+- NAS 路徑：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261113-0813-pv26-nonformal-cuda-smoke
+- GB10 NVMe Trace：/home/ovm-hms-bot/projects/qrokkun26/pv26_trace_storage/20261113-0813-pv26-nonformal-cuda-smoke
+- 設定：--nonformal --updates 1 --episodes 2 --cap 7200 --validation 2（真實鎖定 checkpoints、CUDA）
+- 結果：exitcodes Pv26c=0／Pv26t=0／compare=0，complete_equal，weights_bitwise_equal=true，
+  full_trace_equal=true，events=[39604, 39604]；paired-closure.json SHA256 為
+  f74555b2bee9783069f7c71c73692d594d5cb55f5be223b418253f20a10602c3，comparison.json SHA256 為
+  251c83820fc643ee9af765da3d3de70288b6d38eb564d98342fd6ddbde189766。
+
+正式 u20 執行紀錄、耗時與工程觀察
+- 啟動時間：2026-11-13 08:34 HKT；監督程序閉合檢測時間：2026-11-14 06:49:43 HKT（GPU 與所有子程序已確認完全釋放，
+  $TMPDIR 內 SQLite 對齊暫存目錄已自動清除）。
+- 正式參數：updates=20、episodes=12、cap=7200、seed=17、validation=16（u0/u10/u20 固定 seeds 600000..600015）、
+  hidden=472、nonformal=false、synthetic=false。
+- 兩臂閉合數據與含儀器耗時（所有時間均包含逐事件 SQLite CAS commit 與 gzip flush 成本）：
+  * Pv26c（workers=1）：completed_updates=20，trace_bytes=109,062,932,745（約 101.6 GiB），
+    wall_s=16024.386358379968（約 4 小時 27 分）。
+  * Pv26t（workers=4）：completed_updates=20，trace_bytes=109,063,040,340（約 101.6 GiB），
+    wall_s=23238.800725937996（約 6 小時 27 分）。
+  * compare（離線雙臂完整 CPU 環境重播驗證與 SQLite 對齊比對）：耗時約 11 小時 21 分，exitcode=0。
+- 執行期工程觀察（供後續 Pv27+ 設計參考）：
+  * OS thread 採樣證實 Pv26t 確實建立了 4 條 ThreadPoolExecutor worker threads，但因 (1) 主執行緒逐事件同步
+    sqlite3.commit() 處於磁碟 I/O 等待（D state），以及 (2) 純 Python Gv20Env.step() 受標準 CPython 3.11 GIL
+    限制無法同時在多核執行 bytecode，故純 Python ThreadPool 並不會突破單核 CPU 上限，且因跨執行緒排程開銷使含儀器
+    耗時高於 Pv26c。後續無重型追蹤之正式長訓若需實質環境推進加速，應評估向量化批次環境（Batch Env）或多行程架構。
+
+產物路徑、SHA256 與保存界線
+- NAS 正式報告與檢查點目錄：
+  /mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261113-0834-pv26-u20
+- 關鍵檔案精確 SHA256：
+  * paired-closure.json：1c10548ac542139df07b08dfc38c99917c1e7f5d935537176fabffe13c864943
+  * comparison.json：48dc028ee76c85b04da85b857f710b9eca146a739e66d6538e57601264946da0
+  * Pv26c/manifest.json：7049d736492af77c7c4f40d77ecf32195188d8e386fe4dfb045f0ae4143d919b
+  * Pv26c/closed.json：58dad4d1ae25432848ee211360705e68ec2c36c3e78a7f96156f6ed7905ba509
+    （trace_closure_sha：7191c203db710b7c6a312c4b6997c8db8c83f4b0c9d8f3b7773e915e55da74a4）
+  * Pv26t/manifest.json：1928d54871052a2d452195306e2d74ff7850a8d83cedd6f5d047b86da1ad7b53
+  * Pv26t/closed.json：038724adb06a4d85b75fdcabc814e49a3fc0eb6b857d7600a2e1e802b4227fe8
+    （trace_closure_sha：50ff9ebce7fcc1d28293f1b3bfbeca91f367fb28f27da9d41b28a27bade8767d）
+  * Pv26c & Pv26t checkpoint-00.json（兩臂完全相同）：
+    0f019a40be5c7a845b49fe7a6e405f5d07ec2c46aa0ed4bdb34470901df57348
+  * Pv26c & Pv26t checkpoint-20.json（兩臂完全相同）：
+    9d482ae19b5ac31c7a4379b45383f8b5c2116280767cee10c5f66527e03cd8bf
+- 原始 Trace 保存界線（trace_durable_bundle=false）：
+  兩臂合計約 203.2 GiB 之原始 gzip shards 與 blobs.sqlite 目前保存在 GB10 本地 NVMe：
+  /home/ovm-hms-bot/projects/qrokkun26/pv26_trace_storage/20261113-0834-pv26-u20
+  尚未複製至 NAS 作逐檔 readback 封存，因此依事前合約不宣稱 entire durable NAS trace bundle；
+  NAS 目錄保存完整 manifests、closures、21 組對稱 checkpoints、paired-closure.json 與 comparison.json。
+
+相關文件
+- 事前合約：docs/journal/2026-11-12-1794460557-pv26-thread-bitwise-contract.txt
+- 測試精簡紀錄：docs/journal/2026-11-13-1794502979-pv26-test-consolidation-report.txt
+- 模組說明：qrokkun_ai/v26/README.md
+- 版本目錄：docs/AGENT_VERSIONS.md

@@ -99,5 +99,6 @@
 - Pv26c 為 serial workers1；Pv26t 為相同中央 batch／每 frame barrier 的 env.step thread pool，預設 workers4。沿用 Pv21 架構／觀察／reward／teacher／PPO；Pv21 u400 actor/critic warm start、fresh Adam，固定 stochastic CPU Sv24 best u980。
 - 正式 u20、12 episodes/update、7200 cap、seed17；固定 validation u0/u10/u20，無 heldout／選模／promotion。新增每 episode P generator seed+26000000，兩臂相同；不宣稱重播歷史 Pv25。
 - full lossless streaming trace／RNG／gradients／Adam／每 update checkpoints；離線報首差異及 actor＋critic raw bits。只回答執行等價，沒有強度結論。random-init Pv27+ 與 B filter 延後且未實作。
-- 狀態（2026-11-13）：本地 bounded synthetic CPU 驗證與測試套件精簡完成（`v26` 41 passed、全套 244 passed / 26 skipped，生產模組未變）；GB10 正式 `u20` 尚未啟動，無正式結果。
-- 來源：[README](../qrokkun_ai/v26/README.md)、[runner](../qrokkun_ai/v26/run.py)、[comparator](../qrokkun_ai/v26/compare.py)、[事前合約](journal/2026-11-12-1794460557-pv26-thread-bitwise-contract.txt)、[測試精簡紀錄](journal/2026-11-13-1794502979-pv26-test-consolidation-report.txt)。
+- 狀態（2026-11-13）：本地 bounded synthetic CPU 驗證與測試套件精簡完成（`v26` 41 passed、全套 244 passed / 26 skipped，生產模組未變）；當時快照 GB10 正式 `u20` 尚未啟動。
+- 結案（2026-11-14）：GB10 CUDA 正式 `u20` 兩臂與離線完整重播比對正常完成（結束碼 `0/0/0`，`complete_equal`）；`u=0..20` 全部 21 個檢查點之 Actor＋Critic 具名張量 raw bits 與兩臂各 `1,346,718` 筆完整追蹤事件 100% 一致（`weights_bitwise_equal=true`、`full_trace_equal=true`；原始 trace 留存 GB10 NVMe，`trace_durable_bundle=false`）。見[結案報告](journal/2026-11-14-1794629266-pv26-u20-completion-report.txt)。
+- 來源：[README](../qrokkun_ai/v26/README.md)、[runner](../qrokkun_ai/v26/run.py)、[comparator](../qrokkun_ai/v26/compare.py)、[事前合約](journal/2026-11-12-1794460557-pv26-thread-bitwise-contract.txt)、[測試精簡紀錄](journal/2026-11-13-1794502979-pv26-test-consolidation-report.txt)、[結案報告](journal/2026-11-14-1794629266-pv26-u20-completion-report.txt)。
