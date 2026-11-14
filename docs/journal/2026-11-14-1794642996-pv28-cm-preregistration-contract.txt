@@ -1,0 +1,55 @@
+Pv28c／Pv28m 整集平行 CPU Rollout 與可重現加速事前合約（2026-11-14，HKT）
+建立時間：2026-11-14T15:56:36+08:00（Asia/Hong_Kong）
+建立 Unix 秒：1794642996；狀態：planned / not started（實作與單元測試已完成，尚未啟動 GB10 正式訓練）。
+
+1. 實驗目的與可證偽假設
+- 針對 Pv27w 每幀跨行程 Pipe barrier 與每幀微型 GPU 啟動導致零加速之實測瓶頸，建立 Pv28c（單核依序執行）與
+  Pv28m（長駐 SharedMemory 多行程 CPU Worker Pool）配對基準。
+- 主驗收門檻（正確性）：在相同執行環境與確定性 CUDA 設定下，Pv28c 與 Pv28m 跑完目標更新輪數後，終點檢查點之
+  Actor＋Critic 全部 12 個具名參數張量原始位元 100% 相等（WEIGHTPASS，exit 0）。若終點不一致（WEIGHTFAIL，
+  exit 2），自動以整數排程二分搜尋（Binary Search）定位最早發生分歧之檢查點區間。
+- 次要觀測指標（效能）：獨立紀錄各階段（pool_init、weight_sync、rollout、batch_teacher_gae、ppo、
+  validation、checkpoint、total）實測耗時與加速比（Pv28c / Pv28m）。
+- 分階段推進計畫：先於 GB10 執行 u5（若需比較長駐 Worker 數與大小核綁定配置則於 u5 實測擇優鎖定），通過後依序推進
+  u100 與 u1000 驗收。
+
+2. 凍結程式碼與鎖定輸入身分
+- 凍結實作程式碼 Commit SHA：062cc9c79a2212e1c03892868b721a23c745acc2
+- 生產程式碼指紋（source_tree_sha，排除 tests／文件／快取）：
+  cad6ed92209411940bd47f26d59e360bd3be2c247292221e3a6269fc5f81b98b
+- 鎖定輸入副本（GB10 本地 /home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/）：
+  * Player 初始權重（原 Pv21 u400，fresh Adam）：pv21-u400.pt
+    - file SHA256：b8466bb13972de62003e16b0b570567a016d0dab4dd5667e66a3666974cfd5f8
+    - state_dict SHA256：250f3c3f1053b18129f992e97cb9ae15139fc2e5fa962b5491db5dddb2eb8f91
+  * 凍結對手（Sv24 best u980，CPU stochastic readonly）：sv24-u980.pt
+    - file SHA256：554290b6c17a280dbfb8bb4076583a1230b278bf73a24a701f66fca76e5bfcc0
+    - state_dict SHA256：3db671ed476886b8e9640beff0e0724a66b1a72263b55be2e988078061e69b63
+
+3. 演算法、分工與被取代之舊決策（Superseded Decisions）
+- 沿用不變：PlayerV21 架構（hidden=472、in_dim=84、9 actions）、獎勵縮放 0.05、gamma=0.9995、lam=0.999、
+  逐場 Python float64 反向 GAE、clearance teacher（horizon=12、top_k=12）、PPO 超參數、隨機種子公式
+  （seed=17；訓練集 100_000..111_999；驗證集 600_000..600_015；P +26_000_000、S_train +25_000_000、
+  S_val +24_000_000、PPO perm 27_000_017）。
+- 明確取代之 Pv27 決策（僅限 v28，保留 Pv26／Pv27 歷史結論不變）：
+  1. 取代每幀跨行程 Pipe barrier 與中央動態 batch CUDA P rollout：改為單場完整對戰（0..7200 frames）全在 CPU
+     （threads=1、batch=1）獨立執行完成（並省略凍結 Spawner 未使用的 log_prob 計算與每幀 NAS statvfs 檢查），
+     建立 Pv28 新數值對照基準（不宣稱逐位元重現歷史 Pv25／Pv26／Pv27 權重）。
+  2. 取代每輪重新 spawn 子行程：Pv28m 於啟動時建立一次長駐 spawn 子行程池與預配置 SharedMemory 槽位，跨所有訓練與
+     驗證輪次重用。
+  3. 預設啟用確定性 CUDA（CUBLAS_WORKSPACE_CONFIG=:4096:8、torch.use_deterministic_algorithms(True)）。
+  4. 擴充正式預算支援 updates ∈ {5, 100, 1000}，對應檢查點與固定 16-seed 驗證間距 {1, 10, 100}（6 位數檔名
+     checkpoint-{u:06d}.pt 與整數排序），支援中斷後精確 --resume 續訓，並以「終點優先比對＋不一致時二分搜尋」取代
+     全檢查點逐一載入。
+- 非目標：不執行 64-seed heldout 實力對決、不選模／promotion、不修改 v21..v27 或 qrokkun_env 既有檔案。
+
+4. 啟動前驗證與標準命令模板
+- 本地單執行緒 CPU 測試：qrokkun_ai/v28/tests 18 passed（18.62s）；全專案回歸 279 passed, 28 skipped；
+  獨立 gpt-6.1-sol 審查 PASS。
+- GB10 執行前必須先部署 commit 封存快照並通過獨立 --nonformal CUDA smoke，再啟動正式 u5：
+  python -m qrokkun_ai.v28.supervise \
+    --out-dir /mnt/minion/88_minion_rw/projects/qrokkun26/runs/<YYYYMMDD-HHMM>-pv28-cm-u5 \
+    --source-commit 062cc9c79a2212e1c03892868b721a23c745acc2 \
+    --player-checkpoint /home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/pv21-u400.pt \
+    --spawner-checkpoint /home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/sv24-u980.pt \
+    --updates 5 --workers <N>
+- 相關文件：concepts_brief.md、qrokkun_ai/v28/README.md、docs/AGENT_VERSIONS.md。

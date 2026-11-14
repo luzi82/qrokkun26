@@ -110,3 +110,10 @@ full tracing for this experiment only; historical Pv26 conclusions remain intact
 Readiness review, deployment and formal launch are pending parent ownership.
 
 Pv27c／Pv27w 結案補充（2026-11-14）：兩臂正式完成 5/5 updates（exit 0、WEIGHTPASS），u0..u5 每次 12 個具名張量 raw bits 一致、各 240,606 training frames；實際 spawn worker 工作已確認。收集加 batch 組裝慢 4.8263%、全程慢 1.6837%，沒有加速；單一 seed17 配對，無 full trace／heldout／強度或 promotion 結論。見[完成報告](journal/2026-11-14-1794634360-pv27-cw-u5-completion-report.txt)。先前 pending 紀錄保留為歷史快照；不自動啟動 Pv28。
+
+## Pv28c／Pv28m — 整集平行 CPU Rollout 與可重現加速基準（2026-11-14）
+
+- 架構／觀察／動作：沿用 Pv21（`hidden=472`、`in_dim=84`、9 actions）；`Pv28c` 單核依序執行完整單場，`Pv28m` 以長駐 `spawn` 子行程池＋預配置 `SharedMemory` 平行執行完整單場（`batch=1`、`threads=1`、省略未使用之 `Spawner.log_prob` 與每幀 NAS 檢查），合併後於確定性 CUDA 整批計算 `expert_targets` 與 PPO。
+- 初始化／optimizer／凍結對手與模式：原始 `Pv21 u400` actor/critic＋fresh Adam，對戰凍結 stochastic CPU `Sv24 best u980`；訓練 P stochastic、驗證 P deterministic argmax；建立 `Pv28` 新數值基準，不宣稱重播 `Pv25..Pv27`。
+- 預算／檢查點／驗收：正式支援 `updates ∈ {5, 100, 1000}`（對應檢查點與 16-seed 驗證間距 `{1, 10, 100}`，六位數檔名 `checkpoint-{u:06d}.pt`、支援精確 `--resume`）；離線先驗終點 Actor＋Critic raw bits（`WEIGHTPASS`），不一致時二分搜尋定位首個分歧點，速度比獨立報告；無 heldout 或 promotion。
+- 狀態（2026-11-14）：實作、本地測試（`v28` 18 passed、全套 279 passed / 28 skipped）與 `gpt-6.1-sol` 審查完成，待部署 GB10 執行 `u5` ➔ `u100` ➔ `u1000`。來源：[README](../qrokkun_ai/v28/README.md)、[概念規格書](../concepts_brief.md)、[事前合約](journal/2026-11-14-1794642996-pv28-cm-preregistration-contract.txt)。
