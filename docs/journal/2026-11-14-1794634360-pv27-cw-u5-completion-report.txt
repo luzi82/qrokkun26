@@ -1,0 +1,172 @@
+Pv27c／Pv27w u5 完成報告
+建立時間：2026-11-14T13:32:40+08:00；Unix seconds：1794634360；時區 Asia/Hong_Kong。
+
+結果與實驗範圍
+正式 CUDA 實驗兩臂均完成 5/5 updates，status=complete，正式執行 exit=0，
+離線權重比較 WEIGHTPASS。終點 actor＋critic 共 12 個具名張量 raw bits 相等；
+獨立解析比對亦確認 u0..u5 每次各 12 個張量全部 raw bits 一致。
+兩臂各訓練 240,606 frames。此結果支持本次條件下的保存權重等價。
+沒有逐 frame 完整 trace，不能由模型權重相等推論 full trace、RNG 或 Adam 狀態相等。
+本次沒有 heldout、強度評比、選模、promotion 或自動 Pv28。
+
+實驗身分與保存位置
+source commit：fa48b4488979d0eaa71e930eb3a359718a320245（本地實作 commit，尚未 push）。
+production source_tree_sha：3770cd61c9547cda69570f59b244c4b5e65b6d4d6f7f9e04e0fb9e8bdceb7a64
+此指紋依 v27 契約涵蓋生產 Python 與繼承依賴，排除 tests／文件／cache。
+NAS run：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261114-1320-pv27-cw-u5
+正式啟動：2026-11-14T13:20:03.838432+08:00（Unix 1794633603.8384316）
+正式結束：2026-11-14T13:29:32.435318+08:00（Unix 1794634172.4353178），returncode=0。
+執行來源為上述 commit 的固定 archive；兩臂依序執行，非同時競爭 GPU。
+持久保存為 NAS 上實際 checkpoint-00..05.pt、manifest、update、evaluation、
+status、closed 與 comparison.json。這是有界權重與摘要保存，沒有 Pv26 式 trace bundle。
+
+參數與初始化契約
+Pv27c 無 pool；Pv27w 採 spawn CPU processes、專用 pipes、固定 episode assignments，
+每 frame barrier 後依原 episode 順序合併，不 refill。中央程序保留 P、teacher、
+action sampling、PPO 與 CUDA；worker 為 CPU frozen stochastic S、threads=1/no_grad。
+正式 updates=5、episodes/update=12、cap=7200、seed=17、validation=16，
+hidden=472、obs=84、9 actions；synthetic=false、nonformal=false。
+P 為原始 Pv21 u400 actor/critic，沒有繼承 Pv26 訓練權重；兩個 Adam 重新建立。
+u0 checkpoint 已驗證 fresh Adam；共同原始 P/S 初始狀態鎖定。
+S 為固定 stochastic CPU Sv24 best u980；P 訓練 stochastic，驗證 deterministic argmax。
+沿用既有 reward、clearance teacher、GAE、PPO、batch shape/order 與 RNG offsets。
+P offset=26000000，S train offset=25000000，S validation offset=24000000，
+permutation seed=27000017。訓練 episode seeds=100000..100059，每 update 12 個。
+validation 在 u0/u5 使用相同 seeds 600000..600015；明確將 Pv26 terminal u20
+適配為本次 terminal u5。無最低加速門檻，速度不決定權重正確性判定。
+
+實際輸入與 checkpoint metadata
+正式輸入路徑（執行時紀錄）：
+P：/home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/pv21-u400.pt
+S：/home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/sv24-u980.pt
+輸入檔案 SHA256：
+P：b8466bb13972de62003e16b0b570567a016d0dab4dd5667e66a3666974cfd5f8
+S：554290b6c17a280dbfb8bb4076583a1230b278bf73a24a701f66fca76e5bfcc0
+初始 state SHA256：
+P：250f3c3f1053b18129f992e97cb9ae15139fc2e5fa962b5491db5dddb2eb8f91
+S：3db671ed476886b8e9640beff0e0724a66b1a72263b55be2e988078061e69b63
+保存 checkpoints u0..u5 含實際模型權重及有界 Adam／permutation states；
+本報告的 equality 結論僅限被比較的 actor/critic 張量 raw bits。
+
+實際執行版本及數值設定（兩臂 manifest 相同）
+{
+  "torch": "2.11.0+cu128",
+  "numpy": "2.5.3",
+  "threads": 1,
+  "device": "cuda",
+  "deterministic": false,
+  "cudnn_deterministic": false,
+  "cudnn_benchmark": false,
+  "matmul_precision": "highest",
+  "cuda_matmul_allow_tf32": false,
+  "cudnn_allow_tf32": true,
+  "CUBLAS_WORKSPACE_CONFIG": null,
+  "OMP_NUM_THREADS": "1",
+  "MKL_NUM_THREADS": "1",
+  "python": "3.12.3",
+  "platform": "Linux-7.0.0-1025-nvidia-aarch64-with-glibc2.39",
+  "cuda_version": "12.8",
+  "cudnn_version": 91900,
+  "gpu": "NVIDIA GB10"
+}
+實際 hyperparameters：
+{
+  "gamma": 0.9995,
+  "lam": 0.999,
+  "reward_scale": 0.05,
+  "actor_lr": 0.0003,
+  "critic_lr": 0.001,
+  "adam_eps": 1e-08,
+  "epochs": 4,
+  "minibatch": 512,
+  "clip": 0.2,
+  "max_grad": 1.0,
+  "dagger": 1.0,
+  "ppo": 0.3,
+  "entropy": 0.005,
+  "hard": 0.65,
+  "soft": 0.35
+}
+CPU budget 紀錄：20 logical、affinity 20；訓練 worker count=12，驗證=16。
+上述 deterministic=false 為實際 runtime flag；不宣稱跨硬體或跨版本必然逐位元重現。
+
+實際多行程工作證據
+5 個訓練 batches 每批 12 個 distinct PIDs，2 個驗證 batches 每批 16 個 distinct PIDs，
+合計 7 batches、92 worker process instances。固定 episode assignments 有保存；
+每個 worker tasks 均非零，各 batch task 總數等於 episode frames 總數。
+所有 worker 的 frozen_S_verified=true、cuda_initialized=false。
+訓練各 update 的共同 frame 數：46368、49005、50693、45733、48807。
+驗證 u0/u5 的 task totals 分別為 63965／64659。
+既有完成後檢查確認全部 worker PIDs 已消失，GPU process 清單為空，資源已釋放。
+這證明實際多行程工作，不證明同時 CPU occupancy 或持續利用率。
+
+效能結果：沒有加速
+時間單位為秒；相同 240,606 training frames。
+項目                         Pv27c             Pv27w
+collection＋batch assembly   188.369472542     197.460779621
+collector FPS              1277.30888        1218.50020
+PPO                          10.832165831      11.044824542
+validation                   80.085194486      76.305507053
+total                       280.819175426     285.547435368
+Pv27w collection＋batch assembly 較 Pv27c 慢 4.8263165768%；
+全程較慢 1.6837382756%，並無速度提升。
+collector 依 run.py 計時邊界包括 collection 與 batch construction；wall time 涵蓋
+startup、IPC、barriers、cleanup 等成本，total 另含 PPO、validation 與 checkpoint 成本。
+同 frames 比較中的 total 並非純 collector throughput；validation 有相同種子與模式。
+這僅是一對 seed17 實測，沒有 CI，不作廣泛效能推論。
+中央 P／teacher／GPU transfers、IPC／barrier／startup 是可能成本來源；
+未 profiling，不能認定它們是本次變慢的根因。
+
+證據來源與關鍵 SHA256
+NAS 唯讀輸入目錄：/mnt/minion/88_minion_rw/projects/qrokkun26/assets/pv27-cw
+verified-results.json、formal-file-hashes.json、formal-launch.json、formal-exit.json
+與 run 中兩臂實際 manifest／closed／status／update／evaluation 共同支持本報告。
+以下為上述四份輸入檔案的 SHA256：
+verified-results.json: 0169646835a07e4b5e21cca36917026789608c4db8999984de459c368bc79bd3
+formal-file-hashes.json: 6a54991314e16b0161bdc772b3e60c17af714875b28084a306f873b89a0593b1
+formal-launch.json: 99208bcec21bbd0c7f4ef25e9529536416af41cabc0128d2b7f432026d3255f1
+formal-exit.json: 019288a2578c9947b5cade02667bcbebd06291afdb65e141309d0ca73d697cb1
+
+正式產物 SHA256（相對 NAS run；由 formal-file-hashes.json 記錄）：
+comparison.json: c5bd198108894859497365c0acc51ff4f2ab5209b44a65060c2d213df5441859
+Pv27c/manifest.json: 644f47d54329d453c0d5a424ba7865ce48ff400b8b21dcd2b8e76c78e2d11e86
+Pv27c/checkpoint-00.pt: f9016235feb30b7e14cac980631360c02cbdab9cee8bbee4268dc08a1a4a3ba6
+Pv27c/evaluation-00.json: ffb5ce060a3c14bc39da851d01b0a25eee6cbe9aec272973b7408573258d5791
+Pv27c/checkpoint-01.pt: a42a82cc6d058baaa7bb1084faa9a4b05bf41dd86c9154975182a5a1b291ffb3
+Pv27c/update-01.json: 8634a41ff70602c79b76a559e87d4b6ca3f8a56a27b66d4da100baef8d71c19f
+Pv27c/checkpoint-02.pt: f5e66c23c6c85c25935c6eb7d9847c5f4b0a17aa9beb7945c0354c79f26c5c49
+Pv27c/update-02.json: a2192d2ceebe06136a498a7af4b32a0608fee028dbe141a26fd9ce2103ba277a
+Pv27c/checkpoint-03.pt: c3b662c2e96947fd7f5fb3ab1c2da0a134b1b95a79fee7f97d23bff82da59307
+Pv27c/update-03.json: f54584a8b6ed4f82f885727ec70ef201b0f50c6ce00cf602f6a7c30b51ff47f5
+Pv27c/checkpoint-04.pt: 849c043e608ff1eefff0f00a884d835a7a76b84e8e79e66f62393cd133824b5c
+Pv27c/update-04.json: 6ced7ab2fb390a935cc25f4871e4b4e0cdd1522877340978f8c7c49f53a5b1f3
+Pv27c/checkpoint-05.pt: be338063ad9f16b4fe20ba95f1091a2afebe918a504107dc493de9ed48a16fa7
+Pv27c/update-05.json: 8c54fec129647502ceaa9c6d06d4ddfabd83267baadc4cd14c9c8eca797f5d5d
+Pv27c/evaluation-05.json: abc5be5df639fa636ae5fbd354531aab82113ecdaa3e25bd0175d35e5df4d11f
+Pv27c/closed.json: cea643d289f118ba53ed5fad2117cc313820015c2eb5aab84851d2e86fbc4a7a
+Pv27c/status.json: e2ab9af2107734db6c32764e36befe0f63b30878421af28c237325be8e333cca
+Pv27w/manifest.json: ac4e0ec5602f0651d20028c8b3cf1f85a8518e6532697ecd3ffb04c38ff2e02f
+Pv27w/checkpoint-00.pt: f9016235feb30b7e14cac980631360c02cbdab9cee8bbee4268dc08a1a4a3ba6
+Pv27w/evaluation-00.json: a54971c7eb03ac164f7df637bd5d6a5b955d1bc072a29cb3bd45c1571031fcc0
+Pv27w/checkpoint-01.pt: a42a82cc6d058baaa7bb1084faa9a4b05bf41dd86c9154975182a5a1b291ffb3
+Pv27w/update-01.json: 1ee34f3f2bd18f497baa8aa7e148b92b823f6c6e5d3fb1c95eacaca7cda24838
+Pv27w/checkpoint-02.pt: f5e66c23c6c85c25935c6eb7d9847c5f4b0a17aa9beb7945c0354c79f26c5c49
+Pv27w/update-02.json: 7eea559142c73f70d0aa44d7b4f3f9601894f40b6572e043169661c08ca43ae7
+Pv27w/checkpoint-03.pt: c3b662c2e96947fd7f5fb3ab1c2da0a134b1b95a79fee7f97d23bff82da59307
+Pv27w/update-03.json: caabb1bc812a3f187cc2f4af2728f8142b2e32f82528ab429907d74149f090d2
+Pv27w/checkpoint-04.pt: 849c043e608ff1eefff0f00a884d835a7a76b84e8e79e66f62393cd133824b5c
+Pv27w/update-04.json: 795f1aaea8432583f7124709293d6c8925caf15b5438b15cbecd0adf3483f86e
+Pv27w/checkpoint-05.pt: be338063ad9f16b4fe20ba95f1091a2afebe918a504107dc493de9ed48a16fa7
+Pv27w/update-05.json: 0c763da876a872093af467650e52ef9b8b86435d4cf650c26c19744688291ce0
+Pv27w/evaluation-05.json: 394b3862c1844a90f3327148585c1239538154579ec407ffe565dee77bc689d9
+Pv27w/closed.json: 0e8f76acaaac3de973262cb59797e3fd7f6cbef88be32db9b41e06699f152569
+Pv27w/status.json: e2ab9af2107734db6c32764e36befe0f63b30878421af28c237325be8e333cca
+
+歷史關係與限制
+本報告取代先前「尚待正式執行」的目前狀態判讀；舊條目仍保留為當時快照。
+2026-11-14 worker contract 的初始 source-tree-sha e544dcb65861689ba2a3ca78d16388e935a792d954b0c5a56ac15fb0bed4fc70
+是歷史初始實作快照；上述正式 production digest 屬後續固定來源，沒有回改舊封條。
+Pv26 合約、完整追蹤結果與結案報告維持原結論，不將本次有限證據延伸為 Pv26 的完整追蹤證明。
+既有獨立測試 19 passed／20.83s 僅作實作驗證背景，不作科學結果證據。
+本次只完成文件，未重跑測試、訓練、效能優化或任何新實驗。
+參照：docs/journal/2026-11-14-1794631971-pv27-worker-contract.txt、qrokkun_ai/v27/README.md。

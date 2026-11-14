@@ -108,3 +108,5 @@ See qrokkun_ai/v27/README.md. Fresh original Pv21 u400 and frozen CPU Sv24 u980;
 terminal validation adapted to u5. Bounded weights and summaries replace Pv26
 full tracing for this experiment only; historical Pv26 conclusions remain intact.
 Readiness review, deployment and formal launch are pending parent ownership.
+
+Pv27c／Pv27w 結案補充（2026-11-14）：兩臂正式完成 5/5 updates（exit 0、WEIGHTPASS），u0..u5 每次 12 個具名張量 raw bits 一致、各 240,606 training frames；實際 spawn worker 工作已確認。收集加 batch 組裝慢 4.8263%、全程慢 1.6837%，沒有加速；單一 seed17 配對，無 full trace／heldout／強度或 promotion 結論。見[完成報告](journal/2026-11-14-1794634360-pv27-cw-u5-completion-report.txt)。先前 pending 紀錄保留為歷史快照；不自動啟動 Pv28。

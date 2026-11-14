@@ -204,3 +204,5 @@ Pv26c／Pv26t 執行等價診斷：[操作與合約](qrokkun_ai/v26/README.md)�
 Pv26c／Pv26t 完成紀錄（2026-11-14）：GB10 CUDA 正式 `u20`（`Pv26c` `workers=1` 對 `Pv26t` `workers=4`）與離線完整重播比對已完成，結果為 **`complete_equal`**（三階段結束碼 `0/0/0`，`weights_bitwise_equal=true`、`all_updates_weights_bitwise_equal=true`、`full_trace_equal=true`，兩臂各 `1,346,718` 筆事件零差異；原始 203.2 GiB trace 留存於 GB10 本地 NVMe，`trace_durable_bundle=false`）。此為純執行等價診斷，無強度或未加儀器加速結論。見[結案報告](docs/journal/2026-11-14-1794629266-pv26-u20-completion-report.txt)。
 
 Pv27c／Pv27w：新增 [固定 episode spawn worker 實驗](qrokkun_ai/v27/README.md)，原始 Pv21 u400＋fresh Adam、CPU frozen Sv24 u980，u5 終點權重逐位元比較；速度另報。正式執行與 readiness review 由 parent 負責。
+
+Pv27c／Pv27w 結案（2026-11-14）：兩臂正式完成 5/5 updates（exit 0、WEIGHTPASS），u0..u5 每次 12 個具名張量 raw bits 一致、各 240,606 training frames；實際 spawn worker 工作已確認。收集加 batch 組裝慢 4.8263%、全程慢 1.6837%，沒有加速；單一 seed17 配對，無 full trace／heldout／強度或 promotion 結論。見[完成報告](docs/journal/2026-11-14-1794634360-pv27-cw-u5-completion-report.txt)。上述待執行文字保留為歷史快照。
