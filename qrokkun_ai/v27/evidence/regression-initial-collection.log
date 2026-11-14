@@ -1,0 +1,13 @@
+
+==================================== ERRORS ====================================
+____________ ERROR collecting qrokkun_ai/v27/tests/test_contract.py ____________
+import file mismatch:
+imported module 'test_contract' has this __file__ attribute:
+  /storage/hermes/project/qrokkun26/qrokkun_ai/v25/tests/test_contract.py
+which is not the same as the test file we want to collect:
+  /storage/hermes/project/qrokkun26/qrokkun_ai/v27/tests/test_contract.py
+HINT: remove __pycache__ / .pyc files and/or use a unique basename for your test file modules
+=========================== short test summary info ============================
+ERROR qrokkun_ai/v27/tests/test_contract.py
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 3.28s

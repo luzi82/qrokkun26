@@ -1,0 +1,16 @@
+
+==================================== ERRORS ====================================
+____________ ERROR collecting qrokkun_ai/v27/tests/test_contract.py ____________
+ImportError while importing test module '/storage/hermes/project/qrokkun26/qrokkun_ai/v27/tests/test_contract.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/home/hermes/.local/share/uv/python/cpython-3.11.16-linux-x86_64-gnu/lib/python3.11/importlib/__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+qrokkun_ai/v27/tests/test_contract.py:6: in <module>
+    from qrokkun_ai.v27 import core
+E   ImportError: cannot import name 'core' from 'qrokkun_ai.v27' (unknown location)
+=========================== short test summary info ============================
+ERROR qrokkun_ai/v27/tests/test_contract.py
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 3.93s

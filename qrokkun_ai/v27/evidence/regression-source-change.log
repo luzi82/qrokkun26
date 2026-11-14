@@ -1,0 +1,85 @@
+........................................................................ [ 25%]
+........................................................................ [ 50%]
+s.....................................FF.....s.......................... [ 75%]
+............................................ssssssssssssssssssssssssss   [100%]
+=================================== FAILURES ===================================
+_____________________ test_complete_but_different[weight] ______________________
+
+complete_pair = PosixPath('/tmp/pv27-regression2-1794631760/complete-pv260')
+tmp_path = PosixPath('/tmp/pv27-regression2-1794631760/test_complete_but_different_we0')
+injection = 'weight'
+
+    @pytest.mark.parametrize('injection',['rng','action','weight'])
+    def test_complete_but_different(complete_pair,tmp_path,injection):
+        def change(row,out):
+            if injection=='rng' and row['kind']=='P' and row['key'][1]=='train':
+                draw=row['data']['draws'][0];draw['pre']=draw['post'];return True
+            if injection=='action' and row['kind']=='G' and row['key'][1]=='train':
+                row['data']['action']=(row['data']['action']+1)%9;return True
+            if injection=='weight' and row['kind']=='checkpoint' and row['key']==[1]:
+                model=row['data']['model'];name='policy_head.bias'
+                import sqlite3,zlib
+                ref=dict(model[name]); db=sqlite3.connect(out.parent/'trace'/'blobs.sqlite')
+                raw=bytearray(zlib.decompress(db.execute('SELECT raw FROM blobs WHERE sha=?',(ref['blob'],)).fetchone()[0]))
+                raw[0]^=1; ref['blob']=digest(raw)
+                db.execute('INSERT INTO blobs VALUES (?,?,?)',(ref['blob'],len(raw),zlib.compress(raw)));db.commit();db.close()
+                model[name]=ref
+                json_write(out/'checkpoint-01.json',row['data']);return True
+        changed=mutate_bundle(complete_pair,tmp_path,change)
+        if injection in ('rng','action'):
+            with pytest.raises(ValueError):compare(complete_pair/'Pv26c',changed)
+            return
+>       result=compare(complete_pair/'Pv26c',changed)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+qrokkun_ai/v26/tests/test_integrity.py:105: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+qrokkun_ai/v26/compare.py:301: in compare
+    for path in (control,threaded):bundles.append(Bundle(path,expected_commit))
+                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+qrokkun_ai/v26/compare.py:103: in __init__
+    try:self.template=schema(self.s,self.m,expected_commit)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+s = {'P_seed_offset': 26000000, 'S_train_offset': 25000000, 'S_val_offset': 24000000, 'architecture': {'actions': ['idle',...', 's', ...], 'architecture': 'player_v21_kinematic_decoupled', 'architecture_version': 1, 'bullet_feat': 4, ...}, ...}
+m = {'arm': 'Pv26c', 'schema': 2, 'semantic': {'P_seed_offset': 26000000, 'S_train_offset': 25000000, 'S_val_offset': 2400...'storage': {'batch_bytes': 100000, 'compression_credit': 0, 'estimated_bytes': 1091437152, 'max_frames': 80, ...}, ...}
+expected_commit = None
+
+    def schema(s,m,expected_commit=None):
+        from .run import source_digest, HYPER
+        ints={'updates':20,'episodes':12,'cap':7200,'seed':17,'validation':16,'hidden':472}
+        for k,maximum in ints.items():
+            if type(s[k]) is not int or not 0<s[k]<=maximum:raise ValueError('semantic limits '+k)
+        for k in ('nonformal','synthetic','deterministic','resume'):
+            if type(s[k]) is not bool:raise ValueError('semantic flag '+k)
+        if s['resume'] or s['heldout']!=[] or type(s['heldout']) is not list:raise ValueError('resume/heldout contract')
+        if type(s['validation_seeds']) is not list or any(type(v) is not int for v in s['validation_seeds']):raise ValueError('validation seed schema')
+        for k,n in [('source_commit',40),('source_tree_sha',64)]:
+            if not isinstance(s[k],str) or not re.fullmatch('[0-9a-fA-F]{'+str(n)+'}',s[k]):raise ValueError('source identity '+k)
+>       if s['source_tree_sha']!=source_digest():raise ValueError('execution source digest mismatch; use comparator from same frozen archive')
+                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       ValueError: execution source digest mismatch; use comparator from same frozen archive
+
+qrokkun_ai/v26/validation.py:50: ValueError
+_____________________ test_missing_named_weight_failclosed _____________________
+
+complete_pair = PosixPath('/tmp/pv27-regression2-1794631760/complete-pv260')
+tmp_path = PosixPath('/tmp/pv27-regression2-1794631760/test_missing_named_weight_fail0')
+
+    def test_missing_named_weight_failclosed(complete_pair,tmp_path):
+        def change(row,out):
+            if row['kind']=='checkpoint' and row['key']==[1]:
+                del row['data']['model']['policy_head.bias']
+                json_write(out/'checkpoint-01.json',row['data']);return True
+        bad=mutate_bundle(complete_pair,tmp_path,change)
+>       with pytest.raises(ValueError,match='model'):compare(complete_pair/'Pv26c',bad)
+E       AssertionError: Regex pattern did not match.
+E         Expected regex: 'model'
+E         Actual message: 'execution source digest mismatch; use comparator from same frozen archive'
+
+qrokkun_ai/v26/tests/test_integrity.py:117: AssertionError
+=========================== short test summary info ============================
+FAILED qrokkun_ai/v26/tests/test_integrity.py::test_complete_but_different[weight]
+FAILED qrokkun_ai/v26/tests/test_integrity.py::test_missing_named_weight_failclosed
+2 failed, 256 passed, 28 skipped in 162.59s (0:02:42)

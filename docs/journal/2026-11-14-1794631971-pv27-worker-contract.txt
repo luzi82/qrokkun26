@@ -1,0 +1,53 @@
+Pv27c/Pv27w worker contract implementation — 2026-11-14, Unix 1794631971 (HKT)
+Base HEAD: 539123509322298f4c5af69df216f38c8be7d4f9. No commit/deploy/review/launch.
+Production source_tree_sha: e544dcb65861689ba2a3ca78d16388e935a792d954b0c5a56ac15fb0bed4fc70
+
+Contract: original Pv21 u400 actor+critic, fresh Adam; frozen stochastic CPU
+Sv24 best u980, v25 input locks plus actual S state hash. Formal u5/12 episodes,
+seed17/cap7200/hidden472/obs84. Pv26 P/S/PPO RNG offsets, reward, teacher,
+GAE, PPO, active batch shape/order, frame barrier and index merge preserved.
+Validation u0/u5 uses the same 16 validation seeds and modes; terminal u5
+explicitly adapts Pv26 terminal u20. No heldout or promotion.
+
+Pv27c has no pool; Pv27w spawn processes use dedicated pipes and fixed episode
+assignments with CPU frozen S and thread count1/no_grad. P, teacher, action
+sampling and PPO stay parent. No refill or environment IPC. CPU choice records
+logical/affinity/cgroup quota constraints. PID/tasks/CPU/wall time and episode
+assignments are recorded. Direct children close/reap in finally including stop.
+
+Weights u0..u5 and atomic bounded summaries replace full traces for this
+experiment only; Pv26 historical conclusions remain unchanged. Every update
+compared separately offline; only terminal actor+critic raw bits decide 0/2.
+Runtime/incomplete=3, ownerstop=130. Speed ratios separate, no minimum speedup.
+Source fingerprint includes production Python and inherited dependencies,
+excludes tests/docs/cache. Parent supplies actual immutable archive commit;
+CLI does not depend on .git. No adversarial resealing logic.
+
+TDD RED: missing core import recorded before implementation.
+Final focused GREEN: 16 passed in 21.55s. Includes actual serial/spawn rollout
+and u1 weights, one representative Pv26 baseline alignment, cleanup and tiny
+sequential c/w/offline comparison. CPU-only, no formal training.
+AST+compile without pyc writes and git diff --check performed.
+Evidence local: qrokkun_ai/v27/evidence/.
+Requested NAS evidence directory could not be created: filesystem read-only.
+Parent must copy evidence to assets/pv27-cw/implementation when writable.
+Whole-project regression result recorded separately in evidence; no older
+source or tests were edited. Parent owns one fresh readiness review; do not
+claim review approval or formal CUDA reproducibility from these CPU tests.
+
+Final stable-source full regression: 258 passed, 28 skipped in 170.29s, exit0.
+Initial collection collision fixed using new v27 package markers. First full
+run overlapped final production edits: 256 passed,28 skipped,2 failures in
+162.59s, both v26 source-digest mismatch; fixed-source rerun passed completely.
+Logs preserved in v27/evidence. Final focused test count16, runtime21.55s.
+All own disposable pytest basetemps removed after verification.
+
+Exact changed paths (only authorized scope):
+README.md (append), docs/AGENT_VERSIONS.md (append), this NEW journal;
+qrokkun_ai/v27/{__init__.py,core.py,run.py,supervise.py,compare.py,README.md};
+qrokkun_ai/v27/tests/{__init__.py,test_contract.py};
+qrokkun_ai/v27/evidence/{red.log,green.log,regression-initial-collection.log,
+regression-source-change.log,regression-green.log,source-tree-sha.txt}.
+Remaining: parent readiness review, deployment/archive provenance and formal
+CUDA launch; NAS evidence copy blocked by read-only mount. No speed or formal
+weight-equality claim is made by this implementation result.
