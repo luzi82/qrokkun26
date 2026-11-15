@@ -1,6 +1,7 @@
 """Episode-parallel CPU rollout with SharedMemory worker pool and CUDA teacher/PPO."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import dataclass
 import hashlib
@@ -63,7 +64,8 @@ TRAJ_FIELDS: tuple[tuple[str, tuple[int, ...], np.dtype], ...] = (
 def ppo_backend(device) -> dict[str, object]:
     cuda = torch.device(device).type == "cuda"
     return {"ppo_backend": "cuda_actor_critic_streams" if cuda else "cpu_serial",
-            "cuda_streams_enabled": cuda, "kernel_overlap_measured": False}
+            "cuda_streams_enabled": cuda, "host_dispatch_workers": 2 if cuda else 0,
+            "kernel_overlap_measured": False}
 
 
 def configure_runtime(device: str) -> dict[str, object]:
@@ -963,6 +965,63 @@ def source_digest() -> str:
     return h.hexdigest()
 
 
+
+def _prefer_error(current: BaseException | None, candidate: BaseException) -> BaseException:
+    if current is None:
+        return candidate
+    if isinstance(current, (KeyboardInterrupt, InterruptedError)) and not isinstance(
+        candidate, (KeyboardInterrupt, InterruptedError)
+    ):
+        return candidate
+    return current
+
+
+def _dispatch_pair(executor, actor, critic):
+    """Submit both lanes before waiting; drain all submitted work on any error."""
+    if executor is None:
+        return actor(), critic()
+    futures = []
+    results = []
+    error = None
+    try:
+        futures.append(executor.submit(actor))
+        futures.append(executor.submit(critic))
+    except BaseException as exc:
+        error = _prefer_error(error, exc)
+    for future in futures:
+        # A main-thread interrupt can interrupt result() before the worker ends.
+        # Retry the wait in that case, retaining the first failure for the caller.
+        while True:
+            try:
+                result = future.result()
+            except BaseException as exc:
+                error = _prefer_error(error, exc)
+                if not future.done():
+                    continue
+            else:
+                results.append(result)
+            break
+    if error is not None:
+        raise error
+    return tuple(results)
+
+
+def _make_streams(device: torch.device) -> list:
+    return [torch.cuda.Stream(device=device) for _ in range(2)] if device.type == "cuda" else []
+
+
+def _join_streams(streams) -> None:
+    """Synchronize every stream, then re-raise the first failure."""
+    error = None
+    for stream in streams:
+        try:
+            stream.synchronize()
+        except BaseException as exc:
+            error = _prefer_error(error, exc)
+    if error is not None:
+        raise error
+
+
 def train(
     net: PlayerV21,
     opt_actor: torch.optim.Optimizer,
@@ -990,81 +1049,102 @@ def train(
 
     cuda = player.device.type == "cuda"
     # Fail closed: construction/dispatch errors propagate; never fall back on CUDA.
-    streams = [torch.cuda.Stream(device=player.device) for _ in range(2)] if cuda else []
+    streams = _make_streams(player.device)
     def lane(i):
+        # Gate on cuda: injected CPU mocks must not enter torch.cuda.stream.
         return torch.cuda.stream(streams[i]) if cuda else nullcontext()
     def join():
         # Host join also bounds allocation lifetime, metric reads and policy sync.
-        for stream in streams:
-            stream.synchronize()
+        _join_streams(streams)
 
     n_samples = int(player.shape[0])
     pl_sum, vl_sum, dl_sum, kl_sum, agr_sum, seen = 0.0, 0.0, 0.0, 0.0, 0.0, 0
 
-    for _ in range(v21.PPO_EPOCHS):
-        if stop_check():
-            raise InterruptedError("owner stop")
-        perm = torch.randperm(n_samples, device=player.device, generator=generator)
-        for start in range(0, n_samples, minibatch):
-            mb = perm[start : start + minibatch]
-            feat = net.features(player[mb], bullets[mb], pad[mb])
-            opt_actor.zero_grad()
-            opt_critic.zero_grad()
-            if cuda:
-                for stream in streams:
-                    stream.wait_stream(torch.cuda.current_stream(player.device))
-            try:
-                with lane(0):
-                    # Explicit finite guards below avoid Distribution validation host sync.
-                    dist = torch.distributions.Categorical(
-                        logits=net.policy_head(net.policy_body(feat)), validate_args=False)
-                    log_prob = dist.log_prob(actions[mb])
-                    ratio = torch.exp(log_prob - old_lp[mb])
-                    surr1 = ratio * advantages[mb]
-                    surr2 = torch.clamp(ratio, 1.0 - v21.PPO_CLIP, 1.0 + v21.PPO_CLIP) * advantages[mb]
-                    policy_loss = -torch.min(surr1, surr2).mean()
-                    entropy = dist.entropy().mean()
-        
-                    hard_ce = F.cross_entropy(dist.logits, exp_acts[mb])
-                    t_probs = F.softmax(exp_logits[mb], dim=-1)
-                    s_logp = F.log_softmax(dist.logits, dim=-1)
-                    soft_ce = -(t_probs * s_logp).sum(-1).mean()
-                    dagger_loss = 0.65 * hard_ce + 0.35 * soft_ce
-        
-                    actor_loss = ppo_weight * policy_loss + dagger_weight * dagger_loss - entropy_coef * entropy
-                    actor_loss.backward()
-                with lane(1):
-                    v_pred = net.value_head(net.value_body(feat)).squeeze(-1)
-                    value_loss = F.mse_loss(v_pred, returns[mb])
-                    value_loss.backward()
-                join()
-                # No optimizer may update until BOTH partitions pass their guards.
-                finite({str(i): v.grad for i, v in enumerate(actor_params) if v.grad is not None})
-                finite({str(i): v.grad for i, v in enumerate(critic_params) if v.grad is not None})
-                if not bool(torch.isfinite(actor_loss) & torch.isfinite(value_loss)):
-                    raise FloatingPointError("PPO loss")
-                with lane(0):
-                    nn.utils.clip_grad_norm_(actor_params, v21.PPO_MAX_GRAD_NORM, error_if_nonfinite=True)
-                with lane(1):
-                    nn.utils.clip_grad_norm_(critic_params, v21.PPO_MAX_GRAD_NORM, error_if_nonfinite=True)
-                join()
-                with lane(0):
-                    opt_actor.step()
-                with lane(1):
-                    opt_critic.step()
-            finally:
-                join()
+    # One persistent pair per CUDA train call; CPU never constructs an executor.
+    with ThreadPoolExecutor(max_workers=2) if cuda else nullcontext(None) as executor:
+        for _ in range(v21.PPO_EPOCHS):
+            if stop_check():
+                raise InterruptedError("owner stop")
+            perm = torch.randperm(n_samples, device=player.device, generator=generator)
+            for start in range(0, n_samples, minibatch):
+                mb = perm[start : start + minibatch]
+                feat = net.features(player[mb], bullets[mb], pad[mb])
+                opt_actor.zero_grad()
+                opt_critic.zero_grad()
+                if cuda:
+                    for stream in streams:
+                        stream.wait_stream(torch.cuda.current_stream(player.device))
+                step_error = None
+                try:
+                    def actor_backward():
+                        with lane(0):
+                            # Explicit finite guards below avoid Distribution validation host sync.
+                            dist = torch.distributions.Categorical(
+                                logits=net.policy_head(net.policy_body(feat)), validate_args=False)
+                            log_prob = dist.log_prob(actions[mb])
+                            ratio = torch.exp(log_prob - old_lp[mb])
+                            surr1 = ratio * advantages[mb]
+                            surr2 = torch.clamp(ratio, 1.0 - v21.PPO_CLIP, 1.0 + v21.PPO_CLIP) * advantages[mb]
+                            policy_loss = -torch.min(surr1, surr2).mean()
+                            entropy = dist.entropy().mean()
 
-            with torch.no_grad():
-                approx_kl = float((old_lp[mb] - log_prob).mean().item())
-                agr = float((dist.logits.argmax(dim=-1) == exp_acts[mb]).float().sum().item())
-            bs = int(mb.shape[0])
-            pl_sum += float(policy_loss.item()) * bs
-            vl_sum += float(value_loss.item()) * bs
-            dl_sum += float(dagger_loss.item()) * bs
-            kl_sum += approx_kl * bs
-            agr_sum += agr
-            seen += bs
+                            hard_ce = F.cross_entropy(dist.logits, exp_acts[mb])
+                            t_probs = F.softmax(exp_logits[mb], dim=-1)
+                            s_logp = F.log_softmax(dist.logits, dim=-1)
+                            soft_ce = -(t_probs * s_logp).sum(-1).mean()
+                            dagger_loss = 0.65 * hard_ce + 0.35 * soft_ce
+
+                            actor_loss = ppo_weight * policy_loss + dagger_weight * dagger_loss - entropy_coef * entropy
+                            actor_loss.backward()
+                            return dist, log_prob, policy_loss, dagger_loss, actor_loss
+
+                    def critic_backward():
+                        with lane(1):
+                            v_pred = net.value_head(net.value_body(feat)).squeeze(-1)
+                            value_loss = F.mse_loss(v_pred, returns[mb])
+                            value_loss.backward()
+                            return value_loss
+
+                    actor_result, value_loss = _dispatch_pair(executor, actor_backward, critic_backward)
+                    dist, log_prob, policy_loss, dagger_loss, actor_loss = actor_result
+                    join()
+                    # No optimizer may update until BOTH partitions pass their guards.
+                    finite({str(i): v.grad for i, v in enumerate(actor_params) if v.grad is not None})
+                    finite({str(i): v.grad for i, v in enumerate(critic_params) if v.grad is not None})
+                    if not bool(torch.isfinite(actor_loss) & torch.isfinite(value_loss)):
+                        raise FloatingPointError("PPO loss")
+                    def clip(i, params):
+                        with lane(i):
+                            return nn.utils.clip_grad_norm_(
+                                params, v21.PPO_MAX_GRAD_NORM, error_if_nonfinite=True)
+                    _dispatch_pair(executor, lambda: clip(0, actor_params), lambda: clip(1, critic_params))
+                    join()
+                    def step(i, optimizer):
+                        with lane(i):
+                            optimizer.step()
+                    _dispatch_pair(executor, lambda: step(0, opt_actor), lambda: step(1, opt_critic))
+                except BaseException as exc:
+                    step_error = exc
+                    raise
+                finally:
+                    # Keep the minibatch failure when join repeats a sticky stream error.
+                    # An interrupt must not hide a non-interrupt CUDA join failure.
+                    try:
+                        join()
+                    except BaseException as join_error:
+                        if _prefer_error(step_error, join_error) is join_error:
+                            raise
+
+                with torch.no_grad():
+                    approx_kl = float((old_lp[mb] - log_prob).mean().item())
+                    agr = float((dist.logits.argmax(dim=-1) == exp_acts[mb]).float().sum().item())
+                bs = int(mb.shape[0])
+                pl_sum += float(policy_loss.item()) * bs
+                vl_sum += float(value_loss.item()) * bs
+                dl_sum += float(dagger_loss.item()) * bs
+                kl_sum += approx_kl * bs
+                agr_sum += agr
+                seen += bs
 
     with torch.no_grad():
         ret_var = torch.var(returns)

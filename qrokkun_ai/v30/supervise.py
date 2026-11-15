@@ -222,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
         if stopped[0]:
             raise InterruptedError("owner stop")
         return int(cmp_code)
-    except Exception:
+    except (InterruptedError, KeyboardInterrupt):
         if stopped[0]:
             json_write(root / "pair-status.json", {
                 "status": "stopped", "phase": phase,

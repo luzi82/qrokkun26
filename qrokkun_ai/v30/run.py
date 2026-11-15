@@ -525,7 +525,7 @@ def main(argv: list[str] | None = None, expected_semantic: dict[str, object] | N
         check_stop()
         return 0
     except BaseException as exc:
-        if stopped[0] or isinstance(exc, (InterruptedError, KeyboardInterrupt)):
+        if isinstance(exc, (InterruptedError, KeyboardInterrupt)):
             if out.exists():
                 write_status("stopped", "stopped", completed, error=repr(exc))
             if stopped[0]:

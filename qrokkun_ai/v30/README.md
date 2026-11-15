@@ -23,7 +23,7 @@ source_tree_sha 沿用 Pv28 的全 qrokkun_ai／qrokkun_env 生產 Python 範圍
 
 單一配對 seed17 不構成統計信賴區間。沒有自動重跑、正式續跑、trace、下一版本、heldout 或 promotion。正式 GPU 重現性與吞吐量仍待實測，不預先宣稱通過。
 
-兩臂使用相同新版 PPO。每次 train 建立並重用兩條不同的非預設 CUDA streams；預設 stream 僅建立一次共用 features，兩分支保持原本 loss、epoch／minibatch permutation 與 Adam。兩個 backward 派發後才做分區 finite 檢查，兩邊 clipping 均通過後才更新；每個 minibatch 及例外退出皆 host join，保護張量生命週期、下一次權重同步與診斷讀取。Adam 狀態在所屬分支 stream 初次建立，跨呼叫前已同步。CPU 僅有明確 serial fallback；CUDA 錯誤直接失敗。manifest／PPO metrics 記錄 ppo_backend、cuda_streams_enabled、kernel_overlap_measured=false，不以建立 stream 宣稱 kernel 已重疊。
+兩臂使用相同新版 PPO。每次 train 建立並重用兩條不同的非預設 CUDA streams 與兩個 host dispatch workers；forward/backward、clipping、Adam 分階段成對提交，等待所有已提交 futures 完成後才 join streams，例外亦排空，train 退出關閉 executor；預設 stream 僅建立一次共用 features，兩分支保持原本 loss、epoch／minibatch permutation 與 Adam。兩個 backward 派發後才做分區 finite 檢查，兩邊 clipping 均通過後才更新；每個 minibatch 及例外退出皆 host join，保護張量生命週期、下一次權重同步與診斷讀取。Adam 狀態在所屬分支 stream 初次建立，跨呼叫前已同步。CPU 僅有明確 serial fallback；CUDA 錯誤直接失敗。manifest／PPO metrics 記錄 ppo_backend、cuda_streams_enabled、host_dispatch_workers（CUDA=2、CPU=0）、kernel_overlap_measured=false，不以建立 stream 宣稱 kernel 已重疊。
 
 父層預先規劃額外一次獨立 Pv30m u10：使用相同設定、fresh Pv21 u400／fresh Adam 與全新 exclusive output，直接比較 m-run1 與 m-run2 的具名模型 raw bits。這是事先安排的同版本重現性驗證，不是失敗觸發重跑。現有 compare CLI 專用 c/m 配對；額外 m/m 比較由父層使用 weight_diff 逐一檢查 11 個 checkpoint、以 u10 為主結論。沒有 Pv29 matching gate；歷史速度比較缺少固定工作量時不得作因果解讀。
 
