@@ -1,0 +1,23 @@
+日期：2026-11-15，Asia/Hong_Kong；Unix seconds：1794725264
+主題：Pv30c/m u10 實作交接（Implementer ONLY）
+基底：442fa2126dc814d18b2ce4b2dde8cd631ec8769c，開始時乾淨。
+已先讀 AGENTS.md 與指定 NAS guideline；無 agent/review/network/SSH/GPU/commit/push/worktree。
+
+範圍：新 v30 由 v29 runner/core/compare/supervise 與 18 項測試作版本化適配；新增 2 項 PPO 行為測試（CPU 與有 GPU 才執行的 CUDA callable path）。v29 及更早檔案未修改。測試總數 20（19 passed、1 skipped），2 個真實 worker process 案例沿用 pool reuse 與 startup cancellation。未加入 profiling framework。
+
+TDD：新增 production PPO 前先執行 CPU 行為測試，檢查兩分支 backward 在首個 finite guard 前均已完成、檢查範圍為單一參數分區。RED 是行為 assertion，不是 import/syntax error：1 failed、1 skipped，2.72 秒。之後最終 GREEN 19 passed、1 skipped，6.94 秒。新增測試同時檢查 fresh Adam、權重更新、有限值、backend metadata 與 Categorical 關閉隱式 host validation。CPU 無法驗證 CUDA streams 重疊與 CUDA lifetime 正確性。
+
+所有命令共用前綴（執行時 TMPDIR 是核准的外部 scratch）：
+PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTHONPATH=. GIT_CEILING_DIRECTORIES="$TMPDIR" .venv/bin/python -m pytest --ignore=tmp -q
+RED suffix：qrokkun_ai/v30/tests/test_streams.py --basetemp="$TMPDIR/pv30-red"
+初次 GREEN suffix：qrokkun_ai/v30/tests --basetemp="$TMPDIR/pv30-green"（19 passed、1 skipped，7.09 秒）
+兩側 clipping 先於任一 Adam 的修正後：qrokkun_ai/v30/tests --basetemp="$TMPDIR/pv30-final"（19 passed、1 skipped，6.97 秒）
+避免 Distribution 隱式 host validation 的修正後最終命令：qrokkun_ai/v30/tests --basetemp="$TMPDIR/pv30-verified"（19 passed、1 skipped，6.94 秒）
+v29 regression 僅一次：qrokkun_ai/v29/tests --basetemp="$TMPDIR/pv29-regression"（18 passed，6.94 秒）
+每次測試期間 source 凍結。小型文字 logs：tmp/pv30-author/（ignored）；外部 basetemp 驗證後刪除。
+
+實作：兩 streams 每個 train invocation 建立並重用；共用 parameter-free features 只建立一次。各 optimizer 維持原先 minibatch/epoch 順序。兩個 forward/loss/backward 派發後才 host join、分區 finite guards；兩側 clipping 成功後才 Adam；finally join 保護錯誤路徑與 allocation lifetime。狀態初次配置在各自 stream，下一呼叫前同步完成。semantic runtime 與 PPO metrics 公開 backend/enable flags，kernel_overlap_measured=false，無 stream handles 混入 semantic identity。CUDA 失敗直接傳出，沒有 silent serial fallback。
+source_digest 涵蓋所有生產 Python，排除 tests/docs/cache，另外納入既有 v25/reference.json，父層 archive inventory 務必包含它。新身分與 schema/CLI 都是 v30。
+
+後續由父層負責：fresh Codex high review、獨立測試、local commit、immutable archive、真實輸入 CUDA u1 smoke、bounded torch.profiler overlap probe，通過 readiness 後正式 c→m u10。即使權重不同仍兩臂完整跑完；u10 具名全 actor+critic raw bits 為主，中間 11 checkpoints 線性比較為輔。事先另外安排相同設定、全新初始化／Adam、全新 output 的一次獨立 m u10，直接驗證 m-run1==m-run2；不是失敗觸發 retry。不以 Pv29 matching 為 gate，歷史速度缺少固定 workload 不作因果解讀。無自動正式 retry/resume/下一版本/full env trace/heldout/promotion。
+review_rounds 仍無實際 review 結果；本次實作供 round1 review。最多 3 rounds，第三輪 unresolved 後父層須停止，不能再 fix/review/GPU。無 GPU 證據，未宣稱速度或重現性。

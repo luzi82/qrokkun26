@@ -214,3 +214,8 @@ Pv28c／Pv28m 三階段結案（2026-11-15）：GB10 CUDA 正式 `u5`（`247,989
 - [Pv29c／Pv29m u10、E20 配對預註冊](qrokkun_ai/v29/README.md)：分離逐更新 checkpoint 與 u0/u10 validation，線性比較全部更新、僅 terminal raw-bit verdict；正式 GB10 結果待執行。
 
 Pv29c／Pv29m 結案補充（2026-11-15）：正式 u10/E20 兩臂完成 10/10 updates（complete_equal、exit 0），PRIMARY u10 **WEIGHTPASS**；獨立 u0..u10 每次 12 個具名 actor/critic 張量 raw bits 一致，各 805,265 training frames。完整收集 wall 加速 **8.0187x**、全程 **5.8143x**；單一 seed17，無 full trace／heldout／promotion 或泛化結論。見[完成報告](docs/journal/2026-11-15-1794724028-pv29-cm-u10-completion-report.txt)。上述預註冊 pending 文字保留為當時快照，由本次日期結案補充取代執行狀態。
+
+
+## 2026-11-15 Pv30 actor／critic CUDA streams 實作
+
+新增 [v30 說明](qrokkun_ai/v30/README.md)：c/m 均使用同一新版 PPO，正式預算 u10/E20/seed17，僅驗證同版本重現性，不要求與 Pv29 位元一致。兩條非預設 CUDA streams、分區梯度 guards、每 minibatch join；CPU 明確 serial。父層預定 c→m 完整配對及額外獨立 fresh-init m u10，新 output 驗證 m/m。CPU 最終 19 passed、1 CUDA skipped；未執行 GPU、正式配對或效能量測，不能宣稱加速或 GPU 重現性。細節與命令見日期 journal。
