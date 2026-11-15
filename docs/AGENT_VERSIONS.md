@@ -142,3 +142,6 @@ Pv30c／Pv30m u10 結案補充（2026-11-15）：三臂完成 10/10、exit 0；c
 ### Pv32m — original Pv21 u400 warm-start, u1000 / E20
 
 Implementation: `qrokkun_ai/v32/`. Preserves Pv31m PPO and episode-parallel CPU sampling directly, fresh Adam/new u0 lineage, frozen Sv24 u980. Validation u0/u10..u1000 selects strict integer-total-frame best (ties earlier); terminal saved independently. One-shot paired final uses the previously used Pv25 benchmark, primary best and secondary terminal versus original. No legacy survival gate, no random-init arm, no launch. Pv25 E12 remains historical reference; this E20 baseline supports a future separately authorized episode-matched initialization comparison. See `qrokkun_ai/v32/README.md` for protocol and commands.
+
+
+Pv32m warm-start u1000 結案補充（2026-11-16）：正式 u1000/E20/seed17 完成 20000 episodes、83378713 frames，train/final exit0。主要 validation-selected best u120 對 original 的共同基準差 +0.488542 秒，95% 配對 CI 涵蓋 0，尚未證實改善；terminal u1000 為次要結果。此為未來 random-init 比較的 warm-start 對照，並非最低改善門檻；800000..800063 為曾使用窗口，非新 heldout，尚未啟動 random 臂。見[完成報告](journal/2026-11-16-1794763715-pv32-warm-start-u1000-completion-report.txt)。本日期附錄取代先前 pending／未啟動的執行狀態，舊條目與預註冊保留為歷史快照。

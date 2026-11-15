@@ -1,0 +1,117 @@
+Pv32m warm-start u1000 完成報告
+建立時間：2026-11-16T01:28:35+08:00（Asia/Hong_Kong，HKT）
+建立 Unix 秒：1794763715
+狀態：正式訓練與一次性共同基準評估完成。
+
+研究目的與範圍
+本次建立未來 random initial weights 比較所需的 warm-start 對照。
+本次目的不是最低改善門檻，也不是嚴格重現 Pv25。
+尚未啟動 random-init 臂；未來實驗前不保證 warm-start 較好。
+歷史 Pv25 使用 E12，不能當成本次 E20 的嚴格反事實對照。
+本報告不作初始化效果或歷史版本差異的因果歸因。
+既有預註冊與 pending 文字保留為歷史快照。
+本日期附錄明確取代其「待執行／尚未完成」狀態，不改寫舊結論。
+
+來源與執行身分
+訓練來源 commit：32745bac06ca422d52598d4039ea47e0b3afff63
+此為實驗來源 commit，與完成文件的提交身分分開；本報告不宣稱文件已提交。
+生產程式 source_tree_sha：
+17781668c31504fb0221f7a965aa3486ee9cdbdd36c5a8144dfb15c694d608b6
+NAS 正式 run：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261115-2205-pv32m-warm-start-u1000
+證據根目錄：/mnt/minion/88_minion_rw/projects/qrokkun26/assets/pv32-warm-start
+正式起點：2026-11-15T22:05:20.736517+08:00。
+監督程序完成：2026-11-16T01:24:11.523231+08:00。
+上述時間取自正式啟動／退出 metadata；監督 wall 約 11930.786713 秒。
+
+固定科學合約
+只載入原始 Pv21 u400 的 actor 與 critic BOTH 權重。
+fresh Adam，新 lineage u0；未沿用歷史 optimizer 或歷史更新計數。
+凍結 stochastic CPU Sv24 u980；訓練與評估期間固定 S。
+沿用 Pv31m single-stream、hoisted features、deferred sync PPO 與數值 collector。
+v32 local pool cleanup adapter 僅處理生命週期，未修改歷史 v31 原始碼。
+未啟用 AMP、TF32、compile 或 CUDA Graphs；未更換 teacher、reward 或超參數。
+不使用舊 raw-bit gate 作本次完成條件。
+正式預算 u1000、E20、seed17、cap7200、hidden472、obs84。
+10 個持續 CPU 大核 workers；主行程綁 CPU5，CUDA learner。
+訓練 P stochastic、CPU batch1；每回合使用獨立 RNG offsets。
+P_offset=26000000；S_train_offset=25000000；S_validation_offset=24000000。
+permutation_seed=27000017；評估 P deterministic argmax、S stochastic。
+未來初始化比較須匹配 20 episodes/update、u1000 及完整協定，實際 frames 可不同。
+
+訓練、驗證與選模
+已完成 1000/1000 updates、20000 training episodes、83378713 training frames。
+驗證使用原始 16 seeds：600000..600015。
+u0 與每 10 updates 至 u1000，共 101 個驗證點。
+保存 101 個六位數編號 checkpoints，附 optimizer、RNG 與來源資訊。
+以 INTEGER total_frames 嚴格較大選 best；平手取較早；u0 可入選。
+u0 的 16 seeds frame/death/censor 與歷史完全一致，合計 63965 frames。
+u0：63965 / (16×60) = 66.63020833333333 秒。
+best u120：74709 / (16×60) = 77.821875 秒。
+terminal u1000：65222 / (16×60) = 67.93958333333333 秒。
+此處採整數 frames 直接正規化；mean_elapsed 浮點累加的些微差異屬正常。
+主要結果固定為驗證選出的 u120；u1000 僅為次要 terminal 結果。
+
+一次性共同基準結果
+窗口 800000..800063 曾用於 Pv25，不是全新、未接觸的 heldout。
+original、best、terminal 各完成 64 個唯一 seeds，皆 64 deaths、0 censors。
+original：269559 frames，平均 70.19765625 秒。
+best u120：271435 frames，平均 70.68619791666667 秒。
+terminal u1000：280045 frames，平均 72.92838541666667 秒。
+主要 best−original：+0.4885416666666669 秒。
+95% paired bootstrap CI：[-5.1469921874999995, 6.223723958333333] 秒。
+次要 terminal−original：+2.7307291666666664 秒。
+95% paired bootstrap CI：[-1.6928190104166667, 7.096119791666666] 秒。
+既有配對 bootstrap 為 10000 次、seed17；父層已由保存的逐 seed frames 獨立重算。
+該重算沒有重跑 episodes；本次文件作業也未重跑 bootstrap。
+兩個 CI 均涵蓋 0：尚未證實改善，亦不能證明等效或變化很小。
+此不構成執行失敗；本次完成的是未來初始化比較的基線。
+terminal 的共同基準平均高於 validation-selected best，不據 final 改換主要選模。
+不依 final 調參、重選或重測；三組逐 seed 結果與雜湊均保留。
+僅一個 training seed，加上已使用窗口，限制泛化與推論。
+
+完成、資源與先前驗證證據
+closed 先鎖定 best／terminal 雜湊，train exit0 後才執行 final，final exit0。
+supervisor、status、final-status 均 complete；errors 空，無 owner stop。
+既有退出核對顯示已知 trainer／final／supervisor PIDs 均退出。
+精確 workers／resource tracker 查詢為空，GPU 為空，/dev/shm 為空。
+以上是保存的完成核對證據，本次未連線 GPU 主機進行新查詢。
+訓練 workers 有 10 個唯一 PID，綁 CPU5..9、15..19，每個 tasks 均非零。
+全部 frozen S verified，均未初始化 CUDA。
+訓練與 validation worker tasks 合計 21616 = 20000 + 101×16。
+final workers 已驗證退出，但未保存其 worker stats；不推測其 PID 或統計。
+既有 scoped CPU 測試：32 passed in 2.98s，並非整個專案測試。
+既有當前 cap7200 CUDA smoke：u1/E3/W2/validation2，fresh Adam。
+smoke 確認 original P、P 更新、S 固定、無 FINAL 存取；不列為正式結果。
+部署 inventory 有 272 個檔案，既有 post-formal 核對記錄全部未變。
+NAS 正式產物共 215 個；本次以 hashlib 全數核對 manifest 所列 SHA256，全部吻合。
+
+耗時（既有 raw timers，秒）
+train total_s=11843.68446211399。
+rollout_s=9569.676923219187；pure_rollout_s=9563.015550380485。
+collector_s=9632.92699215455；batch_teacher_gae_s=56.94269080065715。
+ppo_s=1502.6536705497565；validation_s=670.6248503880342。
+checkpoint_s=6.815726825996535；weight_sync_s=5.314159222732997。
+pool_init_s=0.6891242489946308；pool_shutdown_s=0.3040946629771497。
+final 階段僅計入 supervisor wall，不包含在上述 train totals。
+不提供效能 CI，也不據此宣稱新 PPO 的因果加速。
+
+精選 SHA256（完整 215 項請見 formal-file-hashes.json）
+verified-results.json：af978fc7a288bcea81454e9a1e23ed6634105c4e9e9de7c52c5dc0599c608811
+formal-file-hashes.json：8b55da1eb77f5e52e8dc1d9b55f887ec679c8ec976e009e429f03454195758ca
+manifest.json：46ac1d86bbe6ff7df1c88a3891fae62902dbb28cf78cf651cf140ffef5386efb
+closed.json：7d085fa38b5997d59eb966086fa556026dcbca6ff0587f71be9f79ac274a48b4
+final.json：9354200e9a604eecb2ff525a07f0c85fcbd9808843a7a4fc1a916aee813599c7
+final-original.json：e9c9059492ab504581df53cacba9ad0e894932080847de78a199c84f3ce3aabb
+final-best.json：9bebdca3a8e889d4b4602f3bb07bdc741fd6c3a7be83e0d290e5c0d28bec842a
+final-terminal.json：173d56de21a9f4081e847ea768a4281a9527930ac819476374d6b7a23316a879
+checkpoint-000000.pt：32d561fc2e0e60d04120b362046ca262fc2c4e25477735629af4698acf90d4d4
+checkpoint-000120.pt：0c102dd64ca59be3fd57aefe5203150beb3db56d122aaa95667d24d99f5cb45a
+checkpoint-001000.pt：ca4ca332ac170e9cf2299d2906ff4ab992a8d33306a299b9aae192a57188fde1
+original/u0 model-state SHA：250f3c3f1053b18129f992e97cb9ae15139fc2e5fa962b5491db5dddb2eb8f91
+best u120 model-state SHA：2f4aa3ea256db6c62c089a00019f206e0246d9c93a252655591b40d97fa2255c
+terminal u1000 model-state SHA：48ae05aa8a461218a03075864e1bf848b776fce5a9c3b791854cc598739c59f5
+固定 S model-state SHA：3db671ed476886b8e9640beff0e0724a66b1a72263b55be2e988078061e69b63
+
+文件結案
+本次只完成 metadata／雜湊核對與文件追加，未啟動新實驗或重跑評估。
+未來 random-init 比較仍須另行授權；本次沒有 resume、retry、重跑 final 或發布。

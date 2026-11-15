@@ -228,3 +228,6 @@ Pv31m 單流外提特徵與延遲同步 PPO 加速結案（2026-11-15）：新�
 ### Pv32m — warm-start long-run baseline
 
 [Pv32m](qrokkun_ai/v32/README.md) implements the owner-authorized original Pv21 u400 actor/critic weight-only u1000/E20 baseline on the unchanged Pv31m single-stream backend. Best is selected by integer validation frames; final reports primary best and secondary terminal against original on the previously used Pv25 common 64-seed benchmark. It is a baseline for a future separately authorized initialization comparison; no random arm or training launch is included.
+
+
+Pv32m warm-start u1000 結案補充（2026-11-16）：正式 u1000/E20/seed17 完成 20000 episodes、83378713 frames，train/final exit0。主要 validation-selected best u120 對 original 的共同基準差 +0.488542 秒，95% 配對 CI 涵蓋 0，尚未證實改善；terminal u1000 為次要結果。此為未來 random-init 比較的 warm-start 對照，並非最低改善門檻；800000..800063 為曾使用窗口，非新 heldout，尚未啟動 random 臂。見[完成報告](docs/journal/2026-11-16-1794763715-pv32-warm-start-u1000-completion-report.txt)。本日期附錄取代先前 pending／未啟動的執行狀態，舊條目與預註冊保留為歷史快照。
