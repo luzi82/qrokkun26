@@ -1,0 +1,123 @@
+Pv30c／Pv30m u10 完成報告
+建立時間：2026-11-15T18:26:10+08:00（Asia/Hong_Kong）；Unix creation seconds：1794738370。
+結論：三臂完成 10/10，c/m 與獨立 fresh m1/m2 均 WEIGHTPASS；同環境重現性目標達成。
+未證實新版 PPO 加速；多核心 rollout 效益保留。GPU kernel 重疊不等於速度提升。
+
+一、研究身分與固定設計
+實際執行 commit：5c19fcb48040f83717f6820b4dfc8eb7f35ce091。
+生產程式碼摘要（直接取自正式 manifest semantic.source_tree_sha）：
+27a4cbe6b74b4004d9c0c7bf2056bcf118bec041c6a19e6d999dc00ba6b0e4e1
+正式 run：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261115-1759-pv30-cm-u10
+下文 R 表示上述 run；A 表示 /mnt/minion/88_minion_rw/projects/qrokkun26/assets/pv30-cm。
+執行封存根：/home/ovm-hms-bot/projects/qrokkun26/pv30_execution/5c19fcb48040f83717f6820b4dfc8eb7f35ce091
+部署封存共 245 檔，既有執行後核對記錄確認全部未變；正式 NAS 產物共 55 檔，包含 m2。
+初始化為原 Pv21 u400 actor/critic、fresh Adam；對手為凍結 stochastic CPU Sv24 best u980。
+hidden=472、observation=84；seed17、u10、E20（每 update 20 episodes）、cap7200。
+三臂各 200 training episodes、805,265 training frames。
+固定 validation 為 16 seeds（600000..600015），僅 u0/u10；沒有其他驗證點或 heldout。
+checkpoint 為 u0..u10，六位數 checkpoint-000000.pt 至 checkpoint-000010.pt。
+c 為 serial CPU rollout；m1（Pv30m）與 m2（Pv30m-replicate）各用 10 個 pinned 大核 workers。
+兩組 m 均為長駐 SharedMemory workers、動態 queue、按 episode index 合併。
+全部三臂使用相同新版 Pv30 PPO：兩條 CUDA streams＋兩個 host dispatch workers。
+因此 c/m 不是 serial PPO 與 parallel PPO 的控制比較。
+PPO loss、超參數與每條 optimizer 的更新順序未改；沒有舊 Pv29 權重驗收門檻。
+m2 是事前規劃的獨立 fresh-init 複現，使用新輸出目錄，不是失敗觸發重跑。
+
+二、執行時間與閉合狀態（全部 HKT／UTC+08:00）
+c→m 配對啟動：2026-11-15 17:59:45.927386；結束：18:18:11.918712。
+m2 啟動：2026-11-15 18:18:12.476136；結束：18:21:07.959930。
+整體結束：2026-11-15 18:21:07.963924；來源為 launch／exit JSON 的 Unix 時間。
+臂                completed   status     exit   最後 status 時間（2026-11-15 HKT）
+Pv30c             10/10       complete   0      18:15:10.806677
+Pv30m             10/10       complete   0      18:18:09.708197
+Pv30m-replicate   10/10       complete   0      18:21:07.438752
+R/pair-status.json：complete_equal；c、m、compare exitcodes 均為 0。
+A/formal-pair-exit.json、replicate-exit.json、formal-exit.json 均記錄成功退出。
+
+三、數值與 episode 複現結果
+PRIMARY 為 u10 actor＋critic 全部具名張量 raw bits；其他 updates 是輔助結果。
+既有獨立解析核對涵蓋 u0..u10 每次全部 12 個具名張量：c/m 及 m1/m2 均零差異。
+u0 已核對原始 P state 與空 Adam state；不是接續舊 optimizer 的訓練。
+三臂逐 episode frames、death／censored 與 summary 一致；u0/u10 validation summaries 亦一致。
+validation          各臂 mean_elapsed（秒）     各臂 total_frames
+u0                  66.63020833333084          63,965
+u10                 75.26041666666367          72,250
+以上固定驗證值是重現性摘要，不是 heldout 強度改善證據。
+u10 三臂共享 model_state_sha：
+875a2d40bf89086438c784d66b6629f4593a76287d79b74e708990eb4fe5db0a
+同環境、相同版本的這次結果，不保證跨硬體或跨版本重現。
+未保存 full environment event trace；不宣稱完整事件、RNG 或 Adam state 全程相等。
+
+四、實際耗時：未證實 PPO 效能利益
+項目（秒，FPS 除外）        c                m1               c/m1
+rollout_s                    747.827830059    91.760753111     8.149756892x
+frames/rollout_s（FPS）       1076.80534       8775.70173       —
+collector_s                  748.605329249    93.586090323     7.999108913x
+ppo_s                         73.915032786    69.020852788     1.070908715x
+validation_s                  98.931920931    13.283045779     7.447984640x
+total_s                      923.360467623   177.763833521     5.194310054x
+m2 rollout_s=90.804366221、collector_s=92.635989538、ppo_s=66.133375456。
+m2 validation_s=13.334108832、total_s=174.023276271。
+collector 包括 pool 啟動、權重同步、rollout、batch／teacher／GAE 與 pool 關閉。
+total 包括 validation 與 checkpoint；各 timer 並非可任意相加的互斥時間分解。
+pure_rollout_s 為 worker busy／critical lane 指標，不是可加總的 wall time。
+兩臂共享相同平行 PPO；上述 c/m wall ratio 不能歸因於平行 PPO 的收益。
+歷史 Pv29m：同為 805,265 training frames，ppo_s=43.398444185、total_s=151.934548335。
+相較該歷史值，現 m1 PPO 慢 59.03992432%，m2 慢 52.38651223%。
+這是描述性歷史比較，並非同期、固定工作負載隔離的 PPO 計時控制；不推論變慢的因果。
+即使如此，資料清楚不支持「新版 PPO 已加速」的結論。
+Pv29 與 Pv30 u10 model state SHA 恰好一致（見 A/historical-timing-comparison.json），不是驗收條件。
+單一 seed 配對加一次預先規劃複現；沒有效能 CI 或效能泛化結論。
+
+五、有限 GPU 平行性證據
+目前 commit 的 Nsight 有界探針：1024 真實 CPU episode frames、hidden472、minibatch512、4 PPO epochs。
+記錄 5625 個實際 GPU kernels；映射 lane0 有 840 個（stream21），lane1 有 456 個（stream25）。
+以 GPU interval 計算，跨 lane kernel overlap pairs=76；不是 CPU launch 或 NVTX range 重疊。
+lane 標籤依到達順序命名，不保證 lane0 就是 actor。
+這證明該探針觀察到 actor/critic 跨分支 kernel 重疊，不證明持續重疊或速度提升。
+正式訓練未插入 profiler；manifest 的 kernel_overlap_measured=false 與探針結果不矛盾。
+早期 eb82f36 雙 streams、單 host dispatch 探針未觀察到重疊；最終雙 host dispatch 已觀察到。
+torch.profiler 嘗試遇 CUPTI invalid device、沒有 events，不能用作 GPU 平行性證據。
+有效 Nsight 私有暫存根：/home/ovm-hms-bot/projects/qrokkun26/pv30_profile_tmp/probe-5c19fcb
+Nsight JSON 證據：A/gpu-probe-final-nsys/ppo.json；統計：A/kernel-overlap-final-verified.json。
+本報告僅引用統計與路徑，不附原始 profiler JSON 或環境內容。
+
+六、實際 runtime 與輸入身分（正式 manifest）
+NVIDIA GB10；Python 3.12.3；torch 2.11.0+cu128；NumPy 2.5.3；CUDA 12.8；cuDNN 91900。
+平台 Linux-7.0.0-1025-nvidia-aarch64-with-glibc2.39；rollout cpu／threads1／batch1。
+learner deterministic=true、cudnn_deterministic=true、cudnn_benchmark=false、matmul_precision=highest。
+cuda_matmul_allow_tf32=false、cudnn_allow_tf32=false；CUBLAS_WORKSPACE_CONFIG=:4096:8。
+OMP_NUM_THREADS=1、MKL_NUM_THREADS=1；cuda_streams_enabled=true、host_dispatch_workers=2。
+原 P input file SHA256：b8466bb13972de62003e16b0b570567a016d0dab4dd5667e66a3666974cfd5f8
+原 S input file SHA256：554290b6c17a280dbfb8bb4076583a1230b278bf73a24a701f66fca76e5bfcc0
+原 P state SHA：250f3c3f1053b18129f992e97cb9ae15139fc2e5fa962b5491db5dddb2eb8f91
+凍結 S state SHA：3db671ed476886b8e9640beff0e0724a66b1a72263b55be2e988078061e69b63
+
+七、worker、清理與既有驗證範圍
+m1、m2 各 10 個不同 PID，共 20 個 worker instances；每組 232 tasks＝200 train＋32 validation。
+全部 worker CPU time 非零，綁定 CPUs 5..9、15..19；frozen_S_verified=true、cuda_initialized=false。
+既有執行後證據確認配對／複現 parents 與 workers 均已退出，GPU 空閒、/dev/shm 空。
+來源封存 245 檔執行後未變；本次文件整理另以 hashlib 唯讀回算 NAS 全部 55 產物，與完整清單一致。
+最近本地 CPU 記錄為 24 passed、1 skipped、6.70s（A/owner-final-confirmation/cpu-tests.log）。
+實際 CUDA callable 單測 1 passed、2.39s（A/cuda-final-unit.log）；skip 不算通過。
+目前 commit 的 cap7200 非正式 smoke：u0/u1 WEIGHTPASS、fresh Adam／原 P／固定 S 已核對。
+以上是既有指定範圍結果，不宣稱整個專案測試全部通過；本次文件整理未重跑任何測試。
+
+八、選錄檔案摘要與完整證據索引（SHA256）
+R/comparison.json：d80e65017f2db0554d584d287b2b7b9253c13838d552ed1c1912c54b430ba9b1
+R/Pv30c/checkpoint-000010.pt：8e450dd90c235d9858d7c2a8e944d0528ecf2daee18c67abd38f011317ecf5ae
+R/Pv30m/checkpoint-000010.pt：da47fdb23bf0eab7bac7ad09e8a9aab49cf451f9798ded2cbade11ddd88055d9
+R/Pv30m-replicate/checkpoint-000010.pt：00a66a93230d379c143ae49ef84576806261c93f453737684164c4f47aec5760
+A/formal-file-hashes.json：350a0a8853ca78619ccece3a1e857d1bf1d7e46fecfef19fa2f6f51522e80e24
+A/verified-results.json：cdfb265cd3ad3f1e7c3759d1ff9af6930f5819bdd96e755c9077b8c431fd9cad
+完整 55 檔清單：A/formal-file-hashes.json；不在本報告逐檔展開。
+checkpoint 檔案摘要可不同；共享 model state SHA 與具名張量 raw bits 才是權重比較對象。
+執行與退出來源：A/formal-launch.json、formal-pair-exit.json、formal-exit.json、replicate-launch.json、replicate-exit.json。
+部署來源：A/deployment.json；數值／timing／worker 彙整：A/verified-results.json；原始資料在 R 各臂 manifest/status/closed/updates/evaluation。
+
+九、日期快照取代關係與結案界線
+README、版本目錄及 v30 README 的早期待執行／19 passed 文字保留為原日期快照。
+本報告取代那些文字所述的待 GPU／待正式配對狀態；不改寫歷史實驗或舊版結論。
+本次僅新增本報告、追加 README 與 AGENT_VERSIONS 結案連結；無程式碼、測試或歷史 journal 變更。
+未啟動新實驗、失敗自動重跑、resume、heldout、promotion 或下一版本；未提交或推送。
+結案範圍：同環境重現性達成、多核心收集效益保留、PPO 效能利益未證實；沒有已證實的效能根因推論。

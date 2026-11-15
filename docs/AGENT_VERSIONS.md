@@ -128,3 +128,6 @@ Pv29c／Pv29m 結案補充（2026-11-15）：正式 u10/E20 兩臂完成 10/10 u
 ## 2026-11-15 Pv30 actor／critic CUDA streams 實作
 
 新增 [v30 說明](../qrokkun_ai/v30/README.md)：c/m 均使用同一新版 PPO，正式預算 u10/E20/seed17，僅驗證同版本重現性，不要求與 Pv29 位元一致。兩條非預設 CUDA streams、分區梯度 guards、每 minibatch join；CPU 明確 serial。父層預定 c→m 完整配對及額外獨立 fresh-init m u10，新 output 驗證 m/m。CPU 最終 19 passed、1 CUDA skipped；未執行 GPU、正式配對或效能量測，不能宣稱加速或 GPU 重現性。細節與命令見日期 journal。
+
+
+Pv30c／Pv30m u10 結案補充（2026-11-15）：三臂完成 10/10、exit 0；c/m 與事前規劃的獨立 fresh m1/m2 均 **WEIGHTPASS**，u0..u10 每次 12 個具名張量 raw bits 一致，各 805,265 training frames。同環境重現性達成；多核心 rollout 加速 **8.1498x**、全程 **5.1943x**，但三臂共享同一平行 PPO，**未證實 PPO 加速**；相對歷史 Pv29m，m1/m2 PPO 分別慢 59.04%／52.39%（描述性比較，無因果隔離）。有限 Nsight 探針觀察到 76 對跨分支 kernel 重疊，不能據此宣稱效能提升。見[完成報告](journal/2026-11-15-1794738370-pv30-cm-u10-completion-report.txt)。上述待執行文字保留為日期快照，本次結案補充取代其 pending 執行狀態；無 full trace／heldout／promotion 或跨環境保證。
