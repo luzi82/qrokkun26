@@ -1,0 +1,70 @@
+Pv31m（含條件式 Pv31c 備援）事前註冊合約（planned / not started）
+日期：2026-11-15 Asia/Hong_Kong；建立 Unix seconds：1794744069。
+狀態：planned / not started（撰寫當下 GB10 無執行中訓練程序，尚未部署或啟動 Pv31 smoke／正式訓練）。
+
+1. 演進背景與取代關係（Superseded Decisions）
+- Pv28c／Pv28m（commits 062cc9c, 74b87b4）：確立獨立 CPU episode workers（threads=1, batch=1，長駐 spawn pool + SharedMemory 綁定 10 顆 3.9 GHz Cortex-X925 大核）搭配集中式確定性 CUDA 老師與 PPO（u5, u100, u1000 全數 WEIGHTPASS）。
+- Pv29c／Pv29m（commits 52d18dc, 442fa21）：確立 u10, E20, seed=17, cap=7200, checkpoint_cadence=1, validation_cadence=10 正式基準（805,265 frames；Pv29m rollout_s=91.48s [8.02x]、單流序列 ppo_s=43.40s、total_s=151.93s、WEIGHTPASS，終點 u10 model state_dict_sha256 = 875a2d40bf89086438c784d66b6629f4593a76287d79b74e708990eb4fe5db0a）。
+- Pv30c／Pv30m（commits 5c19fcb, 16f4364 — 本次 Pv31 取代其雙 stream／雙執行緒 PPO 派發機制，保留歷史產物與負面效能結論不變）：嘗試以雙非預設 CUDA streams 與 ThreadPoolExecutor(max_workers=2) 平行化 Actor／Critic PPO，雖達成 WEIGHTPASS（0-ULP 還原 u10 model state_dict_sha256 = 875a2d40bf89086438c784d66b6629f4593a76287d79b74e708990eb4fe5db0a），但 Pv30m ppo_s 退化至 69.02s（複現臂 m2=66.13s，較 Pv29m 慢 +52%～+59%）。Nsight Systems 奈秒級追蹤證實：GPU 僅 10.5% 時間忙碌（89.5% 等 CPU）、58.8% GPU kernels 來自 4 個 epochs 重複計算無參數 net.features()、每 minibatch ~31.6 次同步阻塞、雙執行緒 GIL + 3 段式 barrier 倍增發射延遲，且未綁核主行程漂移至 2.8 GHz A725 小核。
+- Pv31 決策（Owner 授權第一階段）：移除雙 CUDA streams 與 ThreadPoolExecutor，回到單流（cuda_hoisted_single_stream），在 4 個 PPO epochs 前一次外提無參數 all_feat = net.features(...) 與 all_t_probs = F.softmax(exp_logits, dim=-1)，移除 minibatch 迴圈內所有 .item() 與逐參數同步（改為裝置端 0-dim 張量累加與布林非有限值旗標，於 4 epochs 後單次同步檢查），並於 EpisodePool 建池後將主行程固定綁定於單顆最高頻大核（GB10 CPU 5, 3.9 GHz Cortex-X925）。
+
+2. 凍結程式碼與實驗身分（Frozen Code & Verification）
+- 凍結實作程式碼 Commit（frozen code parent）：ced9b50ee39f1f210d933834a9f2787542410991
+- v31 生產程式碼指紋（source_tree_sha）：e612f2bfd9aeff7eb01e421e4091c7c8ebb10ef82bcdfd9ba3994f6e16dfbe3e
+- 設計規格書：docs/designs/pv31_hoisted_single_stream_ppo.md（通過 EGM 3 路 gpt-6.1-sol 審查 deleg_3534638e 並修訂全部 Majors）
+- 實作審查與測試：
+  - v31 單元測試：23 passed, 1 skipped（CUDA test 留待 GB10），與 v30 合併執行 47 passed, 2 skipped in 12.86s；全專案回歸（排除無 __init__.py 之撞名 v29/tests 單獨核驗）326 passed, 30 skipped。
+  - 獨立唯讀 Code Review（codex exec --model gpt-6.1-sol）：修補 _recv_one 同時收到停止與 worker error 時保留完整 worker traceback 後，複審為 PASS（無剩餘 Blocker／Major）。
+- 目標執行主機：GB10B（ovm-hms-bot@192.168.0.41），Python 解譯器：/home/ovm-hms-bot/projects/qrokkun26/venv/bin/python
+- 部署快照路徑：/home/ovm-hms-bot/projects/qrokkun26/pv31_execution/${EXECUTION_HEAD}（由乾淨本機 commit 透過 git archive 展開，逐檔驗證 SHA-256 與 qrokkun_ai/v25/reference.json，執行時以 --source-commit 傳入 40-hex EXECUTION_HEAD，不觸碰既有遠端 checkout 或歷史目錄）。
+
+3. 鎖定輸入與封存 Pv30c 對照產物（Locked Inputs & Reference Artifacts）
+- 初始 Player 檢查點（GB10 本地）：/home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/pv21-u400.pt
+  - whole-file SHA-256：b8466bb13972de62003e16b0b570567a016d0dab4dd5667e66a3666974cfd5f8
+  - initial player state_dict_sha256：501ac044d6da715759ac022e800a70f62d5be5bd5c1026576c6d0e3ca5920237
+  - optimizer 初始化：weight-only warm start（fresh_adam = true，建立全新 Actor／Critic Adam）
+- 凍結對手 Spawner 檢查點（GB10 本地，requires_grad=False, eval()）：/home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/sv24-u980.pt
+  - whole-file SHA-256：97942466a3e3a334e2a5c32d3b14d28b51d4d8dc7604200690546b78dc2c1343
+  - spawner state_dict_sha256：f891cd82cf3d9d9a4a124200612d3171d5f4a5343728f92e64154f97bb32df68
+- 封存非正式 CUDA Smoke 對照組（比較前先複製至本地 scratch 並核驗 SHA-256）：
+  - 來源：/mnt/minion/88_minion_ro/projects/qrokkun26/runs/20261115-1756-pv30-final-nonformal-cuda-smoke/Pv30c
+  - manifest.json SHA-256：4e99f685921082e0a6a341d40d17f3717a9faef1fce084f8c4f72c8f4f4988eb（updates=1, episodes=3, cap=7200, validation=2, seed=17, nonformal=true）
+  - checkpoint-000000.pt SHA-256：2d6742220f543e91f72e03f62bafa4d3e69497908155c0f3790b8cb688ceb608
+  - checkpoint-000001.pt SHA-256：0f7083786d48057fb43044ab808b35ddb38298ec2c8a7c065bcb556e8c014f7c
+- 封存正式 u10 對照組（比較前先複製至本地 scratch 並核驗 SHA-256）：
+  - 來源：/mnt/minion/88_minion_ro/projects/qrokkun26/runs/20261115-1759-pv30-cm-u10/Pv30c
+  - manifest.json SHA-256：c9c6b2d782a664e4aef1b396fcf1de14227a95521f5624ffb91fda064aa2cee3
+  - status.json SHA-256：03aaf6f4cf3b418bc98dbce499043eb062faa2d21ae59df55c8c1102a5b6fcce
+  - closed.json SHA-256：94a50a4d910b36b3384cc33f2615bf457e947d312bc7b2cd97bab634b61ea3e1
+  - checkpoint-000000.pt SHA-256：fe79504b4585d532057a9c2f6e7e19df81b61d06bf9bb85aabe35719453aff92
+  - checkpoint-000010.pt SHA-256：8e450dd90c235d9858d7c2a8e944d0528ecf2daee18c67abd38f011317ecf5ae（model state_dict_sha256：875a2d40bf89086438c784d66b6629f4593a76287d79b74e708990eb4fe5db0a）
+
+4. 固定科學參數與硬體配置（Fixed Scientific & Execution Knobs）
+- 正式訓練預算：--updates 10 --episodes 20 --cap 7200 --seed 17 --hidden 472 --device cuda
+- 排程與種子視窗：
+  - 訓練 rollout 種子（u=1..10, i=0..19）：seed_ep = 17 * 1,000,000 + u * 1,000 + i（即 17,001,000..17,010,019，共 200 局）
+  - 驗證種子：3000..3015（--validation 16，Player greedy argmax vs stochastic S，validation_cadence=10 -> u0, u10）
+  - RNG 偏移：P_offset=26,000,000、S_train_offset=25,000,000、S_validation_offset=24,000,000、PPO permutation seed = 27,000,000 + 17 = 27,000,017
+  - 檢查點排程：checkpoint_cadence=1 -> checkpoint-000000.pt .. checkpoint-000010.pt（全部 11 個檢查點線性逐位元比對，主判決僅看終點 u10 之 12 個具名 Actor+Critic 張量 raw bytes）
+- 平行與綁核設定（Pv31m）：--workers 10 --pin-cores on（EpisodePool 10 workers 綁定 CPU [5, 6, 7, 8, 9, 15, 16, 17, 18, 19]；主行程建池後綁定 learner_pinned_cpu = 5）
+- 禁止變更項目：不修改物理、獎勵、觀測特徵定義、PPO/DAgger 權重與超參數、學習率、clip 閾值、minibatch=512、epochs=4；不啟用 heldout 64-seed 評估或自動模型升格（experimental / no-promotion）。
+
+5. 可證偽假說、閘門與條件式 Pv31c 分支（Hypotheses & Gates）
+- 科學重現性假說（H_repro）：Pv31m 在確定性 CUDA 下執行完 u10（805,265 frames）後，u0..u10 全部 11 個檢查點之 12 個具名 Actor+Critic 權重張量與封存之 Pv30c 達到 0-ULP 逐位元完全相等（qrokkun_ai.v31.compare --reference-dir 回傳 exit 0, result="WEIGHTPASS"）。
+- 工程加速假說（H_speed，與權重判決獨立報告）：Pv31m 之 ppo_s 將較 Pv30m（69.02s）與 Pv29m（43.40s）顯著下降（GB10 單輪原型預估 u10 ppo_s ≈ 12s–16s），同時維持 rollout_s ≈ 91s 水準。
+- 執行順序與分支規則：
+  1) 階段 A（GB10 CUDA 單元測試與非正式全 cap Smoke）：
+     於 GB10 本地 scratch 執行 qrokkun_ai/v31/tests（含 CUDA 測試），接著執行非正式 smoke：
+     `PYTHONPATH=. /home/ovm-hms-bot/projects/qrokkun26/venv/bin/python -m qrokkun_ai.v31.run --arm Pv31m --out-dir "${SMOKE_DIR}/Pv31m" --source-commit "${EXECUTION_HEAD}" --player /home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/pv21-u400.pt --spawner /home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/sv24-u980.pt --nonformal --updates 1 --episodes 3 --cap 7200 --validation 2 --seed 17 --workers 2 --pin-cores on --device cuda`
+     並與本地雜湊驗證之 `20261115-1756-pv30-final-nonformal-cuda-smoke/Pv30c` 執行 `--reference-dir` 比對：
+     - 若 exit 3（設定／invariant 不符、非有限值或執行錯誤）：立即中止並排查，絕不當作 WEIGHTFAIL 進入備援。
+     - 若 exit 0（WEIGHTPASS）：確認 Pv31m 在 GB10 完整訓練路徑可 0-ULP 還原 Pv30c，進入階段 B 單獨啟動正式 Pv31m。
+     - 若 exit 2（WEIGHTFAIL，科學 invariants 完全一致但 u1 權重分歧）：依 Owner 指示「如果結果預計無法還原 Pv30c ,就開 Pv31c」，進入備援路徑執行完整同版本序列配對 `qrokkun_ai.v31.supervise`（Pv31c -> Pv31m -> compare）。
+  2) 階段 B（正式 Pv31m u10 執行與跨版本驗收）：
+     於 GB10 本地 scratch 先寫入完整產物再雜湊驗證搬移至 `/mnt/minion/88_minion_rw/projects/qrokkun26/runs/${STAMP}-pv31-m-u10/`（或直接輸出後逐檔核驗）：
+     `PYTHONPATH=. /home/ovm-hms-bot/projects/qrokkun26/venv/bin/python -m qrokkun_ai.v31.run --arm Pv31m --out-dir "${LOCAL_RUN_ROOT}/Pv31m" --source-commit "${EXECUTION_HEAD}" --player /home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/pv21-u400.pt --spawner /home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/sv24-u980.pt --updates 10 --episodes 20 --cap 7200 --validation 16 --seed 17 --workers 10 --pin-cores on --device cuda`
+     執行完成後：
+     `PYTHONPATH=. /home/ovm-hms-bot/projects/qrokkun26/venv/bin/python -m qrokkun_ai.v31.compare "${LOCAL_RUN_ROOT}" --reference-dir "${LOCAL_PV30C_REF}" --candidate-dir "${LOCAL_RUN_ROOT}/Pv31m"`
+     - 若 exit 0（WEIGHTPASS）：無須重跑 Pv31c，將完整實驗包與 SHA256SUMS 同步至 `/mnt/minion/88_minion_rw/projects/qrokkun26/runs/${STAMP}-pv31-m-u10/` 並驗證一致，撰寫結案報告與更新 `docs/AGENT_VERSIONS.md`／`README.md`。
+     - 若 exit 2（WEIGHTFAIL）：保留該跨版本比對紀錄，於同一執行目錄補跑同版本 `Pv31c`（`--arm Pv31c`）並執行同版本配對 `compare` 驗證 `Pv31c == Pv31m`。
+     - 若 exit 3（執行／契約錯誤）：立即中止並如實回報，不宣稱完成。
