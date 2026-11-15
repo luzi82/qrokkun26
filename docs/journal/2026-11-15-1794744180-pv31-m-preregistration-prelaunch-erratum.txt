@@ -1,0 +1,24 @@
+Pv31m 事前註冊合約啟動前勘誤補正（planned / not started — prelaunch erratum）
+日期：2026-11-15 Asia/Hong_Kong；建立 Unix seconds：1794744180。
+補正對象：docs/journal/2026-11-15-1794744069-pv31-m-preregistration-contract.txt（原檔保留不覆寫；撰寫當下尚未啟動任何 Pv31 smoke 或正式訓練）。
+
+於 GB10 啟動前雜湊預檢（preflight）比對 qrokkun_ai/v31/run.py 實際程式碼與封存之 20261115-1759-pv30-cm-u10/Pv30c/manifest.json、20261115-1756-pv30-final-nonformal-cuda-smoke/Pv30c/manifest.json 後，補正合約文字中四項常數／旗標名稱使與實作程式碼及 Pv30c manifest 完全一致（v31 生產程式碼本身無任何變更，source_tree_sha 維持 e612f2bfd9aeff7eb01e421e4091c7c8ebb10ef82bcdfd9ba3994f6e16dfbe3e，凍結實作 commit 維持 ced9b50ee39f1f210d933834a9f2787542410991）：
+
+1. 鎖定輸入雜湊（依實測 sha256sum 與 Pv30c/manifest.json）：
+   - /home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/pv21-u400.pt：
+     - whole-file SHA-256：b8466bb13972de62003e16b0b570567a016d0dab4dd5667e66a3666974cfd5f8
+     - initial_player_state_sha：250f3c3f1053b18129f992e97cb9ae15139fc2e5fa962b5491db5dddb2eb8f91
+   - /home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/sv24-u980.pt：
+     - whole-file SHA-256：554290b6c17a280dbfb8bb4076583a1230b278bf73a24a701f66fca76e5bfcc0
+     - spawner_state_sha：3db671ed476886b8e9640beff0e0724a66b1a72263b55be2e988078061e69b63
+
+2. 種子視窗（依 qrokkun_ai/v31/run.py:280, 442 與 Pv30c/manifest.json）：
+   - 訓練 rollout 種子：range(100_000 + (u - 1) * episodes, 100_000 + u * episodes)（正式 u=1..10, E=20 為 100000..100199；smoke u=1, E=3 為 100000..100002）。
+   - 驗證種子：VALIDATION[:validation] = 600000..600015（正式 validation=16；smoke validation=2 為 600000..600001）。
+
+3. CLI 檢查點參數名稱（依 qrokkun_ai/v31/run.py:80–81）：
+   - 參數名為 `--player-checkpoint` 與 `--spawner-checkpoint`（預設即指向上述兩份 GB10 本地鎖定輸入）。
+   - Smoke 精確命令模板：
+     `PYTHONPATH=. /home/ovm-hms-bot/projects/qrokkun26/venv/bin/python -m qrokkun_ai.v31.run --arm Pv31m --out-dir "${SMOKE_DIR}/Pv31m" --source-commit "${EXECUTION_HEAD}" --player-checkpoint /home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/pv21-u400.pt --spawner-checkpoint /home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/sv24-u980.pt --nonformal --updates 1 --episodes 3 --cap 7200 --validation 2 --seed 17 --workers 2 --pin-cores on --device cuda`
+   - 正式 Pv31m 精確命令模板：
+     `PYTHONPATH=. /home/ovm-hms-bot/projects/qrokkun26/venv/bin/python -m qrokkun_ai.v31.run --arm Pv31m --out-dir "${LOCAL_RUN_ROOT}/Pv31m" --source-commit "${EXECUTION_HEAD}" --player-checkpoint /home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/pv21-u400.pt --spawner-checkpoint /home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/sv24-u980.pt --updates 10 --episodes 20 --cap 7200 --validation 16 --seed 17 --workers 10 --pin-cores on --device cuda`
