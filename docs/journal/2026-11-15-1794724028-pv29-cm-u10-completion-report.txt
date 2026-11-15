@@ -1,0 +1,110 @@
+Pv29c / Pv29m u10 E20 completion report
+Created: 2026-11-15T14:27:08+08:00 (Asia/Hong_Kong); creation Unix seconds: 1794724028
+
+Outcome and scope
+Formal paired experiment: both arms completed 10/10 updates; pair complete_equal.
+Exit codes: Pv29c=0, Pv29m=0, comparator=0; formal launcher returncode=0.
+PRIMARY u10: WEIGHTPASS; all 12 named actor/critic tensors have identical raw bits.
+Independent saved-checkpoint checks also found all 12 tensors equal at every u0..u10.
+Weights establish the specified verdict, not full event, RNG, or Adam-state equality.
+Each arm used 200 training episodes and 805,265 training frames; synthetic=false.
+All update episode summaries match, including per-episode frames, death and censor flags.
+Validation episode summaries also match at both scheduled boundaries.
+
+Protocol and identity
+Preregistered contract: ../../qrokkun_ai/v29/README.md
+Historical preregistration: 2026-11-15-1794721797-pv29-preregister.txt
+This dated closure supersedes pending execution status only; historical snapshots remain.
+Inputs: original Pv21 u400 actor/critic with fresh empty Adam, frozen Sv24 best u980.
+This was a fresh warm start, not a Pv28 resume; S remained stochastic on CPU.
+P training stochastic; P validation deterministic argmax; hidden=472, observation=84.
+Budget: updates=10, episodes/update=20, seed=17, cap=7200, validation=16.
+Checkpoint cadence=1: u0..u10; validation cadence=10: ONLY u0 and u10.
+Fixed validation seeds: 600000..600015; checkpoint-only updates did not validate.
+CPU rollout: batch=1, threads=1; central deterministic CUDA teacher and PPO.
+Pv29c serial, no pool; Pv29m persistent spawn SharedMemory pool, 10 pinned workers.
+Learner algorithm is identical across arms; PPO was not parallelized.
+Player input file SHA256: b8466bb13972de62003e16b0b570567a016d0dab4dd5667e66a3666974cfd5f8
+Player initial model state SHA: 250f3c3f1053b18129f992e97cb9ae15139fc2e5fa962b5491db5dddb2eb8f91
+Spawner input file SHA256: 554290b6c17a280dbfb8bb4076583a1230b278bf73a24a701f66fca76e5bfcc0
+Frozen spawner state SHA: 3db671ed476886b8e9640beff0e0724a66b1a72263b55be2e988078061e69b63
+Shared final u10 model state SHA256: 875a2d40bf89086438c784d66b6629f4593a76287d79b74e708990eb4fe5db0a
+Checkpoint container file digests differ; they are distinct from the common model digest.
+P/S-train/S-validation seed offsets: 26000000 / 25000000 / 24000000.
+Permutation seed=27000017; full hyperparameters are preserved in both manifests.
+
+Formal execution and runtime (recorded manifests, not the documentation host)
+NAS run: /mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261115-1406-pv29-cm-u10
+Formal start: 2026-11-15T14:06:07.025238+08:00; Unix 1794722767.0252383
+Formal end:   2026-11-15T14:23:27.082192+08:00; Unix 1794723807.082192
+Launcher interval includes sequential arms and comparison; it is not either arm total_s.
+Source implementation commit: 52d18dc9586393baad7dea8d361f06b8a51790a4
+Production source_tree_sha: c53c5aa13bd4efbc2b67ac5de00d1b588c59eed6dbf0ae4336302b36e6446122
+Fingerprint covers numerical/runtime production Python and dependencies; excludes tests/docs/cache.
+Immutable archive: 233 files unchanged after run, including v25/reference.json readback.
+v25/reference.json SHA256: af7638d6606cb4e9041f9746d73ec075c54d21ada0e8357f6ee6cb2fd083ae59
+38 actual NAS artifact files were verified; full inventory is linked below.
+Runtime: Python 3.12.3; PyTorch 2.11.0+cu128; NumPy 2.5.3.
+Platform: Linux-7.0.0-1025-nvidia-aarch64-with-glibc2.39; GPU: NVIDIA GB10.
+CUDA 12.8; cuDNN 91900; learner threads=1.
+Deterministic algorithms=true; cudnn_deterministic=true; cudnn_benchmark=false.
+matmul_precision=highest; CUDA matmul TF32=false; cuDNN TF32=false.
+CUBLAS_WORKSPACE_CONFIG=:4096:8; OMP_NUM_THREADS=1; MKL_NUM_THREADS=1.
+
+Timing: seconds, c / m; ratio = c duration divided by m duration
+Complete collect wall rollout_s: 733.545469087 / 91.479065953; 8.018724956x.
+Training FPS (805265 / rollout_s): 1097.77108 / 8802.72433.
+Worker busy pure_rollout_s: 733.493032257 / 91.394461211; 8.025574226x.
+pure_rollout_s sums episode computation per worker then takes the maximum lane (serial sums).
+It excludes IPC/merge, is not collection wall latency, and is not additive to wall fields.
+Collector_s: 734.299799144 / 93.363414724; 7.864962966x.
+Collector = pool init + weight sync + collect wall + batch/teacher/GAE + shutdown.
+Pool init includes spawn/ready; weight sync includes CPU copy/ACK; collect includes dispatch/wait/copy.
+PPO_s: 48.297096018 / 43.398444185; 1.112876208x (same learner algorithm).
+Validation_s: 98.858018240 / 13.353489800; 7.403159752x.
+Checkpoint_s: 0.886901418 / 0.788655138.
+Total_s: 883.399822793 / 151.934548335; 5.814344614x.
+Saved: 731.465274458 seconds = 12.191087908 minutes.
+Total includes startup, I/O and cleanup; validation is separate from training frame counts.
+Final timing authority is closed.json; checkpoint snapshots omit their own write duration.
+
+Actual persistent worker workloads: PID / pinned CPU / tasks / CPU seconds
+2138691 / 5 / 23 / 88.531996240
+2138692 / 6 / 23 / 77.300631984
+2138693 / 7 / 22 / 84.538691728
+2138694 / 8 / 22 / 79.268535040
+2138695 / 9 / 24 / 81.972118080
+2138696 / 15 / 24 / 88.268699008
+2138697 / 16 / 23 / 85.508273232
+2138698 / 17 / 24 / 75.386338864
+2138699 / 18 / 25 / 84.573441136
+2138700 / 19 / 22 / 81.642208640
+10 unique PIDs; pinned CPUs 5..9 and 15..19; 232 tasks = 200 train + 32 validation.
+All workers recorded nonzero CPU time, frozen_S_verified=true, cuda_initialized=false.
+Persisted verification confirms all PIDs, GPU allocations and /dev/shm resources released.
+
+Fixed validation (descriptive only; no heldout or model selection)
+u0 mean survival: 66.630208333s; frames: 63965 per arm.
+u10 mean survival: 75.260416667s; frames: 72250 per arm.
+
+Selected artifact SHA256 (computed from actual files with hashlib)
+comparison.json: f6cd0023a7968e05d41bc98295fea90602af38f83063da99624da71cf1bc2e69
+Pv29c/manifest.json: edfa65e6b9f70711773a49dc16a829df2cfbc8670f24df5c7a9d7ccd9a2776c2
+Pv29m/manifest.json: 88ec2b9f6a3def31d723ae0ef3b8ff8a11e345c893fb857744b17c1a13544faf
+Pv29c/checkpoint-000010.pt: dd488f5368175d235991ef261575e8dc4449a093c7f0ba3352a1b9e83f328a7a
+Pv29m/checkpoint-000010.pt: 72ec9489190b89a1c7361f5a4698853368278f5585c855c48b14c2840f99c206
+verified-results.json: a31c6444680a44d7202ea55058a5aaa2d1eccfff6b25a516f03e9670f7ea2f08
+Full 38-file hash manifest: /mnt/minion/88_minion_rw/projects/qrokkun26/assets/pv29-cm/formal-file-hashes.json
+Full hash manifest SHA256: 8f16d06e36c6b8699bd5e822ce13db98c111a1e2b16e373aaf3de8d71db172cd
+Launch / exit / deployment metadata directory: /mnt/minion/88_minion_rw/projects/qrokkun26/assets/pv29-cm
+
+Validation evidence and limits
+Previously completed independent focused final v29 tests: 18 passed in 6.76s.
+Earlier pre-repair v28+v29 regression: 35 passed in 23.46s, on a different revision.
+These are historical test results, not a claim that the final whole project passed.
+This report performed only read-only evidence inspection and focused documentation checks.
+One paired seed17 measurement; no confidence interval or generalization claim.
+No causal claim that E20 improves over Pv28 without a controlled experiment/profiling.
+No heldout, promotion, full trace, next version, or automatic rerun was performed or authorized here.
+No source, tests, prior journal or Pv28 report changed; no training, SSH, network or GPU work.
+Only this new report and append-only README/version-catalog closure links were written; no commit/push.

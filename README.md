@@ -212,3 +212,5 @@ Pv28c／Pv28m 整集平行加速與可重現基準（2026-11-14）：新增 [v28
 Pv28c／Pv28m 三階段結案（2026-11-15）：GB10 CUDA 正式 `u5`（`247,989` 幀）、`u100`（`4,997,472` 幀）與 `u1000`（`49,888,272` 幀）全數完成並通過 **`WEIGHTPASS`（0 ULP 差異）**。`Pv28m` 鎖定 10 顆 `3.9 GHz` Cortex-X925 大核後，`u1000` 對戰收集達 **`7,259.4 FPS`（加速 `6.69x`）**、驗證加速 **`7.33x`**、全程總耗時由 `13 小時 49 分` 縮短至 **`2 小時 50 分`（總加速 `4.87x`）**。見[三階段結案報告](docs/journal/2026-11-15-1794714252-pv28-cm-u5-u100-u1000-completion-report.txt)。
 
 - [Pv29c／Pv29m u10、E20 配對預註冊](qrokkun_ai/v29/README.md)：分離逐更新 checkpoint 與 u0/u10 validation，線性比較全部更新、僅 terminal raw-bit verdict；正式 GB10 結果待執行。
+
+Pv29c／Pv29m 結案補充（2026-11-15）：正式 u10/E20 兩臂完成 10/10 updates（complete_equal、exit 0），PRIMARY u10 **WEIGHTPASS**；獨立 u0..u10 每次 12 個具名 actor/critic 張量 raw bits 一致，各 805,265 training frames。完整收集 wall 加速 **8.0187x**、全程 **5.8143x**；單一 seed17，無 full trace／heldout／promotion 或泛化結論。見[完成報告](docs/journal/2026-11-15-1794724028-pv29-cm-u10-completion-report.txt)。上述預註冊 pending 文字保留為當時快照，由本次日期結案補充取代執行狀態。
