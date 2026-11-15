@@ -1,0 +1,16 @@
+Pv29c／Pv29m 預註冊與實作紀錄
+日期：2026-11-15 Asia/Hong_Kong；建立 Unix seconds：1794721797。
+基準：74b87b466c516836a5c972133a9cbc94e39b3321，開始時工作目錄乾淨。
+
+授權範圍：實作與微型 CPU 測試；未 SSH、連網、GPU、正式訓練、commit/push、代理委派或獨立 review。
+正式契約詳見 qrokkun_ai/v29/README.md。採 Pv28 的生產核心適配，不改演算法。此版本 supersedes Pv28 配對的 u5/100/1000、E12 與 terminal-fastpath/binary-search 決策；改成 u10/E20、checkpoint1/validation10 與全更新線性比較，primary 僅 u10 raw bits。
+
+TDD：先以目前 Pv28 parser 執行新行為測試，實際因 episodes=12 而預期失敗（非匯入／語法錯誤），RED 1 failed in 1.52s。之後才適配 v29。初次 GREEN 嘗試 15 passed、1 failed in 5.23s：本機無可辨識 big-core frequency，取消測試的預設 pin-on 被正確拒絕，故測試明確指定 pin-off。正式設定仍 pin-on。
+RED 原始紀錄唯讀保存在 ignored tmp/pv29-author/RED.txt；完整命令與 GREEN 結果保存在同目錄，待父層搬至耐久儲存。測試資料 basetemp 僅 /tmp，驗證完清理。版本內不保存證據 log 或 fixture。
+
+限制與後續：此處只驗證 CPU tiny fixture，尚無 GB10 CUDA 位元重現性、效能或正式結果。父層須獨立測試、fresh readiness review、部署、CUDA smoke，再 fresh c→m actual pair，最後依 u10 primary verdict 結案。單一 seed17 不報統計信賴區間，不執行 heldout/promotion，不自動重跑或延伸版本。
+
+GREEN：v29（16項）與 v28（18項）合併一次回歸，34 passed in 24.38s。
+最後將 supervisor 子程序非零退出統一轉為 3（原始退出碼仍記入 pair status），補一項行程內 fake-child 測試；版本目前共17項。targeted 結果與完整命令見 tmp/pv29-author/EXIT-GREEN.txt、commands.txt。未受影響的 v28 不重跑，未執行全專案測試。
+
+最後 targeted GREEN：1 passed in 1.52s；git diff --check 通過。

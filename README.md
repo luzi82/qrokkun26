@@ -210,3 +210,5 @@ Pv27c／Pv27w 結案（2026-11-14）：兩臂正式完成 5/5 updates（exit 0�
 Pv28c／Pv28m 整集平行加速與可重現基準（2026-11-14）：新增 [v28 模組與操作說明](qrokkun_ai/v28/README.md)、[EGM 概念規格書](concepts_brief.md) 與 [事前合約](docs/journal/2026-11-14-1794642996-pv28-cm-preregistration-contract.txt)。單場對戰全在 CPU 獨立完成並透過長駐 `SharedMemory` 子行程池重用，合併後於確定性 CUDA 整批計算老師標籤與 PPO；支援 `u5／u100／u1000` 六位數恢復檢查點、`--resume` 與終點優先／二分搜尋權重比對（當時快照準備啟動 GB10 實測）。
 
 Pv28c／Pv28m 三階段結案（2026-11-15）：GB10 CUDA 正式 `u5`（`247,989` 幀）、`u100`（`4,997,472` 幀）與 `u1000`（`49,888,272` 幀）全數完成並通過 **`WEIGHTPASS`（0 ULP 差異）**。`Pv28m` 鎖定 10 顆 `3.9 GHz` Cortex-X925 大核後，`u1000` 對戰收集達 **`7,259.4 FPS`（加速 `6.69x`）**、驗證加速 **`7.33x`**、全程總耗時由 `13 小時 49 分` 縮短至 **`2 小時 50 分`（總加速 `4.87x`）**。見[三階段結案報告](docs/journal/2026-11-15-1794714252-pv28-cm-u5-u100-u1000-completion-report.txt)。
+
+- [Pv29c／Pv29m u10、E20 配對預註冊](qrokkun_ai/v29/README.md)：分離逐更新 checkpoint 與 u0/u10 validation，線性比較全部更新、僅 terminal raw-bit verdict；正式 GB10 結果待執行。

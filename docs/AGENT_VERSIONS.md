@@ -119,3 +119,5 @@ Pv27c／Pv27w 結案補充（2026-11-14）：兩臂正式完成 5/5 updates（ex
 - 狀態（2026-11-14）：實作、本地測試（`v28` 18 passed、全套 279 passed / 28 skipped）與 `gpt-6.1-sol` 審查完成，當時快照待部署 GB10 執行 `u5` ➔ `u100` ➔ `u1000`。
 - 結案（2026-11-15）：GB10 CUDA 正式 `u5`、`u100`、`u1000`（`Pv28m` 綁定 10 顆 `3.9 GHz` X925 大核）全數正常完成並達成 **`WEIGHTPASS`（0 ULP 差異）**；`u1000`（`49,888,272` 幀）對戰收集加速 **`6.69x`（`7,259.4 FPS`）**、驗證加速 **`7.33x`**、全程耗時由 `49,766.75s` 縮至 **`10,223.14s`（總加速 `4.87x`）**，且獨立 `u100` 與 `u1000` 於第 100 輪之模型雜湊完全一致。
 - 來源：[README](../qrokkun_ai/v28/README.md)、[概念規格書](../concepts_brief.md)、[事前合約](journal/2026-11-14-1794642996-pv28-cm-preregistration-contract.txt)、[結案報告](journal/2026-11-15-1794714252-pv28-cm-u5-u100-u1000-completion-report.txt)。
+
+- **Pv29c / Pv29m**（2026-11-15，預註冊／尚未正式執行）：[版本契約](../qrokkun_ai/v29/README.md)。在 Pv28 演算法上固定 u10/E20、10 pinned workers 對 serial，checkpoint cadence1／validation cadence10；全更新線性 raw-bit 比較，terminal-only verdict。取代 Pv28 此配對的預算／比較排程決策，不改寫歷史結論。
