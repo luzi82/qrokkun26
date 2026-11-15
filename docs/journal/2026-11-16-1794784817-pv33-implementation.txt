@@ -1,0 +1,15 @@
+2026-11-16T07:20:17.878697+08:00
+
+## Pv33m：隨機初始化 matched control（實驗用途，不晉升）
+
+本版本以已完成 Pv32m 暖啟動為參考，比較相同「額外」1000 updates、每次 20 episodes 的訓練預算；不宣稱終生預訓練算力相同。來源基底為 `3c33391...`，並非最終 source SHA；封存啟動必須明確提供 40 位 `--source-commit`，不依賴 git。
+
+所有 actor／critic 權重與 bias 均使用 PlayerV21 預設 nn.Linear 初始化，在 CPU `fork_rng(devices=[])` 內固定 seed 17，還原呼叫者 RNG；所有模型建構後重設與 Pv32 相同的訓練 seed 17、permutation seed 27000017。兩個 Adam 全新，u0 實際驗證且可入選。保留 clearance teacher imitation，並非 teacher-free pure PPO。沿用 v31 `cuda_hoisted_single_stream`、feature hoist、deferred sync 與 v32 pool lifecycle；不更動觀測、獎勵、PPO 或架構。Sv24 u980 凍結、stochastic CPU，驗證原始 P lineage 但不載入 P 權重初始化 learner。
+
+每 10 updates 用 600000..600015 驗證，整數 frames 總和嚴格較大才更新 best，同分保留較早者；保存 101 checkpoint／evaluation。無 score floor、early stop、重試或 resume。只有完整正式訓練與 terminal 驗證後才能獨占 claim final。PRIMARY 為 Pv33 selected best 減保存的 Pv32 best u120；SECONDARY 為 terminal u1000 相減。僅新增 Pv33 best 與 terminal 各 64 episodes（兩者相同可重用），不重跑 Pv32 或原始 Pv21。800000..800063 是先前 Pv25／Pv32 已見 common window，非新 heldout。10000 paired bootstrap、seed 17、95% CI 僅描述用途；CI 涵蓋零不構成失敗。保存 u0..1000 曲線、實際 frames 與時間比較，不用 final 重新選模。
+
+固定單一初始化與單一訓練 seed 不能證明初始化普遍優劣，不將速度或強度差異直接歸因於初始化。原始 Pv21 保存分數 70.19765625 秒僅供輔助參考。暖參考為 `20261115-2205-pv32m-warm-start-u1000`，training commit `32745bac06ca422d52598d4039ea47e0b3afff63`；完整固定舊檔雜湊見 `qrokkun_ai/v33/warm-reference.json`，不修改舊產物。可透過 `--warm-reference-dir` 指定 GB10 上相同內容的可攜副本；v32 與 v33 的版本／source fingerprint 本來就不同。
+
+本次僅完成實作與 CPU fixture 驗證；未執行 GPU、CUDA smoke 或正式訓練。獨立測試、一次 fresh source readiness review、部署、CUDA smoke 與正式執行由 parent 處理。
+
+TDD 原始紀錄：tmp/pv33-implementation/red.txt（nonformal final 未拒絕的行為 assertion 失敗），green.txt（19 passed）。collection-error.txt 為前置匯入失誤，不計作 RED。reference-check.txt 為唯讀舊產物驗證。無真實訓練、網路、SSH、安裝、commit、push、agent 或 review。

@@ -1,0 +1,15 @@
+{
+  "directory": "/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261115-2205-pv32m-warm-start-u1000",
+  "file_hashes": {
+    "manifest.json": "46ac1d86bbe6ff7df1c88a3891fae62902dbb28cf78cf651cf140ffef5386efb",
+    "closed.json": "7d085fa38b5997d59eb966086fa556026dcbca6ff0587f71be9f79ac274a48b4",
+    "final.json": "9354200e9a604eecb2ff525a07f0c85fcbd9808843a7a4fc1a916aee813599c7",
+    "final-original.json": "e9c9059492ab504581df53cacba9ad0e894932080847de78a199c84f3ce3aabb",
+    "final-best.json": "9bebdca3a8e889d4b4602f3bb07bdc741fd6c3a7be83e0d290e5c0d28bec842a",
+    "final-terminal.json": "173d56de21a9f4081e847ea768a4281a9527930ac819476374d6b7a23316a879",
+    "final-status.json": "47f0d8496848ad0a1c02d3fb1412ffd69d8e728e2cc9259b680cefa3ff8609f3"
+  },
+  "best_update": 120,
+  "terminal_update": 1000,
+  "training_source_commit": "32745bac06ca422d52598d4039ea47e0b3afff63"
+}
