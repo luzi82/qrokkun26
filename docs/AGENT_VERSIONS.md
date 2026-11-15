@@ -131,3 +131,10 @@ Pv29c／Pv29m 結案補充（2026-11-15）：正式 u10/E20 兩臂完成 10/10 u
 
 
 Pv30c／Pv30m u10 結案補充（2026-11-15）：三臂完成 10/10、exit 0；c/m 與事前規劃的獨立 fresh m1/m2 均 **WEIGHTPASS**，u0..u10 每次 12 個具名張量 raw bits 一致，各 805,265 training frames。同環境重現性達成；多核心 rollout 加速 **8.1498x**、全程 **5.1943x**，但三臂共享同一平行 PPO，**未證實 PPO 加速**；相對歷史 Pv29m，m1/m2 PPO 分別慢 59.04%／52.39%（描述性比較，無因果隔離）。有限 Nsight 探針觀察到 76 對跨分支 kernel 重疊，不能據此宣稱效能提升。見[完成報告](journal/2026-11-15-1794738370-pv30-cm-u10-completion-report.txt)。上述待執行文字保留為日期快照，本次結案補充取代其 pending 執行狀態；無 full trace／heldout／promotion 或跨環境保證。
+
+## Pv31m（含條件備援 Pv31c）— 單流外提特徵與延遲同步 PPO 加速（2026-11-15）
+
+- 架構／觀察／動作：沿用 Pv21（`hidden=472`、`in_dim=84`、9 actions）；取代 `Pv30` 之雙 CUDA streams＋雙執行緒 `ThreadPoolExecutor`，改為單流序列派發（`cuda_hoisted_single_stream`），於 4 個 PPO epochs 前整批外提無參數 `net.features()` 與老師 `F.softmax(exp_logits)`、移除迴圈內 `.item()` 與逐張量同步（改於期末單次同步與有限值檢查），並於 `EpisodePool` 綁定 10 顆 X925 大核後將主行程固定綁定於單顆 `3.9 GHz` X925 大核（`CPU 5`）。保留歷史 `Pv29`／`Pv30` 產物與結論不變。
+- 初始化／optimizer／凍結對手與模式：原始 `Pv21 u400` actor/critic＋fresh Adam，對戰凍結 stochastic CPU `Sv24 best u980`；正式預算 `u10 / E20 / seed=17 / cap=7200`。
+- 結案（2026-11-15）：GB10 CUDA 非正式 smoke（`u1, E3`）與正式 `Pv31m`（`u10, E20, 805,265` frames）直接對照本地雜湊驗證之封存 `Pv30c` 皆達成 **`WEIGHTPASS`（exit 0，`u0..u10` 全部 11 個檢查點之 12 個具名 Actor＋Critic 張量 `0-ULP` 完全一致，終點 `u10` 共享 `state_dict_sha256 = 875a2d40bf89086438c784d66b6629f4593a76287d79b74e708990eb4fe5db0a`）**，無須啟動條件備援 `Pv31c`。`Pv31m` 的 `ppo_s` 降至 **`15.25s`**（穩態 `u2..u10` 平均 `1.46s/update`；較 `Pv30c` `73.92s` 快 **`4.85x`**、較 `Pv30m` `69.02s` 快 **`4.53x`**、較單流序列基準 `Pv29m` `43.40s` 快 **`2.85x`**），`rollout_s = 90.98s`（**`8.22x`** vs `Pv30c`），全程 `total_s` 縮短至 **`122.31s`**（較 `Pv30c` 快 **`7.55x`**、較 `Pv30m` 快 **`1.45x`**、較 `Pv29m` 快 **`1.24x`**）；單一 `seed=17`，無 heldout 或 promotion。
+- 來源：[README](../qrokkun_ai/v31/README.md)、[EGM 設計規格書](designs/pv31_hoisted_single_stream_ppo.md)、[事前合約](journal/2026-11-15-1794744069-pv31-m-preregistration-contract.txt)、[啟動前勘誤補正](journal/2026-11-15-1794744180-pv31-m-preregistration-prelaunch-erratum.txt)、[結案報告](journal/2026-11-15-1794744574-pv31-m-u10-completion-report.txt)。

@@ -1,0 +1,69 @@
+Pv31m u10 單流外提特徵與延遲同步 PPO 加速正式結案報告（WEIGHTPASS vs Pv30c）
+日期：2026-11-15 Asia/Hong_Kong；建立 Unix seconds：1794744574。
+
+1. 執行摘要與主結論（Primary Verdict & Speed Summary）
+- 實驗目標：執行第一階段純 Python／Eager 結構清理（`qrokkun_ai/v31`，`ppo_backend = "cuda_hoisted_single_stream"`）：移除 `Pv30` 的雙非預設 CUDA streams 與雙執行緒 `ThreadPoolExecutor`、於 4 個 PPO epochs 前整批外提無參數特徵 `net.features()` 與老師機率 `F.softmax(exp_logits, dim=-1)`、消除 minibatch 迴圈內所有 `.item()` 與逐張量同步阻塞（改為裝置端 0-dim 張量累加與布林非有限值旗標，期末單次同步並檢查 `finite(net.state_dict())`），並於 `EpisodePool` 建立 10 個 CPU rollout workers 後將主行程固定綁定於單顆最高頻大核（GB10 `CPU 5`, `3.9 GHz` Cortex-X925）。
+- 條件式 `Pv31c` 備援觸發結果：**未觸發（無須執行 `Pv31c`）**。無論是非正式全 cap CUDA smoke（`u1, E3, 10,694 frames`）或正式 `Pv31m`（`u10, E20, 805,265 frames`），經 `qrokkun_ai.v31.compare --reference-dir` 對本地雜湊驗證之封存 `Pv30c` 檢查點進行嚴格科學 invariant 核驗與線性逐位元比對，均取得 **`exit 0`、`result = "WEIGHTPASS"`**，`u0..u10` 全部 11 個檢查點之 12 個具名 Actor+Critic 權重張量 `0-ULP` 完全一致（`differences_by_update` 全為 `[]`，`first_diverged_update = null`）。
+- 效能實測結果（相同 `805,265` 訓練幀，速度與權重判決獨立報告）：
+  - `Pv31m ppo_s`：**`15.2484s`**（含 `u=1` 首次 cuBLAS/autograd 初始化 `2.1405s`；`u=2..10` 穩態單輪 `1.3602s – 1.5106s`，平均 `1.4564s/update`，實測完全落在事前預估區間 `12s – 16s` 內）：
+    - 對照封存 `Pv30c`（`73.9150s`）：加速 **`4.8474x`**（節省 `58.6666s`，`-79.37%`）
+    - 對照歷史 `Pv30m`（`69.0209s`，複現臂 `m2 = 66.1292s`）：加速 **`4.5264x`**（節省 `53.7724s`，`-77.91%`；相對 `m2` 為 `4.3368x`）
+    - 對照歷史單流序列基準 `Pv29m`（`43.3984s`）：加速 **`2.8461x`**（節省 `28.1500s`，`-64.86%`；相對 `Pv29c` `48.2971s` 為 `3.1673x`）
+  - `Pv31m rollout_s`：**`90.9844s`**（`8,850.58 FPS`；相對 `Pv30c` `747.8278s` 加速 **`8.2193x`**；完整 `collector_s = 92.7497s` 加速 **`8.0712x`**）
+  - `Pv31m validation_s`：**`13.3968s`**（相對 `Pv30c` `98.9319s` 加速 **`7.3847x`**）
+  - `Pv31m total_s`：**`122.3141s`**（約 `2 分 02 秒`，完全命中事前預估 `120s – 125s`）：
+    - 對照封存 `Pv30c`（`923.3605s`）：總加速 **`7.5491x`**（節省 `801.0463s`）
+    - 對照歷史 `Pv29c`（`883.3998s`）：總加速 **`7.2224x`**（節省 `761.0857s`）
+    - 對照歷史 `Pv30m`（`177.7638s`）：總加速 **`1.4533x`**（全程縮短 `-31.19%`，節省 `55.4497s`）
+    - 對照歷史 `Pv29m`（`151.9345s`）：總加速 **`1.2422x`**（全程縮短 `-19.50%`，節省 `29.6204s`）
+
+2. 程式碼與產物溯源（Provenance & Durable Artifacts）
+- 凍結實作程式碼 Commit：`ced9b50ee39f1f210d933834a9f2787542410991`
+- 事前註冊合約與啟動前補正 Commits：`196b593c36fc83ba3a060ce1dd4570ea53c31871`、`cd65dfab1a35318811efd4637ca2d4d47285207d`（`EXECUTION_HEAD`）
+- `v31` 生產程式碼指紋（`source_tree_sha`）：`e612f2bfd9aeff7eb01e421e4091c7c8ebb10ef82bcdfd9ba3994f6e16dfbe3e`
+- 執行主機與部署快照：`GB10B`（`ovm-hms-bot@192.168.0.41`），`/home/ovm-hms-bot/projects/qrokkun26/pv31_execution/cd65dfab1a35318811efd4637ca2d4d47285207d`（`torch 2.11.0+cu128`, `CUDA 12.8`, `cuDNN 91900`, `NVIDIA GB10`）
+- 鎖定輸入雜湊：
+  - Player 初始檢查點 `/home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/pv21-u400.pt`：
+    - whole-file SHA-256：`b8466bb13972de62003e16b0b570567a016d0dab4dd5667e66a3666974cfd5f8`
+    - `initial_player_state_sha`（同 `u0` 模型 `state_dict_sha256`）：`250f3c3f1053b18129f992e97cb9ae15139fc2e5fa962b5491db5dddb2eb8f91`
+  - 凍結對手 Spawner `/home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/sv24-u980.pt`：
+    - whole-file SHA-256：`554290b6c17a280dbfb8bb4076583a1230b278bf73a24a701f66fca76e5bfcc0`
+    - `spawner_state_sha`：`3db671ed476886b8e9640beff0e0724a66b1a72263b55be2e988078061e69b63`（全部 10 個 workers 皆驗證 `frozen_S_verified: true, cuda_initialized: false`）
+- NAS 耐久保存路徑（皆附 `SHA256SUMS` 並通過 `sha256sum -c`）：
+  - 非正式全 cap CUDA Smoke：`/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261115-2004-pv31-final-nonformal-cuda-smoke`（`u1, E3, 10,694 frames, WEIGHTPASS`）
+  - 正式 `Pv31m u10` 實驗包：`/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261115-2005-pv31-m-u10`
+    - `comparison.json` SHA-256：`df0d2758c314e63f6c779c7ebf9eaad212753c2009cc8a71e4c9acd0c96449db`
+    - `Pv31m/manifest.json` SHA-256：`1074e0d873513ec962dc0319ac6240783d04a1528bb683aff1e9c93a82385432`
+    - `Pv31m/closed.json` SHA-256：`0e28ceb25129f5ddfb527850bcf8300bd8de1f64c43cac04b6fce7d04966b0de`
+    - `Pv31m/updates.jsonl` SHA-256：`8b114bec983e5bd684da6a07d8933c1b045ed2f04fa38f7fe4e853eb7089b991`
+    - `Pv31m/checkpoint-000000.pt` file SHA-256：`f7e45463bdac4f79776959e39a843a39ad6809a0fabf2cd80a37e516fbe39978`
+    - `Pv31m/checkpoint-000010.pt` file SHA-256：`fed622e4a1fb8c7d4bb07e63425a922018a8dd501b641985d9d11d4fc188e2c3`
+    - 對照之封存 `Pv30c/checkpoint-000010.pt` file SHA-256：`8e450dd90c235d9858d7c2a8e944d0528ecf2daee18c67abd38f011317ecf5ae`
+    - 跨版本共享終點 `u10` 模型 `state_dict_sha256`（`Pv29c == Pv29m == Pv30c == Pv30m == Pv31m`）：`875a2d40bf89086438c784d66b6629f4593a76287d79b74e708990eb4fe5db0a`（whole-file `.pt` SHA-256 不同僅因封包內含 `schema`、`arm` 與執行資訊，模型權重 raw bits 100% 相等）。
+
+3. 逐輪訓練與固定驗證統計（Per-Update Breakdown & Validation）
+- 核心綁定核驗：`EpisodePool` 10 workers 綁定 `pinned_cpus = [5, 6, 7, 8, 9, 15, 16, 17, 18, 19]`（各完成 22～25 個任務，共 232 局 = 200 訓練局 + 32 驗證局）；Learner 主行程固定綁定 `learner_pinned_cpu = 5`。
+- 逐輪訓練明細（`u=1..10`，總計 `805,265` 幀）：
+  - `u=1`：`78,133` frames | `mean_elapsed = 65.1108s` | `rollout_s = 8.5805s` | `batch_s = 0.2739s` | `ppo_s = 2.1405s`
+  - `u=2`：`82,857` frames | `mean_elapsed = 69.0475s` | `rollout_s = 9.9332s` | `batch_s = 0.0615s` | `ppo_s = 1.4903s`
+  - `u=3`：`79,603` frames | `mean_elapsed = 66.3358s` | `rollout_s = 9.6152s` | `batch_s = 0.0505s` | `ppo_s = 1.4330s`
+  - `u=4`：`75,328` frames | `mean_elapsed = 62.7733s` | `rollout_s = 8.7140s` | `batch_s = 0.0492s` | `ppo_s = 1.3602s`
+  - `u=5`：`83,743` frames | `mean_elapsed = 69.7858s` | `rollout_s = 10.0422s` | `batch_s = 0.0549s` | `ppo_s = 1.5085s`
+  - `u=6`：`81,593` frames | `mean_elapsed = 67.9942s` | `rollout_s = 8.4210s` | `batch_s = 0.0543s` | `ppo_s = 1.4711s`
+  - `u=7`：`79,803` frames | `mean_elapsed = 66.5025s` | `rollout_s = 8.6327s` | `batch_s = 0.0525s` | `ppo_s = 1.4345s`
+  - `u=8`：`79,405` frames | `mean_elapsed = 66.1708s` | `rollout_s = 8.7354s` | `batch_s = 0.0518s` | `ppo_s = 1.4346s`
+  - `u=9`：`83,664` frames | `mean_elapsed = 69.7200s` | `rollout_s = 9.2757s` | `batch_s = 0.0547s` | `ppo_s = 1.5106s`
+  - `u=10`：`81,136` frames | `mean_elapsed = 67.6133s` | `rollout_s = 9.0346s` | `batch_s = 0.0529s` | `ppo_s = 1.4651s`
+- 固定驗證（`seeds = 600000..600015`，deterministic P vs stochastic S，觀察指標非 heldout）：
+  - `u=0`：`mean_elapsed = 66.63020833333084s`（`63,965` frames，0 censored）
+  - `u=10`：`mean_elapsed = 75.26041666666367s`（`72,250` frames，0 censored）
+
+4. 跨世代 u10（805,265 frames）正式耗時對照總表
+- `Pv29c`（序列收集 + 舊單流每步重算特徵 PPO）：`rollout_s = 733.55s` | `ppo_s = 48.30s` | `validation_s = 98.86s` | `total_s = 883.40s`
+- `Pv29m`（10 大核收集 + 舊單流每步重算特徵 PPO）：`rollout_s = 91.48s` | `ppo_s = 43.40s` | `validation_s = 13.35s` | `total_s = 151.93s`
+- `Pv30c`（序列收集 + 雙執行緒雙 stream PPO）：`rollout_s = 747.83s` | `ppo_s = 73.92s` | `validation_s = 98.93s` | `total_s = 923.36s`
+- `Pv30m`（10 大核收集 + 雙執行緒雙 stream PPO）：`rollout_s = 91.76s` | `ppo_s = 69.02s` | `validation_s = 13.28s` | `total_s = 177.76s`
+- `Pv31m`（10 大核收集 + 單流外提特徵與延遲同步 PPO + Learner 綁定 CPU 5）：`rollout_s = 90.98s` | **`ppo_s = 15.25s`** | `validation_s = 13.40s` | **`total_s = 122.31s`**
+
+5. 範圍限制聲明（Scope & Non-Promotion）
+- 本實驗為固定單一 `seed=17` 之工程加速與逐位元等價驗證（`statistical_ci = false`），不作統計信賴區間推論，未觸碰任何 64-seed heldout 測試集，所有檢查點維持 `experimental / no-promotion` 狀態。GB10 執行完畢後已確認無殘留程序、GPU 空閒。
