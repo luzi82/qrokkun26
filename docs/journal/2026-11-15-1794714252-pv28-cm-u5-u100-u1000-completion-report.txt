@@ -1,0 +1,134 @@
+Pv28c／Pv28m 三階段（u5／u100／u1000）逐位元等價與加速驗收結案報告（2026-11-15，HKT）
+建立時間：2026-11-15T11:44:12+08:00（Asia/Hong_Kong）
+建立 Unix 秒：1794714252；時間由本檔名的 Unix timestamp 換算。
+
+1. 結論摘要
+- 正式三階段配對實驗（u5 ➔ u100 ➔ u1000，每階段均依序執行 Pv28c 單核對照臂、Pv28m 10 大核長駐 SharedMemory
+  子行程池平行臂、以及離線終點優先位元比對）已於 GB10 CUDA 全部完成並正常閉合：
+  * 三階段 pair-status 均為 complete_equal，exitcodes 全為 {"Pv28c": 0, "Pv28m": 0, "compare": 0}。
+  * 三階段離線權重驗證結果均為 WEIGHTPASS（exitcode=0，terminal_differences=[]）：終點 u=5、u=100、u=1000
+    之 Actor＋Critic 全部 12 個具名參數張量原始位元 100% 相等（0 ULP 差異）。
+  * 額外跨里程碑與跨批次核對：u1000 全部 11 個六位數檢查點（000000..001000）兩臂 model raw bits 全數一致；
+    且獨立執行之 u100 終點（每 10 輪驗證）與 u1000 第 100 輪檢查點（每 100 輪驗證）擁有完全相同之
+    model state_dict_sha256（5b0157ac2bbea11d04eb25883b11c73cb88b143cf33521e22dba7b704a64413c），
+    同時實證跨批次重現性與「驗證頻率完全不污染訓練 RNG 與權重」。
+- 效能結論（Pv28m 綁定 GB10 全部 10 顆 3.9 GHz Cortex-X925 大核 CPUs [5,6,7,8,9,15,16,17,18,19]）：
+  * 純對戰收集（rollout_s）加速比：u5 為 6.36x（7,028.8 FPS）、u100 為 6.68x（7,208.5 FPS）、
+    u1000 為 6.69x（7,259.4 FPS；相較舊 Pv27c 1,277.3 FPS 快約 5.68 倍）。
+  * 固定 16-seed 驗證（validation_s）加速比：u5 為 7.38x、u100 為 7.44x、u1000 為 7.33x。
+  * 全程總耗時（total_s，含全部 GPU PPO 更新、檢查點寫入與驗證）加速比：
+    - u5（247,989 frames）：525.11s ➔ 91.10s（5.76x）
+    - u100（4,997,472 frames）：5,480.42s（1h 31m 20s）➔ 1,057.65s（17m 38s）（5.18x）
+    - u1000（49,888,272 frames）：49,766.75s（13h 49m 27s）➔ 10,223.14s（2h 50m 23s）（4.87x，單輪千步長訓省下約 11 小時）
+- 實驗邊界聲明：本結案驗證 Pv28m 多行程架構相對於 Pv28c 之逐位元可重現性與收集吞吐加速；本次未執行 64-seed heldout
+  實力對決、選模或模型 promotion。
+
+2. 執行來源、環境與大小核擇優實測紀錄
+- 執行來源 Commit SHA（--source-commit）：062cc9c79a2212e1c03892868b721a23c745acc2
+- 生產程式碼指紋（source_tree_sha）：cad6ed92209411940bd47f26d59e360bd3be2c247292221e3a6269fc5f81b98b
+- GB10 不可變執行封存（222 檔逐一核對 SHA256，無 .git）：
+  /home/ovm-hms-bot/projects/qrokkun26/pv28_execution/062cc9c79a2212e1c03892868b721a23c745acc2
+- 鎖定輸入副本（/home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/）：
+  * pv21-u400.pt：b8466bb13972de62003e16b0b570567a016d0dab4dd5667e66a3666974cfd5f8
+    （state_dict_sha256：250f3c3f1053b18129f992e97cb9ae15139fc2e5fa962b5491db5dddb2eb8f91）
+  * sv24-u980.pt：554290b6c17a280dbfb8bb4076583a1230b278bf73a24a701f66fca76e5bfcc0
+    （state_dict_sha256：3db671ed476886b8e9640beff0e0724a66b1a72263b55be2e988078061e69b63）
+- 執行環境（兩臂完全相同）：Python 3.12.3、torch 2.11.0+cu128、numpy 2.5.3、NVIDIA GB10（CUDA 12.8、cuDNN 91900）；
+  rollout={device: cpu, threads: 1, batch: 1}；learner={device: cuda, threads: 1, deterministic: true,
+  cudnn_deterministic: true, cudnn_benchmark: false, matmul_precision: highest, cuda_matmul_allow_tf32: false,
+  cudnn_allow_tf32: false, CUBLAS_WORKSPACE_CONFIG: ":4096:8"}。
+- 前置非正式全幀上限 CUDA Smoke：
+  * 路徑：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261114-1646-pv28-nonformal-cuda-smoke
+  * 設定：--nonformal --updates 1 --episodes 2 --cap 7200 --validation 2 --workers 2
+  * 結果：WEIGHTPASS（exit 0，7,293 frames）；驗證 u0 fresh Adam、u1 12/12 參數張量更新、frozen_S_verified=true、
+    worker cuda_initialized=false。comparison.json SHA256：
+    176c135430037b46e01ddbcc61790fda8f140399d1d2d05f6f04c27e0ddfb5f8。
+- GB10 異質核心（10x Cortex-X925 @ 3.9 GHz + 10x Cortex-A725 @ 2.8 GHz）Worker 數實測擇優：
+  以單輪 12 場訓練＋16 場驗證（cap=7200）實測：
+  * workers=10（依 cpuinfo_max_freq 排序釘死於 X925 大核 [5..9, 15..19]＋動態佇列）：rollout_s=6.961s（6,627 FPS），total_s=25.174s
+  * workers=12（2 個溢出至 A725 小核）：rollout_s=15.811s（2,917 FPS），total_s=51.813s
+  * workers=16（6 個溢出至 A725 小核）：rollout_s=15.944s（2,893 FPS），total_s=57.278s
+  據此正式實驗全面鎖定 --workers 10。
+
+3. 三階段正式實驗詳細數據與計時（秒）
+
+[階段 A] u5：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261114-1650-pv28-cm-u5
+- 完成時間：2026-11-14T17:01:52.627604+08:00；訓練總幀數：247,989（兩臂相同）；排程：[0,1,2,3,4,5]。
+- 固定驗證（16 seeds）：u0 mean=66.63020833333084s（63,965 frames）；u5 mean=68.08437499999742s（65,361 frames）。
+- 計時與比例（Pv28c vs Pv28m，ratio = Pv28c / Pv28m）：
+  * rollout_s：224.507029370 ➔ 35.281796958（6.363254x；FPS 1,104.59 ➔ 7,028.81）
+  * collector_s：224.890633969 ➔ 36.702564783（6.127382x；含 pool_init 0.674579s、weight_sync 0.031329s、
+    batch_teacher_gae 0.419660s、pool_shutdown 0.295200s）
+  * ppo_s：15.564804280 ➔ 14.613012052（1.065133x）
+  * validation_s（6 次）：283.211879873 ➔ 38.391140387（7.377011x）
+  * checkpoint_s（6 次）：0.465615607 ➔ 0.496094194（0.938563x）
+  * total_s：525.114085378 ➔ 91.096858129（5.764349x）
+
+[階段 B] u100：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261114-1703-pv28-cm-u100
+- 完成時間：2026-11-14T18:53:57.221796+08:00；訓練總幀數：4,997,472（兩臂相同）；排程：[0,10,20,30,40,50,60,70,80,90,100]。
+- 固定驗證（16 seeds）：u0 mean=66.63020833333084s（63,965 frames）；u100 mean=69.829166666664s（67,036 frames）。
+- 計時與比例（Pv28c vs Pv28m）：
+  * rollout_s：4,634.220992961 ➔ 693.274608763（6.684539x；FPS 1,078.38 ➔ 7,208.50）
+  * collector_s：4,637.780372365 ➔ 698.760101982（6.637157x；含 pool_init 0.666053s、weight_sync 0.498807s、
+    batch_teacher_gae 4.025503s、pool_shutdown 0.295130s）
+  * ppo_s：304.243453224 ➔ 282.718136240（1.076137x）
+  * validation_s（11 次）：533.629209238 ➔ 71.706911058（7.441810x）
+  * checkpoint_s（11 次）：0.862796275 ➔ 0.759330903（1.136259x）
+  * total_s：5,480.423962036 ➔ 1,057.646521497（5.181716x）
+
+[階段 C] u1000：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261114-1855-pv28-cm-u1000
+- 完成時間：2026-11-15T11:35:16.743987+08:00；訓練總幀數：49,888,272（兩臂相同）；
+  排程：[0,100,200,300,400,500,600,700,800,900,1000]；兩臂 updates.jsonl 皆為完整 1,000 筆紀錄。
+- 固定驗證（16 seeds）：u0 mean=66.63020833333084s（63,965 frames）；u1000 mean=64.2541666666643s（61,684 frames）。
+- Worker 負載與隔離：10 個長駐子行程共完成 12,176 場任務（單 worker 介於 1,172..1,277 場，cpu_s 介於 4540.2..4687.6s），
+  全部 frozen_S_verified=true、cuda_initialized=false；結束後程序、GPU 與 /dev/shm 全數釋放。
+- 計時與比例（Pv28c vs Pv28m）：
+  * rollout_s：45,966.610447363 ➔ 6,872.214590225（6.688762x；FPS 1,085.32 ➔ 7,259.42）
+  * collector_s：46,000.494247502 ➔ 6,916.681488930（6.650660x；含 pool_init 0.853701s、weight_sync 4.928712s、
+    batch_teacher_gae 38.384912s、pool_shutdown 0.299573s）
+  * ppo_s：3,187.673086503 ➔ 3,203.541600003（0.995047x）
+  * validation_s（11 次）：542.802049948 ➔ 74.011546283（7.334019x）
+  * checkpoint_s（11 次）：0.851080298 ➔ 0.774838895（1.098396x）
+  * total_s：49,766.753103836 ➔ 10,223.138907608（4.868050x）
+
+4. 關鍵產物 SHA256 與共同模型狀態雜湊
+（註：checkpoint-*.pt 封裝內含該臂自身之 arm 名稱與累計 timings 供 --resume 使用，故兩臂 .pt 整檔雜湊不同，
+  而其內部 model 12 個張量之 state_dict_sha256 在兩臂間完全一致。）
+- 共同模型參數雜湊（model state_dict_sha256，Pv28c 與 Pv28m 100% 相同）：
+  * u=000000（三階段共通）：250f3c3f1053b18129f992e97cb9ae15139fc2e5fa962b5491db5dddb2eb8f91
+  * u=000005（u5 終點）：65bb6d27ed71cfd0e27d118f437124b928d640f9a8417ae4fdac65ee00dcc509
+  * u=000100（u100 終點及 u1000 第 100 輪共通）：5b0157ac2bbea11d04eb25883b11c73cb88b143cf33521e22dba7b704a64413c
+  * u=001000（u1000 終點）：17ad40c90ff9df80101f5915c7c3efa87e486b2d6849e500e4be67cf20477a31
+- [u5] 檔案 SHA256（20261114-1650-pv28-cm-u5）：
+  * pair-status.json：d194d07dacd0c4c5a7622753dc9c17616392a4e3d2e6e2ab148a95d8ed3eeaad
+  * comparison.json：235172df27458b188c4e32e473ed74d7fb6111837d4767d10dc764a733c41529
+  * Pv28c/manifest.json：c7e9231d78043fde2eef72ac4e4f7a180b359788215ef721a5b101806b969164
+  * Pv28c/closed.json：67818d22849fb70314c1ad37ea5223bdd350da1417cee5187ee808daf47983be
+  * Pv28c/checkpoint-000005.pt：51283cf63ec57f60d918944fac8e51da4f97aaee10baf23b687dc1b21b3dab1c
+  * Pv28m/manifest.json：61de1db8b1b8c093cdd6669fd20d6f1decff86b10142d1490fbf87f69d94e6f9
+  * Pv28m/closed.json：e9573469a133072f9e823cd70c9a06a4081ae96cedd6d6d1ad7d1cf138fe671d
+  * Pv28m/checkpoint-000005.pt：2e0542645521c9467f30e773f727ace819585ebe624d31b92cfa57268e6a8b3c
+- [u100] 檔案 SHA256（20261114-1703-pv28-cm-u100）：
+  * pair-status.json：f0022c3cab215c2604b8cfdaf7ec89e96947218ed29b52b4c666e801927146fa
+  * comparison.json：e4d46bab7933f94fde0244b9c38577ed4994c9b7b411d1fbf1e4b9579f263776
+  * Pv28c/manifest.json：7a5ddb57c3aefca18a49e016f6d4da3020be4efa2f83bf66fc090576d327b147
+  * Pv28c/closed.json：a0a10f4ddd00955798a7c93571490fb2b0148f04405fb86cd849db7e34b56df8
+  * Pv28c/checkpoint-000100.pt：dc1f247c301718de2f0045f6e20b01b7d25faa30e6030c0a76c8260576bba2fe
+  * Pv28m/manifest.json：1ddf32e4ae8c2d0334bd75bcfe0a01789a78e2340e2794efe9960b29ef95a773
+  * Pv28m/closed.json：09624ca9c32689357d363a10e2679093b29faf209f46b84f49d15df8a452819b
+  * Pv28m/checkpoint-000100.pt：0394b4225934baf5d95040769bdf77af44be1faa416e741047fa88693156fa9d
+- [u1000] 檔案 SHA256（20261114-1855-pv28-cm-u1000）：
+  * pair-status.json：3ec22ccf654d91e489e604bfba849de689d396ca66dc70f405e4eb30e956e76e
+  * comparison.json：5b72f7d4d50c5294f8c43fa21d2fa75af084ab79a571969034ab0503f417b8e1
+  * Pv28c/manifest.json：6871dc2a46dc9c0577e85aafb7b16b7ba8c635eeb7205eebb867dbb682d4053a
+  * Pv28c/closed.json：55a3b19b07c8b5b450f9328f221b3e82fa53ac84ac9446d3db92bfd6708e0bcc
+  * Pv28c/checkpoint-001000.pt：f59808b0e1ea141e6afae9b950fcb67036dd82d55c73ff3225842c577209a3eb
+  * Pv28m/manifest.json：90b18533f05628a21a2855e4b72cc14ba3d86aa5652b010b9f52d8ca58127d4f
+  * Pv28m/closed.json：c90942bef428bb05c11a75e859ea86794ab894cb212099c928dc434c21895932
+  * Pv28m/checkpoint-001000.pt：ac74de004eee35871ae83a3b5bcf6721124a009539ba3d1d2613f05bd2b3ff6a
+
+5. 相關文件
+- 事前合約：docs/journal/2026-11-14-1794642996-pv28-cm-preregistration-contract.txt
+- EGM 概念規格書：concepts_brief.md
+- 模組說明：qrokkun_ai/v28/README.md
+- 版本目錄：docs/AGENT_VERSIONS.md
