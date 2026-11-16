@@ -259,3 +259,15 @@ Pv34m 威脅觀測過濾 u1000 結案補充（2026-11-16）：train／final／su
 
 
 Pv35m input64 u1000 結案補充（2026-11-17）：完成 1000 updates／20000 episodes／80777784 frames；PRIMARY best u330 common64 71.6138021s vs Pv34 best u210 67.2815104s，候選減對照 +4.3322917s（95% 配對 CI [-1.1203581, +9.7862826]）；SECONDARY terminal +1.8638021s（CI [-2.6112305, +6.3424674]）。兩個 CI 均跨 0，未證實改善或等價；單一 init/train seed17、已見 common64，非新 heldout，無模型晉升。見[完成報告](docs/journal/2026-11-17-1794856288-pv35-input64-u1000-completion-report.txt)。本附錄僅取代舊 pending 執行狀態；歷史條目保留。
+
+
+### Gv36 integer player — Python only (2026-11-17)
+
+Opt-in `qrokkun_env.gv36.Gv36Env`: signed integer movement counts, canonical
+P-position key, cached float32 coordinates, per-axis wall reset, fixed 60 Hz
+and immutable P-only snapshot/restore; inherited Gv20 S/bullets and 64-slot
+observations. 17 new tests; environment suite 39 passed. See [2026-11-17-1794858266-gv36-integer-player-implementation.txt](docs/journal/2026-11-17-1794858266-gv36-integer-player-implementation.txt).
+Owner naming decision supersedes Pv36 death-search-teaching name with **Pv37**;
+design unfinished, no AI v36/v37 implementation or training. Gv36 changes rules
+and needs a new control before Pv37; no old Pv35 direct causal comparison,
+new baseline/control model assignment, or Godot mirror in this task.

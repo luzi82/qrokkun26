@@ -1,0 +1,44 @@
+Gv36 integer player implementation — 2026-11-17T03:44:26.677349+08:00 HKT
+Baseline ccdece2, clean at start. Owner-authorized Python-only, no training.
+Read root AGENTS.md and NAS guideline.md. Tools: local bash and project
+.venv/bin/python, single-thread CPU; no network/install/SSH/GPU/agents/review.
+
+Opt in: from qrokkun_env.gv36 import Gv36Env
+ e = Gv36Env(seed=7); e.reset(position=(160,126)); e.step('ne')
+Old imports still use Gv20. No old production/tests were edited.
+DT is fixed at constants.DT; nonstandard construction/assignment rejected.
+Reset/set_player_position require legal Python integer origins and zero counts.
+P authority: x0,x1,x2,y0,y1,y2; signed cardinal and diagonal counts.
+Canonical P-only key (10*x0+17*x1,17*x2,10*y0+17*y1,17*y2).
+Coordinate evaluation order: float64 (A+B/sqrt(2))/10, then one f32 rounding.
+Equivalent keys therefore share caches. Cache reads O(1); observations retain
+64 bullet slots and four player fields, no integer model features.
+Action updates only counts; velocity retains old normalized f32 direction*102.
+Raw float64 proposal is clamped before f32 conversion, resetting only offending
+axis origin to integer wall and its counts to zero. Exact touches retain counts.
+The legacy dataclass constructor/reset px/py writes are ignored in a scoped
+try/finally window; integer state is ready before old reset observe/frame0 spawn.
+No extra reset/spawn/RNG draw. Ordinary px/py assignments are rejected.
+get_player_state returns immutable PlayerState; restore_player_state validates
+all six integer types, raw bounds, cache consistency and finite f32 velocities
+before commit. Copy/deepcopy snapshots have no mutable count aliasing.
+P snapshot is NOT a full checkpoint. Future search must preserve clocks,
+bullets, RNGs, S state and event stream separately. No search/serialization added.
+S/field/bullet floating physics, spawn order and pre-move cached aiming inherited.
+
+Evidence: /mnt/minion/88_minion_rw/projects/qrokkun26/assets/20261117-033943-gv36-integer-player/author-evidence
+01-red: actual missing-import failure; 02-green: reset 1 passed.
+03-red: inherited float integration cannot write protected cache.
+04-tests: 15 passed, two test setup failures (Pell arithmetic and seed19 death
+at frame48); corrected to controlled Pell residual and surviving fixed seed0.
+05-suite: 39 passed 0.87s. 06-final-suite: final actual output and wall timing.
+17 new tests + 22 existing environment tests; all 39 passed. No Godot gate.
+Pytest cache disabled, basetemp under approved TMPDIR, removed after validation.
+
+Superseded naming decision only: death-search-teaching Pv36 renamed Pv37 by
+owner. Pv37 design unfinished; no qrokkun_ai/v36 or v37 implementation/training.
+Gv36 is new rules, old Gv20 moving trajectories not guaranteed. Needs a new
+control before Pv37; no old Pv35 direct causal comparison or assigned model.
+Remaining API limitation is intentional P-only snapshot, not full-world fork.
+Source ready for parent diff/tests and fresh readonly review before local commit.
+No commit or push performed; historical conclusions/artifacts retained.
