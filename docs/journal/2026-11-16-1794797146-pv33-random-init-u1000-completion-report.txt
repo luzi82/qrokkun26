@@ -1,0 +1,123 @@
+Pv33m 隨機初始化 u1000 完成報告
+日期：2026-11-16 10:45:46 HKT（UTC+08:00）；建立 Unix 秒：1794797146。
+本報告依已保存的實驗與逐 seed 證據結案；本次僅整理文件。
+舊預註冊、實作 journal 與索引中的 pending 文字保留為當時快照。
+本日期結案附錄取代其「未執行 CUDA smoke／正式訓練／random 臂」執行狀態。
+此取代關係不改寫事前科學合約、歷史產物或歷史結論。
+
+一、問題與 matched INIT 合約
+問題是：相同額外更新／episode 預算下，暖啟動與原生隨機初始化的表現如何？
+Pv32 暖臂：載入原始 Pv21 u400 actor／critic 權重，再建立全新 Adam。
+Pv33 隨機臂：全部 actor／critic weights 與 biases 使用 PlayerV21 原生 nn.Linear 初始化。
+初始化在 CPU、seed 17、隔離的 fork_rng(devices=[]) 中完成，之後還原呼叫者 RNG。
+P 與凍結 S 模型建構後，重新設定 training seed 17 與 permutation seed 27000017。
+隨機 u0 model-state SHA256：49a7c9426a1054fc000caf359fc1a0a3c90db49adfe6a53c3275350a9b5a7942。
+已驗證 fresh Adam；隨機 u0 與舊 original state 不同。
+原始 P lineage 經驗證，但 Pv33 learner 並未以其 P 權重初始化。
+兩臂同為 hidden 472、觀測 84，保留相同 teacher imitation、reward、loss 與 PPO 超參數。
+因此這是初始化起點比較，保留 clearance teacher imitation，並非 teacher-free pure PPO。
+沿用未改動的 Pv31 單 stream、外提 features、deferred sync 與 v32 lifecycle adapter。
+未採用 AMP、TF32、compile 或 CUDA graphs。
+S 鎖定 Sv24 u980，凍結權重、CPU stochastic；訓練 P stochastic／S stochastic。
+評估 P argmax／S stochastic；S validation seed offset 為 +24000000。
+
+二、固定預算與選模
+正式 training u1000、每 update E20、seed 17、cap 7200。
+10 個大核 CPU rollout workers，各單執行緒、batch 1，按 canonical episode 次序合併。
+worker pool 建立後才將 learner parent 固定 CPU 5；workers 固定 5..9、15..19。
+固定 validation 為原有 600000..600015 共 16 seeds，u0 與每 10 updates 執行。
+保存 101 個六位數 checkpoint、101 份 validation 與 1000 筆 update summaries。
+best 依 validation INTEGER total frames 嚴格大於才更新；同分保留較早者，u0 有資格入選。
+主要模型為 best u910；terminal u1000 獨立保存，作次要分析。
+沒有沿用舊暖臂 u0 分數門檻，也沒有 early stop、調參、seed search、resume 或 retry。
+final 不參與重新選模，best selection 維持凍結。
+
+三、執行完成與來源身分
+正式 run：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261116-0728-pv33m-random-init-u1000。
+正式啟動：2026-11-16 07:28:55.051064 HKT（Unix 1794785335.0510643）。
+supervisor 結束：2026-11-16 10:40:17.748883 HKT（Unix 1794796817.748883）。
+train、final 與 supervisor 均 exit 0；狀態 complete，errors 空，沒有 owner stop。
+來源 commit：ec1754da09f4813d6a4b88f7f7aeb3f8d9c9113b。
+source_tree_sha：f443aaa2b2acc559425c27ecf5a58ac0a7f0813ce5b0de417038b179e70280b8。
+封存來源 285 files，既存結案核對確認執行後未變；正式 NAS 216 files 已逐檔 hash 驗證。
+暖參考 run：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261115-2205-pv32m-warm-start-u1000。
+暖臂 training commit：32745bac06ca422d52598d4039ea47e0b3afff63。
+暖參考合約 PIN SHA：709782579fc961afb7691846529281a9e1f089c4ef33c15b9e426ed0abfa9eb1。
+暖參考 112 input files 執行前／後均未變；本次唯讀比對亦一致。
+隨機臂完成 20000 training episodes、81377765 frames。
+暖臂保存紀錄為 20000 training episodes、83378713 frames。
+兩臂相同的是額外 updates／episodes；實際 frames 不同，也未匹配終生預訓練算力。
+暖臂不同的預訓練歷史是起始策略比較的一部分。
+
+四、固定 validation 結果
+隨機 u0：4132 total frames，平均 4.304166666666666 秒。
+隨機 best u910：76988 total frames，平均 80.19583333333334 秒。
+隨機 terminal u1000：71825 total frames，平均 74.81770833333333 秒。
+暖臂 u0：平均 66.63020833333333 秒。
+暖臂 best u120：平均 77.821875 秒；terminal u1000：平均 67.93958333333333 秒。
+上述平均以 16 episodes、60 FPS 換算；選模使用整數 total frames。
+完整雙臂各 101 點曲線與 timings 已保存於 learning-comparison.json。
+
+五、共同基準與比較方向
+共同 seeds 800000..800063 曾用於 Pv25／Pv32，是已見 benchmark，非 fresh heldout。
+本次正式 final 只新增 Pv33 best u910 與 terminal u1000 各 64 episodes。
+暖 best u120、暖 terminal u1000 與輔助原始 Pv21 u400 均重用已保存結果。
+沒有重跑舊暖臂／Pv21 的訓練、final 或 episodes。
+逐檔 identity、model-state、模式與逐 seed 結果已相互核對。
+隨機與暖臂各模型均為 64 deaths、0 censored。
+PRIMARY：random best u910 減 warm best u120。
+隨機平均 68.38984375 秒；暖平均 70.68619791666667 秒。
+配對平均差 -2.2963541666666667 秒；95% CI [-7.069075520833333, 2.3875130208333326]。
+SECONDARY：random terminal u1000 減 warm terminal u1000。
+隨機平均 68.58098958333333 秒；暖平均 72.92838541666667 秒。
+配對平均差 -4.347395833333334 秒；95% CI [-9.05005859375, 0.6251692708333266]。
+輔助原始 Pv21 u400 保存平均 70.19765625 秒，不屬主要初始化差值。
+負值偏向暖啟動，正值偏向隨機初始化。
+既存驗證已從保存的逐 seed 資料獨立重算 paired bootstrap：10000 samples、seed 17、95% CI。
+此重算未重跑 episodes；CI 僅描述用途，沒有 CI 通過門檻；本次文件工作未再跑 bootstrap。
+
+六、科學解讀與限制
+本配對的主要與次要點估計都偏向暖啟動，但兩個 CI 均涵蓋 0。
+尚未證實暖啟動較好；CI 涵蓋 0 也不是等價證明或初始化普遍相同的證據。
+只有單一 init seed／training seed，且 benchmark 已見，推論範圍受限。
+隨機臂固定 validation 較高、共同基準較低，不能據此證明 overfitting 機制。
+不指定差異成因，不宣稱可靠的學習優勢，也不依 final 改選 checkpoint。
+本次結案不包含晉升、新實驗或額外圖表；完整曲線可由保存 JSON 查閱。
+
+七、既存驗證與資源證據
+parent 保存的 scoped CPU 驗證：19 passed in 2.81s，並非全專案測試。
+非正式 CUDA smoke：full cap 7200、u1／E3／W2／validation 2、鎖定 S／隨機初始化，無 FINAL。
+同一 runtime 的獨立 CPU constructor 已確認預設 seed17、呼叫者 RNG 還原與 fresh Adam。
+smoke 確認 P 在 u1 更新、S 固定及資源釋放；這些均是既存證據，本次未重跑。
+實際 runtime：Python 3.12.3、Torch 2.11.0+cu128、CUDA 12.8、NVIDIA GB10。
+10 個唯一 training workers 皆有非零 CPU 時間／tasks，frozen_S_verified=true、無 CUDA 初始化。
+training worker tasks 合計 21616 = 20000 + 101×16。
+final worker stats 未保存，因此不推算或杜撰 final worker 分布。
+既存釋放紀錄：已知 trainer／final／supervisor／workers 均結束。
+精確 spawn／resource_tracker 查詢空、GPU processes 空、/dev/shm 空。
+原始隨機 train total_s=11421.950479699008；rollout_s=9220.141977270774。
+隨機 ppo_s=1470.9032339175756；validation_s=628.9364113398769。
+暖 total_s=11843.68446211399；rollout_s=9569.676923219187。
+暖 ppo_s=1502.6536705497565；validation_s=670.6248503880342。
+兩臂 frames 不等，這些時間僅描述保存執行，不是速度基準或初始化造成加速的因果證據。
+
+八、唯讀證據索引與精選 SHA256
+正式產物目錄：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261116-0728-pv33m-random-init-u1000
+完整 216 檔清單：/mnt/minion/88_minion_rw/projects/qrokkun26/assets/pv33-random-init/formal-file-hashes.json
+完整暖 112 input hashes：/mnt/minion/88_minion_rw/projects/qrokkun26/assets/pv33-random-init/warm-reference-verified.json（identity.file_hashes）
+結果核對：/mnt/minion/88_minion_rw/projects/qrokkun26/assets/pv33-random-init/verified-results.json
+啟動／結束：/mnt/minion/88_minion_rw/projects/qrokkun26/assets/pv33-random-init/formal-launch.json；formal-exit.json
+live 初始化核對：/mnt/minion/88_minion_rw/projects/qrokkun26/assets/pv33-random-init/formal-live-verified.json
+來源部署／smoke／CPU：/mnt/minion/88_minion_rw/projects/qrokkun26/assets/pv33-random-init/deployment.json；smoke-verified.json；parent-tests.log
+以下 file SHA 由本次唯讀 hashlib 計算；model-state SHA 與序列化檔案 SHA 分開記錄。
+manifest.json SHA256：0f56294f774e2c36d4891ab79f4a3fd7d6217428c90745c54e036546988b48a2
+closed.json SHA256：fb361c193262fde684e3a9e56d960a2717d145d3d81ca6876f2299a905cfbb3a
+final.json SHA256：19d145e03feb46a5511023cd85dedb19277dec3c32a047bf2b556e2339f6518a
+learning-comparison.json SHA256：52a5d0d0c79134cffc61066a8a6daacdd8df515060afae32991b29b5fffae048
+checkpoint-000910.pt SHA256：a295818cf130c490c1d7b728945ed3bf0b51f15b027d8f3b91d0559020aca8bf
+checkpoint-001000.pt SHA256：aca556a49747f8f858d8475d718f2d349bca82e9d3b9554c78c08d613bb7170f
+verified-results.json SHA256：22bdaee309f6d3f59e319233c18727c965c88d88edd2b803b8d48e65490558ce
+formal-file-hashes.json SHA256：c35eeb6fa3f98d1cb543ed2499cc6c01c0e76046ffa8a533d3d3432b7030abbb
+best u910 model-state SHA256：1c2a21934373a45736e2527508766458dcbdfc3ea589079a01fd40cc4398cbde
+terminal u1000 model-state SHA256：19271e3c9e97bcc6281b851b4d763893308921c101dfaf24e03fe05202710894
+本次僅新增此報告並附加兩份索引；沒有變更證據、來源、測試或既有 journal。

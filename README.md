@@ -244,3 +244,6 @@ Pv32m warm-start u1000 結案補充（2026-11-16）：正式 u1000/E20/seed17 �
 固定單一初始化與單一訓練 seed 不能證明初始化普遍優劣，不將速度或強度差異直接歸因於初始化。原始 Pv21 保存分數 70.19765625 秒僅供輔助參考。暖參考為 `20261115-2205-pv32m-warm-start-u1000`，training commit `32745bac06ca422d52598d4039ea47e0b3afff63`；完整固定舊檔雜湊見 `qrokkun_ai/v33/warm-reference.json`，不修改舊產物。可透過 `--warm-reference-dir` 指定 GB10 上相同內容的可攜副本；v32 與 v33 的版本／source fingerprint 本來就不同。
 
 本次僅完成實作與 CPU fixture 驗證；未執行 GPU、CUDA smoke 或正式訓練。獨立測試、一次 fresh source readiness review、部署、CUDA smoke 與正式執行由 parent 處理。
+
+
+Pv33m random-init u1000 結案補充（2026-11-16）：train／final／supervisor 均 exit 0、complete；完成 20000 episodes、81377765 frames。與保存 Pv32 暖臂比較相同額外 u1000／E20 預算（非相同 frames 或終生預訓練算力）。PRIMARY best u910 減 warm best u120 為 -2.2963541666666667 秒，95% CI [-7.069075520833333, 2.3875130208333326]；SECONDARY terminal 相減為 -4.347395833333334 秒，95% CI [-9.05005859375, 0.6251692708333266]。點估計偏向暖啟動，兩個 CI 均涵蓋 0，未證實暖臂較好，也不證明等價；單一 seed、已見共同 benchmark 限制推論。僅新增隨機 best／terminal 各 64 episodes，暖／Pv21 結果重用保存資料。見[完成報告](docs/journal/2026-11-16-1794797146-pv33-random-init-u1000-completion-report.txt)。本日期結案附錄取代先前 pending／未執行 CUDA smoke、正式訓練或 random 臂之執行狀態；原條目、預註冊與歷史結論保留為當時快照。
