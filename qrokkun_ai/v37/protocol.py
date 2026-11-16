@@ -1,5 +1,6 @@
 """Trial pairing and explicit source archive; no formal/final seed protocol."""
 import json
+import re
 from pathlib import Path
 import subprocess
 import tarfile
@@ -10,11 +11,30 @@ def schedule(updates):
 def better(total, previous): return total > previous
 
 def archive_source(commit, destination):
-    subprocess.run(['git','archive','--format=tar','-o',str(destination),commit],check=True)
+    """Archive checkout bytes verified against commit, or deployed closure bytes.
+
+    Without root .git, commit is explicit caller-supplied provenance, not a
+    locally verified Git identity. The existing source_tree_sha identifies the
+    executed production bytes independently of that provenance.
+    """
+    if not isinstance(commit, str) or not re.fullmatch(r'[0-9a-fA-F]{40}', commit):
+        raise ValueError('--source-commit must be a 40-char hex SHA')
     root = Path(__file__).resolve().parents[2]
+    from .fingerprint import source_files
+    paths = source_files()
+    if not (root / '.git').exists():
+        with tarfile.open(destination, 'w', format=tarfile.PAX_FORMAT,
+                          pax_headers={'qrokkun.source_commit': commit,
+                                       'qrokkun.source_identity': 'explicit-provenance; current-production-closure; git-unverified'}) as archive:
+            for path in paths:
+                archive.add(path, arcname=str(path.relative_to(root)), recursive=False)
+        return
+    # Explicit git-dir prevents discovery of an unrelated ancestor checkout.
+    subprocess.run(['git', '--git-dir=' + str(root / '.git'),
+                    '--work-tree=' + str(root), 'archive', '--format=tar',
+                    '-o', str(Path(destination).resolve()), commit], cwd=root, check=True)
     with tarfile.open(destination) as archive:
-        from .fingerprint import source_files
-        for path in source_files():
+        for path in paths:
             name=str(path.relative_to(root))
             try:
                 archived = archive.extractfile(name)

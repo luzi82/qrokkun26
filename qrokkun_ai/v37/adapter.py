@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from functools import partial
 from pathlib import Path
 import json
+import sys
 import numpy as np
 from qrokkun_ai.v31 import core
 from qrokkun_ai.v32.pool import EpisodePool as LifecyclePool
@@ -44,9 +45,55 @@ def runtime(search=False, root=None):
             for k,v in previous.items(): setattr(core,k,v)
             episode.SEARCH, episode.ROOT = saved
 
-def worker(*args, search, root):
+class _CloseCapture:
+    def __init__(self, resource, errors):
+        self.resource, self.errors = resource, errors
+
+    def __getattr__(self, name):
+        return getattr(self.resource, name)
+
+    def close(self):
+        try:
+            return self.resource.close()
+        except BaseException as exc:
+            self.errors.append(exc)
+
+
+def worker(conn, *args, search, root):
+    errors = []
     with runtime(search, root):
-        return _ORIGINAL_WORKER(*args)
+        previous = core._open_child_shm
+        try:
+            core._open_child_shm = lambda *a, **kw: _CloseCapture(previous(*a, **kw), errors)
+            result = _ORIGINAL_WORKER(_CloseCapture(conn, errors), *args)
+        except BaseException as primary:
+            if errors:
+                failure = BaseExceptionGroup('v37 worker cleanup failed', [primary, *errors])
+                print(repr(failure), file=sys.stderr)
+                raise failure from primary
+            raise
+        finally:
+            core._open_child_shm = previous
+    if errors:
+        failure = BaseExceptionGroup('v37 worker cleanup failed', errors)
+        print(repr(failure), file=sys.stderr)
+        raise failure
+    return result
+
+
+class _ExitCapture:
+    """Read exitcode after v32's join, before Process.close invalidates it."""
+    def __init__(self, process, errors):
+        self.process, self.errors = process, errors
+
+    def __getattr__(self, name):
+        return getattr(self.process, name)
+
+    def close(self):
+        code = self.process.exitcode
+        if code not in (None, 0):
+            self.errors.append(RuntimeError(f'worker exited with code {code}'))
+        return self.process.close()
 
 class EpisodePool(LifecyclePool):
     def __init__(self, *args, search=False, root=None, **kwargs):
@@ -65,7 +112,12 @@ class EpisodePool(LifecyclePool):
         errors = []
         result = None
         try:
-            result = super().close()
+            children = self.children
+            try:
+                self.children = [(conn, _ExitCapture(proc, errors)) for conn, proc in children]
+                result = super().close()
+            finally:
+                self.children = children
         except BaseException as exc:
             errors.append(exc)
         try:

@@ -148,6 +148,7 @@ def test_close_attempts_all_cleanup_and_preserves_errors(monkeypatch):
     monkeypatch.setattr(adapter.LifecyclePool, 'close', fail_close)
     monkeypatch.setattr(adapter.Path, 'glob', lambda *args: [Sidecar('one.npz'), Sidecar('two.npz')])
     pool = object.__new__(adapter.EpisodePool)
+    pool.children = []
     pool.root = 'in-memory'
     with pytest.raises(BaseExceptionGroup) as caught:
         pool.close()
