@@ -1,0 +1,109 @@
+2026-11-17T03:11:28.236713+08:00 HKT (Unix 1794856288)
+Pv35m input64 u1000 completion report — documentation closure
+
+Outcome and interpretation
+The completed Pv35m experiment has 1000 updates, 20000 training episodes and
+80777784 training frames. Validation-selected best u330 remains PRIMARY;
+terminal u1000 remains SECONDARY. Both common64 paired difference point
+estimates favor Pv35, but both descriptive 95% CIs include zero. Improvement
+has not been demonstrated; equivalence has not been demonstrated either.
+These results do not promote a new model.
+
+Objective and model contract
+Extend P actor/critic raw bullet input from 12 to 64 bullets plus their live
+masks, while retaining teacher12 and clearance12 and the unchanged Pv34
+harmless-bullet filter before stable distance ordering/top64 selection.
+Each actor/critic input expands 84 -> 344: player6, raw bullets64x4, mask64,
+clearance9 and safe flags9. Both heads retain hidden472, decoupled Tanh MLPs
+and nine actions. Environment physics, reward, teacher/clearance algorithm,
+PPO and Pv31 cuda_hoisted_single_stream backend remain unchanged.
+This gives raw network access to up to 64 filtered candidates; it does not
+mean the network sees every physical bullet, nor that teacher/clearance use64.
+
+Initialization is a paired embedding of the exact saved Pv34 UNTRAINED random
+u0 realization (initialization seed17), not trained best/terminal weights.
+For both first layers, old player/bullet columns0:54 map to0:54,
+mask54:66 to262:274, clearance66:84 to326:344. Additional raw54:262 and
+mask274:326 columns start at zero; later weights/biases are copied exactly.
+This uses old fan_in84 initialization, not native fan_in344 initialization;
+new columns can subsequently learn. Exact mapped weights do not assert
+bit-identical expanded-GEMM logits or trajectories. Both Adam optimizers are
+fresh. The inherited old trained-player CLI path is unused provenance only,
+never a learner warm start. Frozen stochastic CPU Sv24 best u980 is unchanged.
+
+Protocol and reproducibility
+Candidate source: 4f8a8bf63fc357c520c08b3d0b6727c414ddc476 (local source commit,
+not pushed; no external push authorized or performed for this closure).
+Actual training runtime: Torch 2.11+cu128; this differs from the local CPU venv.
+Candidate run:
+/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261116-2226-pv35m-input64-u1000
+Saved control:
+/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261116-1219-pv34m-threat-filter-u1000
+Control training source: e6d26e3cefd95327ac2592b9ba2c7ca9c958f194.
+Control pin SHA256: 96b34041b81e733e9f2d005e26af41d3b1b8e684e787c79e1f812bb9a7432cba.
+
+Same u1000/E20/cap7200/init17/train17 contract, 10 pinned CPU workers and
+single-stream backend; matched updates/episodes, not matched frames or time.
+P training is stochastic, validation/final deterministic argmax against
+stochastic frozen S. Fixed validation seeds600000..600015 at u0 and every10
+updates yield 101 validations and 101 checkpoints. Best uses strict integer
+validation-frame totals, with earlier checkpoint retained on ties. No retry,
+resume, score floor or early stop. Final follows completed training and locked
+best, using the previously seen common seeds800000..800063. Saved Pv34
+best210 and terminal1000 results are reused; no control reevaluation.
+Descriptive paired bootstrap uses 10000 resamples, seed17, 95% intervals.
+Single initialization/training seed17 and the previously seen common window
+limit inference: this is not fresh heldout or evidence of general superiority.
+No post-score switch of terminal to PRIMARY is permitted or made.
+
+Actual completion and results (seconds; higher survival is better)
+Formal start: 2026-11-16T22:26:50.084284+08:00.
+Training duration: 4.089520856732496 hours (approximately4.08952h).
+Training plus final complete: 2026-11-17T02:33:29.551281+08:00.
+Validation best u330: 78.1760417s; terminal u1000 validation: 70.2041667s.
+These 16-seed validation scores are distinct from the common64 final below.
+
+PRIMARY, selected best: Pv35 u330 71.6138021s vs Pv34 best u210 67.2815104s.
+Candidate-minus-control mean difference +4.3322917s;
+paired bootstrap 95% CI [-1.1203581, +9.7862826]s.
+Candidate median72.6916667s, std14.4528389s; paired wins/ties/losses40/0/24;
+0 candidate censored episodes.
+SECONDARY, terminal: Pv35 u1000 72.2945313s vs Pv34 u1000 70.4307292s.
+Candidate-minus-control mean difference +1.8638021s;
+paired bootstrap 95% CI [-2.6112305, +6.3424674]s.
+Candidate median74.2166667s, std12.8564544s; paired wins/ties/losses36/0/28;
+0 candidate censored episodes.
+Terminal's higher final point estimate does not change the primary endpoint.
+
+P checkpoint SHA256 identities
+Best checkpoint-000330.pt file:
+32dcd69451f338b5fa606df371292b7cd710e83865a498a0e9ea3810f36f0a17
+Best actor/critic state:
+48f134584609802ab9f15ca0c2ef4cb76d562b6f7af7bc67a706c01de20f968d
+Terminal checkpoint-001000.pt file:
+5645d80a1ac5923ab07e7d4af3f02a3fba1069952d8606b4f1c6ce5c1807a316
+Terminal actor/critic state:
+b05e999d233b3ecbd08630a6f9359f3fc727e8c3075c73a7d815950702d7d43e
+
+Evidence and closure scope
+Evidence directory:
+/mnt/minion/88_minion_rw/projects/qrokkun26/assets/pv35-input64/
+Read verified-results.json, formal-launch.json, smoke-verified.json and
+review-acceptance.json. Saved acceptance is accepted; CUDA smoke completed
+one update without final, confirmed exact u0 mapping, initially zero extra
+columns, fresh Adam, changed actor/critic tensors, frozen S and cleanup.
+Completed verification covers all1000 updates, 101 validations/checkpoints,
+216 artifact hashes, 113 pinned control hashes, actual64-seed final means
+and paired bootstrap. Verified-results timestamp:2026-11-17T02:35:20.468290+08:00.
+Existing liveness/cleanup verification confirms no GPU job remains: actual
+trainer, supervisor and workers are absent, cleanup_verified=true and
+remaining_zombies={}. These are saved verified findings, not a new remote check.
+
+This closure only writes this new report and appends root README.md and
+docs/AGENT_VERSIONS.md. No training, evaluation, tests, review, agents, SSH,
+GPU/network actions, commit or push were run. Prior closure logs are preserved.
+This dated completion supersedes only earlier pending execution statements in
+the v35 implementation journal, root README and catalog; those documents and
+historical conclusions remain historical snapshots, not rewritten results.
+Implementation record:docs/journal/2026-11-16-1794838237-pv35-input64-implementation.txt.
+Contract/model details:qrokkun_ai/v35/README.md (historical implementation text).

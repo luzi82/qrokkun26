@@ -172,3 +172,6 @@ Pv34m 威脅觀測過濾 u1000 結案補充（2026-11-16）：train／final／su
 ### Pv35m — input64, teacher12 / clearance12 (2026-11-16; implementation only)
 
 New `qrokkun_ai/v35` expands both actor and critic inputs84→344, hidden472, following unchanged Pv34 filtering/order. Exact saved Pv34 random u0 realization is embedded with only additional raw/mask columns zeroed; fresh Adam and frozen Sv24. Versioned model metadata, spawn worker hooks, dedicated supervisor/final and production dependency fingerprint are local to v35. Closed Pv34 best210/terminal1000 common64 results are reused, never rerun. Formal protocol unchanged; parent independent review, CUDA smoke and launch pending. See `qrokkun_ai/v35/README.md`. No scientific result or promotion claim.
+
+
+Pv35m input64 u1000 結案補充（2026-11-17）：完成 1000 updates／20000 episodes／80777784 frames；PRIMARY best u330 common64 71.6138021s vs Pv34 best u210 67.2815104s，候選減對照 +4.3322917s（95% 配對 CI [-1.1203581, +9.7862826]）；SECONDARY terminal +1.8638021s（CI [-2.6112305, +6.3424674]）。兩個 CI 均跨 0，未證實改善或等價；單一 init/train seed17、已見 common64，非新 heldout，無模型晉升。見[完成報告](journal/2026-11-17-1794856288-pv35-input64-u1000-completion-report.txt)。本附錄僅取代舊 pending 執行狀態；歷史條目保留。
