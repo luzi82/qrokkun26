@@ -198,3 +198,6 @@ See [verification](journal/2026-11-17-1794859706-gv36-cardinal-normalization.txt
 
 
 Pv37: two roles `control` / `search`, both Gv36 normalized integer cached P and Pv35 model64 untrained seed17 embedding with fresh Adam; frozen stochastic Sv24u980. H60/beam256/top8 death teaching; teacher12/clearance12 unchanged; CE0.1 separate actor Adam step per update. Nonformal paired trial only; no final trial evaluation; formal pending owner after trial. Historical Gv36 naming/reports unchanged. See `docs/journal/2026-11-17-1794861120-pv37-implementation.txt`.
+
+
+Pv37 bounded trial 結案（2026-11-17）：Gv36 matched untrained u0、兩臂各 2 updates/E3；search 6 次搜尋、5 條成功路徑、300 幀示範及 2 次額外 actor 更新，僅證明接線，無強度／promotion 結論。見[結果報告](journal/2026-11-17-1794872251-pv37-bounded-trial-results.txt)。本附錄僅取代先前未執行 trial 的狀態，歷史條目保留；正式 1000/E20 control→learning 與完整 final 協定仍待 owner 確認及實作，尚未啟動。

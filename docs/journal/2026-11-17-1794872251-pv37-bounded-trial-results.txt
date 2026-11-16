@@ -1,0 +1,84 @@
+Actual HKT: 2026-11-17T07:37:31.620525+08:00 UNIX: 1794872251
+
+Pv37 bounded trial completion — engineering wiring proof only
+
+Evidence and scope
+Authoritative parent-recomputed evidence:
+/mnt/minion/88_minion_rw/projects/qrokkun26/assets/pv37-death-search/trial-verified.json
+(verified 2026-11-17T07:35:40.487053+08:00).
+Public contract: same asset root/contract.json; repository copy:
+qrokkun_ai/v37/contract.json.
+Prior implementation record: 2026-11-17-1794861120-pv37-implementation.txt.
+This report supersedes only prior pending/no-real-trial execution status. Earlier
+entries, contracts, implementation snapshots and conclusions remain historical.
+
+Executed contract
+GB10, CUDA, torch 2.11; control first, then search. Each arm completed 2 updates,
+E3, W2, cap7200, validation2, seed17. Both began from matched untrained Pv35 u0
+zero-column embedding with fresh Adam, using cardinal-normalized Gv36 and frozen
+stochastic Sv24 u980. Actual source commit:
+781aecdb4b81a0f799e618f05d7897ca2ba650a7 (local, not pushed; only older Gv36 push
+was authorized). Successful immutable deployment/results reside in asset root
+trial-fixed. Gv20 and historical Pv35 results are not the matched control.
+
+Death search uses all anchor-live bullets, actual Gv36 motion/canonical keys,
+D-12/H60/beam256/top8, full S/field validation, and the first successful path only.
+Ordinary PPO, teacher12, clearance12 and observation filtering remain unchanged.
+Successful pre-action observations/actions feed actor-only imitation CE with fixed
+coefficient 0.1: one separate actor-Adam step per update, mean CE, at most 512
+samples selected with independent fixed RNG, this update only; no replay across
+updates. This is a provisional engineering choice, without score-based tuning.
+Demonstrations are not inserted as fake on-policy PPO samples, value targets or
+teacher labels. Validation performs no teaching.
+
+Parent-verified results
+                                    control           search
+Deaths                              6                 6
+Searches                            0                 6
+Generated candidates                0                 48
+Actually validated paths            0                 13
+Accepted successful paths           0                 5
+Pre-action demonstration frames     0                 300
+Auxiliary actor steps               0                 2
+Ordinary training frames            790               836
+Total wall cost (s)                  4.024713293       12.724575006
+Censored / early-skipped episodes   0 / 0             0 / 0
+
+Search demonstrations were 180 then 120 frames (five accepted H60 paths).
+Validation stops at first success: only 13 of 48 generated candidates were
+actually validated. Do not interpret 13/48 as an all-candidate validation or
+success rate; unvalidated candidates have no measured outcome.
+
+Initial model states were byte-identical; first ordinary rollout and PPO metrics
+were identical. Final Adam counters: control actor8/critic8, search actor14/critic12.
+The search actor/critic difference confirms the 2 additional actor-only steps;
+ordinary minibatch counts can differ after the trajectories diverge. Parent marks
+search learning wiring verified, with no blocker; control has no search teaching.
+This establishes execution of the auxiliary update, not improved model strength.
+
+Search/control wall ratio = 3.161610301061316 (about 3.16161x), descriptive only for
+these tiny, short episodes. It is not a formal-run cost projection. Summed worker
+search_s = 12.869348392006941 overlaps across workers and must not be added to wall
+cost. Search replay_s = 0.006131200003437698, validate_s = 0.0616034840059001,
+aux_s = 0.0064399560214951634 are recorded component costs, not extra wall charges.
+
+Preserved failures and acceptance evidence
+The first trial failed before ANY scientific cases because a git archive lacked
+.git. That failed attempt remains at assets/pv37-death-search/trial. Source was
+corrected and a new immutable deployment used trial-fixed; no scientific cases
+were rerun. Other preflight/review-fix logs remain retained in the asset evidence.
+Parent acceptance: 108 tests passed in 9.47s (42 Pv37 + 23 Pv35 + 43 environment).
+Independent review5 found no actionable findings for this trial. These are saved
+prior evidence, not tests or reviews performed by this documentation task.
+
+Closure and pending work
+Parent verified cleanup: GPU and workers released. No validation teaching, no
+800000 final-window access, no final evaluation and no formal run started.
+Two updates support no accuracy, effect-size, promotion or model-strength claim.
+Formal 1000/E20 control-then-learning and the complete final protocol STILL require
+owner confirmation AND implementation; the trial CLI explicitly rejects formal
+execution. Bounded-trial completion does not authorize or implement formal work.
+
+This task only adds this report and appends README/version-catalog links. No
+production, tests, old journals or runtime artifacts changed; no agents, review,
+tests, SSH, GPU, network, training, commit or push were performed for this task.
