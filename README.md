@@ -271,3 +271,11 @@ Owner naming decision supersedes Pv36 death-search-teaching name with **Pv37**;
 design unfinished, no AI v36/v37 implementation or training. Gv36 changes rules
 and needs a new control before Pv37; no old Pv35 direct causal comparison,
 new baseline/control model assignment, or Godot mirror in this task.
+
+Gv36 cardinal normalization (2026-11-17): current Gv36 commits `x1,y1` in
+`0..9`: `q,r=divmod(cardinal,10)`, `origin+=17*q`, `cardinal=r`; diagonal
+counts stay unchanged. This supersedes only the unbounded cardinal representation.
+Algebraic origins may leave the legal rectangle; canonical keys and cached physics
+remain unchanged from original Gv36. Valid old snapshots are accepted and normalized
+after validation. Pv37 is not implemented.
+See [verification](docs/journal/2026-11-17-1794859706-gv36-cardinal-normalization.txt).

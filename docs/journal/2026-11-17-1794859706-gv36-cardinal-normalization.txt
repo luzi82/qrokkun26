@@ -1,0 +1,38 @@
+2026-11-17 HKT — current Gv36 cardinal normalization
+Baseline clean: 6749a83058b83630e6116a7ab6febeda168df68f.
+
+Supersedes only unbounded cardinal representation. Every P commit has x1,y1
+in 0..9 via q,r=divmod(cardinal,10); origin+=17*q; cardinal=r.
+Negative -1 becomes origin-17,9. Diagonal counts unchanged.
+A=10*origin+17*cardinal and B=17*diagonal stay identical; the float64 canonical
+formula and float32 movement cache remain unchanged. Algebraic origins may leave
+the legal rectangle. Bounds use actual canonical coordinates. Restore first
+validates original integers, bounds, cache and velocity, then normalizes and
+retains the original cache. Reads remain O(1). Pv37 is not implemented.
+
+Evidence:
+/mnt/minion/88_minion_rw/projects/qrokkun26/assets/gv36-normalization/evidence/1794859599/
+original_6749a83.py SHA256:
+7b7452c8f591c91d76122545c957fa08b38c9ea989580bd1b40151cd1178b29d
+red.log: initial negative restore test actually fails because x1 remains -1,
+1 failed in 0.05s. green.log: same test passes, 1 passed in 0.02s.
+New tests cover carries, independent axes, unchanged diagonals/formula/cache,
+actual bounds with outside origins, legacy restore, roundtrip, clone independence
+and invalid restore atomicity. Existing tests only update obsolete count assertions;
+exact-boundary idle retains normalized P and the other axis; raw-inside rounded
+boundary test is unchanged.
+
+differential.py loads preserved original outside production. Fixed mixed signed
+actions reach walls and include restores. differential.log: 1976 movement frames,
+22 old snapshot restores, exact canonical key, cached xy and velocity each frame.
+Comparison is with original Gv36, not Gv20; no full-world random trajectory claim.
+
+Full environment suite: 43 passed in 0.88s (env-suite-final.log).
+PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
+GIT_CEILING_DIRECTORIES=$TMPDIR PYTHONPATH=. .venv/bin/python -m pytest
+--ignore=tmp -q -p no:cacheprovider
+--basetemp=$TMPDIR/gv36-normalization-suite qrokkun_env/tests
+Intermediate env-suite.log records a new diagonal assertion using int instead of
+sign; corrected in final run. Basetemp directories cleaned after verification.
+No older environment, Godot, AI, S, bullets or physics formula changes.
+No training, network, SSH, subagents, delegated review, commit or push.

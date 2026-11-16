@@ -7,6 +7,8 @@ A=10*origin+17*cardinal and B=17*diagonal. This canonical operation order
 makes equivalent integer keys share caches; cache reads never evaluate it.
 Counts accumulate signed steps, never float positions. Clamp tests the raw
 proposal, resets only out-of-bounds axes to integer wall origins, then commits.
+Cardinal counts are rebased to 0..9 with divmod(count, 10), adding 17
+times the quotient to the algebraic origin; canonical keys stay unchanged.
 The immutable P snapshot includes velocity but is NOT a world checkpoint:
 search must separately preserve clocks, bullets, RNGs, S and event stream.
 No integer features are added to observations. Moving trajectories need not
@@ -89,6 +91,11 @@ class Gv36Env(Gv20Env):
     def _coordinate(origin, cardinal, diagonal):
         return (10*origin + 17*cardinal + (17*diagonal)/math.sqrt(2)) / 10
 
+    @staticmethod
+    def _normalize_axis(origin, cardinal, diagonal):
+        quotient, cardinal = divmod(cardinal, 10)
+        return origin + 17*quotient, cardinal, diagonal
+
     def set_player_position(self, x, y):
         if type(x) is not int or type(y) is not int:
             raise ValueError('player origins must be Python integers')
@@ -125,7 +132,9 @@ class Gv36Env(Gv20Env):
             raise ValueError('inconsistent player cache')
         if not all(math.isfinite(v) and f32(v) == v for v in (state.pvx, state.pvy)):
             raise ValueError('velocity must be finite float32')
-        self._player = PlayerState(*counts, f32(x), f32(y), state.pvx, state.pvy)
+        counts = (self._normalize_axis(*counts[:3])
+                  + self._normalize_axis(*counts[3:]))
+        self._player = PlayerState(*counts, state.px, state.py, state.pvx, state.pvy)
         self.pvx, self.pvy = state.pvx, state.pvy
 
     def _integrate_player(self, dx, dy):
@@ -144,7 +153,7 @@ class Gv36Env(Gv20Env):
             if raw < lower or raw > upper:
                 origin, cardinal, diag = int(lower if raw < lower else upper), 0, 0
                 raw = float(origin)
-            axes.append((origin, cardinal, diag, f32(raw)))
+            axes.append((*self._normalize_axis(origin, cardinal, diag), f32(raw)))
         x, y = axes
         vx, vy = f32(dx*C.PLAYER_MAX_SPEED), f32(dy*C.PLAYER_MAX_SPEED)
         self._player = PlayerState(*x[:3], *y[:3], x[3], y[3], vx, vy)

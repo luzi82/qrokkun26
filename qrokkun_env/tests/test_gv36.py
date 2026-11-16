@@ -28,7 +28,12 @@ def test_actions_and_velocity():
         move(e, a)
         dx, dy = e._parse_action(a)
         diagonal = dx != 0 and dy != 0
-        assert (e.x1, e.y1) == ((0, 0) if diagonal else (int(dx), int(dy)))
+        cx, cy = (0, 0) if diagonal else (int(dx), int(dy))
+        assert (e.x0, e.x1, e.y0, e.y1) == (
+            160+17*(cx//10), cx % 10, 126+17*(cy//10), cy % 10)
+        assert (e.px, e.py) == (
+            f32(e._coordinate(160, cx, int(math.copysign(1, dx)) if diagonal else 0)),
+            f32(e._coordinate(126, cy, int(math.copysign(1, dy)) if diagonal else 0)))
         assert (e.x2, e.y2) == ((int(math.copysign(1, dx)), int(math.copysign(1, dy))) if diagonal else (0, 0))
         assert (e.pvx, e.pvy) == (f32(dx*102), f32(dy*102))
 
@@ -107,8 +112,13 @@ def test_raw_inside_rounded_boundary():
 def test_exact_boundary_no_reset():
     e = Gv36Env()
     e.restore_player_state(replace(e.get_player_state(), x0=289, x1=10, px=306.))
+    # Keep a nontrivial other axis so an unnecessary whole-player reset fails.
+    move(e, 's')
+    before = e.get_player_state()
     move(e, 'idle')
-    assert e.x1 == 10
+    assert (e.x0, e.x1, e.x2) == (306, 0, 0)
+    assert replace(e.get_player_state(), pvx=before.pvx, pvy=before.pvy) == before
+    assert (e.pvx, e.pvy) == (0., 0.)
 
 
 def test_cache_readonly_and_observation(monkeypatch):
