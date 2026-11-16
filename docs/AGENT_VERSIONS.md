@@ -165,3 +165,6 @@ Pv33m random-init u1000 結案補充（2026-11-16）：train／final／superviso
 ## Pv34m：保守不可能碰撞觀測過濾（待正式執行）
 
 沿用 Pv33m 從零初始化、Sv24u980、v31 數值核心與 v32 資源生命週期；只在 P 穩定距離排序／top64 前，依完整生命期可達集合外包移除可證無法碰撞的子彈。環境與 teacher 演算法不變，teacher 數值允許隨觀測改變。協定與證明見 [v34](../qrokkun_ai/v34/README.md)。未取代歷史結論；正式 CPU 獨立驗證、部署、CUDA smoke 與 u1000 由父流程負責。
+
+
+Pv34m 威脅觀測過濾 u1000 結案補充（2026-11-16）：train／final／supervisor 均 exit0、complete；20000 episodes、81274532 frames，與 Pv33 相同額外 u1000/E20 預算（非相同 frames／時間）。PRIMARY best u210 對 Pv33 best u910 差 -1.1083333333333332 秒，95% CI [-5.627656249999999, 3.5167057291666652]；SECONDARY terminal 差 +1.8497395833333337 秒，95% CI [-3.568639322916667, 7.137239583333329]。兩個 CI 均涵蓋零，未證實改善，亦非等價或無效證明。過濾移除約23.4%子彈觀測出現次數，非環境實體子彈；單一 seed、已見共同 benchmark 限制推論。見[完成報告](journal/2026-11-16-1794816495-pv34-threat-filter-u1000-completion-report.txt)。本日期附錄僅取代舊 pending／尚未執行狀態（supersedes execution status only）；原預註冊、歷史條目與結論逐字保留。

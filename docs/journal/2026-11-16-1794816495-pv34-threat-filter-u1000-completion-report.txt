@@ -1,0 +1,118 @@
+Pv34m 保守威脅觀測過濾 u1000 完成報告
+建立日期：2026-11-16 HKT；建立 Unix seconds：1794816495。
+正式執行已完成；觀測確有減少，但尚未證實 P 的能力改善。
+本報告只整理保存證據；未重新執行測試、評估、訓練或推論。
+
+研究問題與比較契約
+候選 Pv34m 與已完成 Pv33m 比較，只改變 P 的子彈候選觀測過濾。
+兩者均為額外 u1000、E20、20000 episodes；並非相同 frames 或相同時間。
+Pv34 訓練 81274532 frames；Pv33 對照 81377765 frames。
+所有 actor／critic 權重與 bias 均用 PlayerV21 原生 nn.Linear 初始化。
+初始化 seed17、CPU fork_rng，離開後還原呼叫者 RNG；兩個 Adam 全新。
+u0 raw state SHA256：49a7c9426a1054fc000caf359fc1a0a3c90db49adfe6a53c3275350a9b5a7942。
+全部模型及 S 建構後，重設 train seed17、permutation seed27000017。
+S 鎖定 Sv24 u980，凍結、CPU stochastic；實體子彈、碰撞與 S 觀測不變。
+P 過濾發生於所有 live candidates、穩定 Euclidean distance 排序 top64 之前。
+後續 top12、84 維輸入、hidden472、padding 與 teacher 公式均相同。
+HYPER、loss、reward 不變；teacher 輸出可因過濾後觀測改變。
+仍有 teacher imitation，不能稱為 teacher-free pure PPO。
+
+保守過濾與執行路徑
+只在能充分證明直到環境真正 cull 前，所有未來 P 動作序列均不可能碰撞時排除。
+不確定即保留；證明涵蓋碰撞半徑、出生靜止階段、float32 捨入與移動上界。
+採固定分離超平面、可達圓盤加合法矩形的充分測試，解析成本 O(live bullets)。
+這不是最大化無害子彈移除，也不是九個固定方向或短 12-frame gate。
+v34 限定範圍 spawn adapter 接入實際 v31 fast encoder，非僅離線展示。
+trajectory、teacher 與 PPO 使用相同過濾資料；沿用 v31 單流 hoist／deferred sync。
+沿用 v32 lifecycle；10 個 CPU 大核 workers 綁定 5..9、15..19。
+P 與 S rollout 推論均為 CPU batch1，CUDA 僅用於 PPO。
+父行程於 spawn 後綁 CPU5；deterministic，無 AMP、TF32、compile 或 graphs。
+episode cap7200／120秒與既有 seed mapping 不變。
+
+選模、保存與 final
+u0 與每 10 updates 於固定 600000..600015 共16 seeds 驗證。
+P argmax、S stochastic；共101 checkpoints、101 evaluations、1000 update rows。
+以整數 total_frames 嚴格較大更新 best，同分保留較早者，u0 有入選資格。
+PRIMARY 固定選中 best u210；SECONDARY 固定 terminal u1000。
+保存完整 Adam 與 RNG provenance；無 resume、retry、score floor、early stop 或 seed search。
+final 一次獨占 claim，只新增 Pv34 的128 episodes：兩個 checkpoint 各64。
+每臂使用相同且各自唯一的800000..800063，共同 benchmark 先前已見，非 fresh heldout。
+Pv33 best u910／terminal u1000 的逐 seed 保存結果重用，未重跑舊訓練或評估。
+對照狀態、checkpoint 身分及模式匹配，113 個 pinned files 保持原樣。
+差值定義為候選 Pv34 減對照 Pv33 的存活秒數；正數有利 Pv34。
+配對 bootstrap10000、seed17、95% CI 僅供描述；無最低增益或硬 CI gate。
+即使 terminal 的 final 較高，也沒有用 final 重新選模。
+
+final 結果（共同64-seed窗口）
+PRIMARY：Pv34 best u210 = 67.28151041666666秒；Pv33 best u910 = 68.38984375秒。
+PRIMARY 差值 -1.1083333333333332秒；95% CI [-5.627656249999999, 3.5167057291666652]。
+SECONDARY：Pv34 terminal = 70.43072916666667秒；Pv33 terminal = 68.58098958333333秒。
+SECONDARY 差值 +1.8497395833333337秒；95% CI [-3.568639322916667, 7.137239583333329]。
+候選兩臂各64 deaths、0 censors；兩個 CI 均涵蓋零。
+主要點估計較低，次要點估計較高；沒有 demonstrated improvement。
+亦不能據此證明等價、無效或一般方法劣勢。
+單一初始化／訓練 seed 與已見 benchmark 限制推論，不提出因果過擬合主張。
+
+固定 validation 曲線（不同於 final 窗口）
+Pv34 u0 = 4.270833333333333秒；best u210 = 79.725秒；terminal = 67.965625秒。
+上述為600000..600015窗口，不能與 final 平均值混合解讀。
+完整曲線與預算比較保存於 learning-comparison.json。
+
+觀測過濾統計
+TRAIN：considered4340254154／discarded1016467067／retained3323787087；23.41952869426365%。
+VALID：considered368367157／discarded86495339／retained281871818；23.48074125403096%。
+FINAL：considered28496338／discarded6676703／retained21819635；23.430038624612045%。
+這些是跨 frames 重複計數的子彈觀測出現次數，不是唯一實體子彈數。
+也不是從環境刪除的子彈數；移除觀測不等於已證實更強的 P。
+
+時間與完成狀態
+正式啟動：2026-11-16 12:19:04.226104 HKT（Unix1794802744.2261038）。
+正式結束：2026-11-16 16:03:02.519775 HKT（Unix1794816182.519775）。
+train、final、supervisor 均 exit0、complete；無已記錄錯誤或 owner stop。
+保存 train status 的 owner_stop=false；final 為 owner_stop=[]，errors=[]。
+Pv34 total_s13370.428430205007／rollout_s10991.873309232848／ppo_s1465.771420045232。
+Pv33 total_s11421.950479699008／rollout_s9220.141977270774／ppo_s1470.9032339175756。
+這是不同 frames 的描述性時間比較，不能作過濾造成速度差異的因果基準。
+本實驗未設最低速度門檻。
+
+既有驗證與資源釋放證據
+保存 CPU scoped suite：33 passed、4.81秒、exit0；不是全專案測試通過聲明。
+保存 CUDA smoke：真實 full cap7200、u1／E3／W2／validation2，沒有 final。
+smoke 使用 fresh Adam，全部12個 actor／critic 張量更新，S 固定凍結。
+smoke 訓練957次觀測中排除13次；獨立主機原生建構與 RNG 隔離均驗證。
+正式訓練池21616 tasks；10 workers 均有非零 CPU 時間。
+所有保存訓練 worker 統計均 frozen_S_verified=true、cuda_initialized=false。
+final worker 統計未持久保存，不能外推其逐 worker 數值。
+保存清理查核：已知 supervisor／train／final／10 workers 全部結束。
+精確 spawn／resource tracker 查詢空、GPU 空、/dev/shm 空。
+封存303檔於執行後未變；216個新 run artifacts 已有完整雜湊驗證。
+
+證據與可重現身分（以下均 SHA256）
+來源 commit：e6d26e3cefd95327ac2592b9ba2c7ca9c958f194。
+執行程式碼 fingerprint：739223ac410d28ff677c80f774fa242bb7e97a8e3795a5bbe9dd306ea6e73efe。
+正式 run：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261116-1219-pv34m-threat-filter-u1000
+對照 run：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261116-0728-pv33m-random-init-u1000
+對照 source：ec1754da09f4813d6a4b88f7f7aeb3f8d9c9113b。
+完整216檔清單：[formal-file-hashes.json](/mnt/minion/88_minion_rw/projects/qrokkun26/assets/pv34-threat-filter/formal-file-hashes.json)。
+303檔封存清單：[deployment.json](/mnt/minion/88_minion_rw/projects/qrokkun26/assets/pv34-threat-filter/deployment.json)，sha256_inventory 欄位。
+113檔對照 pin：[control-reference-verified.json](/mnt/minion/88_minion_rw/projects/qrokkun26/assets/pv34-threat-filter/control-reference-verified.json)。
+對照 pin_sha：a1c67f116b31ef334b0cf06027b10792fc089f76c0606c969dad2aa7f031480b。
+verified-results.json 實際檔案 SHA：286951713f331576d947e40c203a3b98d91f8b8883e1f270f6911ca89c4aec9f。
+完整 formal-file-hashes.json 實際檔案 SHA：ac6f977a31252fbde1ae0462852faa4e6dab326ecf62a7aad2685169fdd482f5。
+selected checkpoint-000210.pt 檔案 SHA：35bf1f8dcb9faaa055fe74702298d5880aa873a7bda455e45d2278abd5574254。
+selected u210 raw model state SHA：3526b210114cc32a62b28f5b67e606b8b74ac0a97dc9f1907e3d6dad065358ff。
+terminal checkpoint-001000.pt 檔案 SHA：c49736cb1281d4dbef17c94ff1d372fd0879452d6336fa89f8e30ebb92194d0c。
+terminal u1000 raw model state SHA：d72ae4fae6dc41d61c6c320336e8ed81fab076b323b3cf142968a570aeb10c09。
+manifest.json：73e0101ef4a7646791d066722ba6e60ffb094caba453a9fb7be6c0f968f21d78。
+closed.json：f61a2e47cf04fa65e2356dda8ab4276515ba163732753bff4cd7a72a88800e85。
+final.json：3fe611279aef5938f1a88e37fc52417cefd46a08447876055fb42589ccd90011。
+learning-comparison.json：b3b0b202b5619cc64d4a24de76b84cad89b671f877a11c88efc9d547a50d92c2。
+本次只讀 hashlib 逐檔核對216個候選檔與113個對照 pin，全部符合保存清單。
+raw state SHA 沿用保存驗證，未載入模型；303檔遠端封存未在本次重新查核。
+資源釋放與既有測試結果均引用保存證據，並非本次即時 GPU／程序查核。
+
+結案與歷史範圍
+本日期結案僅 supersede 舊索引「待執行／尚未正式執行」狀態。
+原預註冊、歷史 journal 與歷史結論逐字保留；沒有改寫方法契約。
+本次只新增此報告並附加 README.md、docs/AGENT_VERSIONS.md。
+未啟動新實驗、自動訓練、重試、PR、commit 或 push。
