@@ -168,3 +168,7 @@ Pv33m random-init u1000 結案補充（2026-11-16）：train／final／superviso
 
 
 Pv34m 威脅觀測過濾 u1000 結案補充（2026-11-16）：train／final／supervisor 均 exit0、complete；20000 episodes、81274532 frames，與 Pv33 相同額外 u1000/E20 預算（非相同 frames／時間）。PRIMARY best u210 對 Pv33 best u910 差 -1.1083333333333332 秒，95% CI [-5.627656249999999, 3.5167057291666652]；SECONDARY terminal 差 +1.8497395833333337 秒，95% CI [-3.568639322916667, 7.137239583333329]。兩個 CI 均涵蓋零，未證實改善，亦非等價或無效證明。過濾移除約23.4%子彈觀測出現次數，非環境實體子彈；單一 seed、已見共同 benchmark 限制推論。見[完成報告](journal/2026-11-16-1794816495-pv34-threat-filter-u1000-completion-report.txt)。本日期附錄僅取代舊 pending／尚未執行狀態（supersedes execution status only）；原預註冊、歷史條目與結論逐字保留。
+
+### Pv35m — input64, teacher12 / clearance12 (2026-11-16; implementation only)
+
+New `qrokkun_ai/v35` expands both actor and critic inputs84→344, hidden472, following unchanged Pv34 filtering/order. Exact saved Pv34 random u0 realization is embedded with only additional raw/mask columns zeroed; fresh Adam and frozen Sv24. Versioned model metadata, spawn worker hooks, dedicated supervisor/final and production dependency fingerprint are local to v35. Closed Pv34 best210/terminal1000 common64 results are reused, never rerun. Formal protocol unchanged; parent independent review, CUDA smoke and launch pending. See `qrokkun_ai/v35/README.md`. No scientific result or promotion claim.

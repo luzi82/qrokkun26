@@ -1,0 +1,14 @@
+2026-11-16 22:10:37 HKT (tool timestamp 1794838237)
+Pv35m continuation: implementation complete; formal planned/not started.
+
+Owner authorized continuation of partial v35 on baseline b5570ad. Historical code/tests/docs were read only, except append-only root README/catalog. No agents, review, SSH, GPU, network, install, commit or launch.
+
+Implemented split input64/teacher12/clearance12 with versioned344-dimensional actor/critic and paired exact old seed17 random u0 initialization. New input columns zero only initially; later parameters identical and caller CPU RNG preserved. Native344 fan-in initialization is explicitly superseded by paired84-column embedding for this feature extension only. No trained P loaded, Adam fresh, S unchanged. Saved control u0 checked independently against reconstructed model and control reference checked against actual closed Pv34 artifacts, 101 evaluations and final best210/terminal1000.
+
+Acceptance:22 focused tests passed in5.64s, including one actual spawn-worker microtraining path, final contract using synthetic return records (no actual final episodes), teacher/clearance invariance, extra-column gradients, weight mapping, lifecycle cleanup inheritance, preflight digest scope. API-name failure in earlier attempt was a test mistake, corrected to from_metadata; it is not feature RED. A separate in-memory old12 counterfactual documents why bullet13 requires input64; no research result inferred.
+
+Prior attempt used /tmp test paths; that legacy path mistake is preserved as author trace and is not a research outcome. This continuation used environment-approved TMPDIR for pytest, not /tmp. Earlier implementation.stderr was not found in repository/approved scratch or shallow /tmp search; no earlier artifacts changed. Existing logs and /tmp artifacts left untouched.
+
+Parent must independently review, commit/archive, run CUDA nonformal smoke via v35.supervise, then formal via v35.supervise. Formal data not authored here. No accuracy, P-value, threshold or promotion claim.
+
+Final validation also corrected the v35 disk-space estimate to input344 through a scoped hook; historical v31 remains unchanged. Final command disables pytest cacheprovider;22 tests passed in5.64s. Existing root pytest cache predates this task; earlier continuation commands used default pytest caching before the final command disabled it. No historical cache is deleted.
