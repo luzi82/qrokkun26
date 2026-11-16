@@ -1,0 +1,6 @@
+Pv34m 作者實作（HKT 2026-11-16T12:01:37.544263+08:00）
+新增 v34 conservative impossible-collision P observation filter、scoped v31 spawn adapter、沿用 v33 初始化與 v32 資源生命週期。
+Pv33 控制113檔唯讀 pin 驗證完成，原始 u0 state SHA 與 fresh Adam 已由 CPU 測試確認。
+26 focused CPU tests；第一個實際 RED 為缺 filter 模組，後續 spawn 統計接線 RED 修復；證據僅在 NAS author-evidence。
+固定方向投影與合法矩形外包，含實際 cull 生命期、birth stationary、f32 誤差；不確定保留，O(live bullets)。
+未作正式訓練、GPU、SSH、網路、commit 或 push。正式結果與改善尚未知；父流程負責獨立驗證與部署。
