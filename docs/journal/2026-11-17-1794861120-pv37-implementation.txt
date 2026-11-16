@@ -1,0 +1,67 @@
+Actual HKT: 2026-11-17T04:32:00.388021+08:00 UNIX: 1794861120
+
+Pv37 implementation handoff (author; no real model trial executed)
+
+Gv36 control/search both start isolated CPU Pv35 random_player(seed17) zero-column
+embedding u0, fresh Adam. Architecture remains v35; manifests/checkpoints bind Pv37
+role, Gv36 and new source digest. Teacher12, clearance12 and v35 filter unchanged.
+Sv24 u980 strict file/metadata/state lock remains readonly stochastic.
+
+Trial entrypoint: python -m qrokkun_ai.v37.run train. Explicit --nonformal mandatory;
+updates2/E3/W2/cap7200/val2/trainseed17 are enforced; no final evaluation entrypoint.
+Formal entrypoint refuses execution pending owner approval AFTER reviewed trial.
+Future formal defaults 1000/E20/W10/pin-on/val16 every10 are preparation only;
+formal final grading/control identity design remains pending. Never use Gv20 Pv35
+saved final as strict control. Search requires a completed matching Pv37 control.
+
+Search: actual Gv36 integer state integration/canonical position key, all anchor
+live bullets, D-12/H60/beam256/top8, inherited bullet predictor and fixed ranking.
+No future RNG or S/field inputs to planner. Frozen candidates checked against real
+no-spawn integrator then independent full-world replay. First full60 survivor only;
+60 actual filtered64 pre-action labels, no critic/teacher labels. Failure is not
+proof of no solution. Existing/new future bullet attribution is not inferred.
+
+Snapshot: explicit deepcopy of data excluding live generator/callback/capture;
+reconstruct deterministic event stream through known next event. Clone private S
+Torch generator into fresh per-branch sampler closure; shared S weights frozen.
+Two checkpoints at interval64 plus max128 recorded actions; restore requires <=63
+steps for anchor and scans deterministic event schedule from origin. Snapshot cost
+includes current bullets and histories, bounded by cap7200; no per-frame snapshot.
+
+Ordinary v31 rollout/PPO preserved (differential fixture). Auxiliary after ordinary
+PPO: one separate actor Adam step, weight0.1 mean CE, max512 without replacement via
+independent update-seeded generator. Engineering coefficient, no tuning claim.
+Empty/control/lambda0 skip. Critic weights and populated critic Adam state tested
+unchanged. Demos local to update in canonical episode order; selected accepted
+labels persisted per update, transient sidecars consumed/unlinked. Short UUID
+handles only in IPC; v32 cleanup retained. Validation never captures/searches.
+
+Per-episode teaching ledger and update metrics distinguish censored, early skip,
+searched, no candidate, validated failures/success, demo count, search/replay/validate
+cost; auxiliary loss/norm/samples/step/cost and ordinary PPO timing recorded.
+Report includes actual frames and total cost. No accepted path means honest
+unverified-learning blocker; no retries or seed/parameter fishing authorized.
+
+Source archive must be a real exact40 commit containing current production closure
+including Gv36/v37/required JSON, excluding tests/docs from fingerprint. Author has
+NOT committed. Parent must supply an accepted source commit before trial execution.
+Previous RED/green evidence preserved; continuation tests use tiny CPU fixtures,
+including one actual spawn-process case, not a real64 research evaluation.
+
+Parent commands AFTER independent readonly acceptance and source preparation:
+export PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
+export PYTHONPATH=.
+SOURCE_COMMIT=<accepted-exact40-production-commit>
+SV24=/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261111-1040-sv24-seed17-u1000/best.pt
+TRIAL_ROOT=<explicit-new-approved-trial-root>
+# Parent selects device; CPU shown. Keep control before search, separate directories.
+.venv/bin/python -m qrokkun_ai.v37.run train --role control --nonformal --updates 2 --episodes 3 --workers 2 --cap 7200 --validation 2 --seed 17 --device cpu --pin-cores on --source-commit "$SOURCE_COMMIT" --spawner-checkpoint "$SV24" --out-dir "$TRIAL_ROOT/control" > "$TRIAL_ROOT/control.log" 2>&1
+.venv/bin/python -m qrokkun_ai.v37.run train --role search --control-dir "$TRIAL_ROOT/control" --nonformal --updates 2 --episodes 3 --workers 2 --cap 7200 --validation 2 --seed 17 --device cpu --pin-cores on --source-commit "$SOURCE_COMMIT" --spawner-checkpoint "$SV24" --out-dir "$TRIAL_ROOT/search" > "$TRIAL_ROOT/search.log" 2>&1
+Create TRIAL_ROOT before log redirection; arm directories must not exist.
+Inspect status.json, manifest.json, updates.jsonl, teaching-report.json, closed.json,
+selected-demos-*.npz and logs. Parent reports costs and actual learning wiring;
+then seek owner confirmation for any formal work. Author ran no train/SSH/GPU,
+network/install/agents/review/commit/push and changed no older production/tests.
+
+Acceptance verification: 76 passed in 9.48s (32 Pv37 + 44 existing Gv36/v35 tests), single-thread CPU; pytest cache disabled. Command: PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 GIT_CEILING_DIRECTORIES="$TMPDIR" PYTHONPATH=. .venv/bin/python -m pytest -p no:cacheprovider --basetemp="$TMPDIR/pv37-acceptance-tests" qrokkun_ai/v37/tests qrokkun_env/tests/test_gv36.py qrokkun_env/tests/test_gv36_normalization.py qrokkun_ai/v35/tests -q
+Continuation temporary test trees removed after verification. Original red.txt/green.txt preserved. No actual locked-model trial or training executed.

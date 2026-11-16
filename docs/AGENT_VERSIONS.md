@@ -195,3 +195,6 @@ Algebraic origins may leave the legal rectangle; canonical keys and cached physi
 remain unchanged from original Gv36. Valid old snapshots are accepted and normalized
 after validation. Pv37 is not implemented.
 See [verification](journal/2026-11-17-1794859706-gv36-cardinal-normalization.txt).
+
+
+Pv37: two roles `control` / `search`, both Gv36 normalized integer cached P and Pv35 model64 untrained seed17 embedding with fresh Adam; frozen stochastic Sv24u980. H60/beam256/top8 death teaching; teacher12/clearance12 unchanged; CE0.1 separate actor Adam step per update. Nonformal paired trial only; no final trial evaluation; formal pending owner after trial. Historical Gv36 naming/reports unchanged. See `docs/journal/2026-11-17-1794861120-pv37-implementation.txt`.

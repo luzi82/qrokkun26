@@ -279,3 +279,6 @@ Algebraic origins may leave the legal rectangle; canonical keys and cached physi
 remain unchanged from original Gv36. Valid old snapshots are accepted and normalized
 after validation. Pv37 is not implemented.
 See [verification](docs/journal/2026-11-17-1794859706-gv36-cardinal-normalization.txt).
+
+
+Pv37 Gv36 control/search teaching trial infrastructure: `qrokkun_ai/v37/`; matched untrained Pv35 u0, teacher12/clearance12/filter unchanged; fixed auxiliary CE0.1 extra actor step. Trial has no final stage. Formal requires owner confirmation after accepted trial. See `docs/journal/2026-11-17-1794861120-pv37-implementation.txt`.
