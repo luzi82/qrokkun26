@@ -291,3 +291,5 @@ Pv37 bounded trial 結案（2026-11-17）：Gv36 matched untrained u0、兩臂�
 Future Gv36 control is **Pv37m**; fixed death-search teaching is **Pv38m**. These names supersede future trial-arm naming only; historical Pv37-control/Pv37-search records remain unchanged. The current execution contract is `qrokkun_ai/v38/formal-contract.json`. Standalone train/final commands, sequential pair layout, fixed reference-window comparison and nonformal smoke are documented in [v38 workflow](qrokkun_ai/v38/README.md). Formal launch is owner-authorized; implementation author has not launched training or evaluation.
 
 Formal records: [implementation](docs/journal/2026-11-17-1794873702-pv37-pv38-implementation.txt), [preregistration](docs/journal/2026-11-17-1794873702-pv37-pv38-prereg.txt).
+
+Pv37／Pv38 正式來源鎖定（建立時 planned／not started）：[PREREG 與固定啟動命令](docs/journal/2026-11-17-1794875161-pv37-pv38-formal-source-lock.txt)。

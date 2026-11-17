@@ -1,0 +1,59 @@
+# Pv37／Pv38 正式配對 PREREG：來源鎖定
+
+紀錄日期：2026-11-17 HKT；建立時為 planned／not started，GB10 正式訓練尚未啟動。
+本紀錄補足 2026-11-17-1794873702-pv37-pv38-prereg.txt 的來源與啟動鎖定。
+僅取代該預註冊「implementation SHA 未知／待驗證」狀態；歷史 trial、結論及命名保留。
+正式執行已獲 owner 授權，無剩餘 owner 決策；parent 將在本文件提交後啟動。
+本文件是啟動前歷史快照；日後啟動不回寫為已啟動，另記實際啟動證據。
+
+凍結實驗程式碼／不可變 archive 來源 commit：e032de5ec7091937db7007f4b881705b0ce17350。
+此 SHA 與稍後收錄本 journal 的文件 commit 分開，不得以文件 commit 替換實驗來源。
+已驗證 archive 351 files；驗證後 code／source／runtime 均未改動。
+不可變 execution root：/home/ovm-hms-bot/projects/qrokkun26/pv3738_execution/e032de5ec7091937db7007f4b881705b0ce17350。
+Python：/home/ovm-hms-bot/projects/qrokkun26/venv/bin/python。
+實際 GB10 runtime：Python 3.12.3、PyTorch 2.11.0+cu128、numpy 2.5.3；CUDA。
+正式契約：該來源內 qrokkun_ai/v38/formal-contract.json，兩臂 source／runtime 必須一致。
+
+依 parent 提供的既有驗證：獨立 Codex high 靜態 review 無 actionable findings。
+parent 測試 126 passed／9.82s；本次文件工作未重跑測試。
+實際 GB10 CUDA wiring smoke：兩角色各 2 updates／E3／W2／cap7200，均 exit 0。
+兩臂同一未訓練 u0、fresh Adam；首個 ordinary rollout／PPO metrics 相同。
+Pv38 共六次搜尋、五條 accepted paths、300 demo frames、兩次 auxiliary actor steps。
+已驗證 frozen S、資源清理及當時 GPU idle；正式啟動前 parent 必須重新確認 GPU idle。
+以上僅為接線證據，不是強度、改善、等價或 promotion 證據；無正式結果或 ETA。
+
+固定 S 輸入：/home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/sv24-u980.pt。
+S file SHA256：554290b6c17a280dbfb8bb4076583a1230b278bf73a24a701f66fca76e5bfcc0。
+S state SHA256：3db671ed476886b8e9640beff0e0724a66b1a72263b55be2e988078061e69b63。
+無 P input checkpoint；seed17 重建未訓練 Pv35 u0 embedding，兩臂 fresh Adam。
+u0 state SHA256：fd355475c38bdfcd065c13bd5d1b92ddb33327f3533f08baedb92b788fc05fb0。
+模型 input64／teacher12／clearance12／hidden472；保留既有 filter、reward、GAE 與 PPO。
+
+假說：固定 death-search actor imitation 可改善 Gv36 下純網路 P，相對全新 Pv37 control。
+PRIMARY：validation-selected BEST 的 Pv38−Pv37 配對平均存活秒數與對零 CI；正值有利 Pv38。
+採 10000 次 paired bootstrap、seed17、95% 描述性 CI；涵蓋零不能宣稱改善或等價。
+SECONDARY：terminal u1000 配對差；無 minimum-gain promotion threshold。
+兩臂固定 updates1000／E20／cap7200／train seed17／init seed17／W10／pin on／CUDA hoisted normal PPO。
+這是 matched normal training budget；搜尋與額外 actor step 使總 compute 不相等。
+validation u0..u1000 每10更新一次，16 seeds 600000..600015；101 組 checkpoint／evaluation。
+BEST 為整數 validation total frames 最大且最早者；不以 final 重新選模。
+final 為已見共同64 seeds 800000..800063，P argmax／S stochastic，S offset 24000000。
+BEST primary、terminal1000 secondary；相同 checkpoint 可重用，control 保存結果不重跑。
+四階段固定 Pv37 train → Pv37 final → Pv38 train → Pv38 final／comparison。
+搜尋前 pin 已完成 control 全214 files；禁止 resume、調參、auto-retry 或額外 final 窗口。
+
+唯一 treatment：訓練死亡 D−12／H60／beam256／top8／all anchor bullets／Gv36 canonical key。
+取首條 full-world 成功路徑；實際64-slot observations／60 actions，不捏造 PPO／teacher 資料。
+僅 current update demos，CE0.1、獨立抽樣最多512、一個 separate actor Adam step；無 critic auxiliary。
+validation／final 不搜尋或教學；不改 Godot 或 Gv36，不增開 seed／horizon sweep。
+
+以下為唯一正式啟動命令（本次未執行）；${PAIR} 是唯一剩餘 launch-time 值，必須已設定且非空。
+PAIR 必須是 NAS /mnt/minion/88_minion_rw/projects/qrokkun26/runs/ 下唯一 HKT timestamp 新路徑。
+實際 timestamp 在文件 commit 後、啟動當下選定；目錄須尚不存在，由 supervisor 建立空目錄。
+```bash
+(cd /home/ovm-hms-bot/projects/qrokkun26/pv3738_execution/e032de5ec7091937db7007f4b881705b0ce17350 && PYTHONPATH=. /home/ovm-hms-bot/projects/qrokkun26/venv/bin/python -m qrokkun_ai.v38.supervise --out-dir "${PAIR:?PAIR must be set at launch}" --source-commit e032de5ec7091937db7007f4b881705b0ce17350 --spawner-checkpoint /home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/sv24-u980.pt --updates 1000 --episodes 20 --cap 7200 --seed 17 --hidden 472 --workers 10 --pin-cores on --device cuda --validation 16 --validation-every 10)
+```
+parent 啟動時必須將實際 PAIR、start time、supervisor PID、source SHA、execution root／Python／runtime、
+契約路徑與 SHA256、本 journal 路徑與 SHA256 及所屬文件 commit SHA 記入：
+/mnt/minion/88_minion_rw/projects/qrokkun26/assets/pv37-pv38-formal/formal-launch.json。
+本紀錄不虛構實際 PAIR／PID／開始時間／結果；失敗或 owner stop 須中止後續階段並清理。

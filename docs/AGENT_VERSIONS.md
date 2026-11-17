@@ -207,3 +207,5 @@ Pv37 bounded trial 結案（2026-11-17）：Gv36 matched untrained u0、兩臂�
 Pv37m: Gv36 control, ordinary unchanged Pv31 PPO + teacher12, Pv35 input64/clearance12/hidden472, same untrained seed17 embedding and fresh Adam. Pv38m: same engine and initialization plus fixed D−12/H60/beam256/top8 death-search teaching and one actor-only 0.1 mean-CE extra step per update when demonstrations exist. Gv36 retains its name. Both use frozen stochastic Sv24 u980. Formal budget1000/E20/cap7200/W10, validation16 each10; BEST primary and terminal secondary use the common previously seen64-seed final window. Current contract: `qrokkun_ai/v38/formal-contract.json`; executable public entrypoints and pair supervisor are under v37/v38. This supersedes only future role labels, never archived trial conclusions. Author implementation/tests only; no formal run started.
 
 Formal records: [implementation](journal/2026-11-17-1794873702-pv37-pv38-implementation.txt), [preregistration](journal/2026-11-17-1794873702-pv37-pv38-prereg.txt).
+
+Pv37／Pv38 正式來源鎖定（建立時 planned／not started）：[PREREG 與固定啟動命令](journal/2026-11-17-1794875161-pv37-pv38-formal-source-lock.txt)。
