@@ -300,3 +300,5 @@ Pv37／Pv38 正式死亡搜尋教學結案（2026-11-17）：四階段皆 exit0�
 Pv38 [示範轉移診斷](docs/journal/2026-11-17-1794922844-pv38-demonstration-transfer-diagnostic.txt)：抽樣單步 CE 小降、固定路徑逃生 6/12→8/12；不隔離 aux 因果效果，正式強度結論不變。
 
 Pv38 [離線 aux 預算診斷](docs/journal/2026-11-17-1794924868-pv38-offline-aux-budget-diagnostic.txt)：額外 32 步降低封包 CE，但局部逃生 8/12→7/12，尚未顯示預算增加有益；非正式新版本。
+
+Pv38 夜間研究附錄（2026-11-18）：[教學診斷 phases 1～5 結案](docs/journal/2026-11-18-1794945415-pv38-overnight-teaching-diagnostics.txt)。集合擬合未得淨局部收益；student-visited set32 局部 9/12，但已見整集均差 −11.9146s；修正解析 teacher 控制器 +15.4740s（95% CI [6.8264, 24.8482]），不代表 NN 改善。phase6 另行進行、結果未就緒；非新官方模型版本，歷史結論保留。

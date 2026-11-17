@@ -1,0 +1,125 @@
+Pv38 夜間教學診斷：已完成 phases 1～5（2026-11-18）
+
+結論與範圍
+單一示範動作常不是唯一已知成功選項；改用集合目標改善離線擬合，未換得淨逃生收益。
+student-visited 集合擬合雖在局部多救一例，已見整集窗口表現反而下降，不採用候選。
+舊解析 teacher 在已查狀態有可避免的立即致死選擇；限制其選擇於 H1 正 clearance
+的修正控制器，在同一已見 16 seeds 平均增加 15.473958333 秒。
+這是解析控制器結果，尚不是學習後 NN 的進步。本紀錄只結案 phases 1～5；
+phase6 matched NN teacher-target adaptation 另行進行中，結果未就緒，整夜研究未結案。
+不建立新官方 Pa／Pv 版本、不自動晉升，不取代 Pv37／Pv38 正式負面配對結論。
+
+
+時間與來源
+實際建檔 unix 1794945415 = 2026-11-18 03:56:55 HKT（UTC+08:00），檔名與檔案建立時間一致。
+生產來源固定 e032de5ec7091937db7007f4b881705b0ce17350（e032de5）；
+source_tree_sha = 0978f56b8902fb93a665cd5be5164c7bb3ed19d178efbc16613eb12a151c8fb3。
+共同暖權重為原 Pv38 u1000（原 PPO＋aux 完成後），不是新正式模型：
+/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261117-0827-pv37-pv38-gv36-death-search-u1000/Pv38/checkpoint-001000.pt
+檔案 SHA256 = 6028e898b5a0a6be841bee172343ac94283c363ec48379e5ac10c613f098ecf8。
+重建來源行為使用同目錄 u0／500／990；示範為 selected-demos-000001／000501／000991.npz。
+凍結對手 Sv24 u980 的檔案 SHA256 = 554290b6c17a280dbfb8bb4076583a1230b278bf73a24a701f66fca76e5bfcc0。
+
+前情連結（相對本日誌目錄）
+2026-11-17-1794922844-pv38-demonstration-transfer-diagnostic.txt
+2026-11-17-1794924868-pv38-offline-aux-budget-diagnostic.txt
+前者量測抽樣單步 CE 與路徑轉移；後者顯示加預算降低 CE 未帶來逃生收益。
+兩份舊報告逐字保留；下列是新增證據，非回寫歷史結論。
+
+證據索引與重現契約
+令 NAS 根目錄 R 為：
+/mnt/minion/88_minion_rw/projects/qrokkun26/assets/20261117-224024-autonomous-player-research
+各相對路徑均接於 R；本文讀取已保存資料，沒有重跑 episode、訓練、測試或 review。
+phase1-critical-actions/parent-verified.json、newphase-spec.json、results-01/summary.json、results-01/ledger.json
+phase2-set-valued-fit/parent-verified.json、contract.json、results-01/summary.json、results-01/ledger.json
+phase3-student-visited/parent-verified.json、contract.json、results-01/summary.json、results-01/ledger.json
+phase4-teacher-audit/summary.json
+phase5-imminent-teacher/parent-verified.json、contract.json、results-01/summary.json、results-01/ledger.json
+ledger 保存逐例檔名與 SHA；summary 保存輸入雜湊、分組量測及閉合檢查。
+這些是結果與契約追溯位置，不要求重新執行目前工作。
+
+Phase1：固定示範後綴下的已知成功集合
+沿用 u1／501／991 各 4 條、共 12 條已選訓練路徑，每條前 12 個示範狀態，合計 144。
+各狀態試 9 種首動作，之後接不變的 demonstration suffix，直到原 anchor+60；
+共 1296 分支。原選動作在全部 144 狀態均成功，720 個示範觀測逐一精確吻合。
+140/144 狀態有多個已知成功首動作，65 個狀態全部 9 動作成功。
+actor 與硬標籤有 89 個分歧，其中 55 個亦已知成功，占 61.797752809%（約 61.80%）。
+這只證明固定後綴下的充分成功集合；未窮舉所有動作序列。
+集合外是 UNKNOWN，不能稱為不安全；singleton 亦不證明唯一安全。
+
+Phase2：只改離線目標的配對擬合
+三臂皆獨立從原 u1000 權重與已存 actor Adam deep clone 起步，儲存空間不共用；
+zero 0 步、hard CE 32 步、set-mass 32 步，係數 0.1，critic 不動，無一般 PPO／teacher 更新。
+每個來源 update 的 route 0/1/2 用於 train：9 路徑／108 狀態；route3 作 check：3／36。
+全部都是已檢視的舊訓練案例，check 並非 fresh heldout。
+set loss = -log(sum(a in known support) p(a))；全 9 成功時貢獻零。
+train108：hard CE 由 4.720466 降至 hard32 的 0.638444；
+set-mass CE 由 1.471662 降至 set32 的 0.160639。
+三臂 H60 均為 8/12；set32 有 2 gains／2 losses，hard32 無交換。
+目標擬合有改善，淨逃生沒有改善；loss 下降不是強度提升。
+
+Phase3：學生實際訪問狀態與整集代價
+同 12 anchors，以凍結原 u1000 greedy 收集各路徑前 12 個動作前狀態或提早死亡前狀態。
+一例只有 11 個，故共 143（train108／check35）。每狀態試 9 首動作，之後皆接
+凍結原 u1000 greedy continuation 至原 anchor+60，共 1287 分支；不是 phase1 的示範後綴。
+20 個狀態已知可修正，27 個 empty support，4 個 baseline 立即致死。
+empty support 只是此 continuation 下未找到成功，不能證明不可解。
+新三臂仍從同原始權重＋繼承 actor Adam 獨立起步，用本階段標籤各擬合 32 步。
+hard target 若 baseline 在集合內就保留，否則取集合內 base 機率最高者（同分最小 ID）。
+兩種 loss 均以全部 108 列為平均分母；unresolved 列貢獻零，critic 不變。
+H60：base 8/12、hard32 8/12（1 gain／1 loss）、set32 9/12（1 gain／0 loss）。
+同一已見 common16 的完整遊戲平均秒數：
+base 71.796875；hard32 66.242708333；set32 59.882291667。
+候選減 base 的配對均差與 95% bootstrap CI：
+hard32 -5.554166667 秒，[-13.227369792, +3.129375000]；
+set32 -11.914583333 秒，[-19.143906250, -4.677916667]。
+base 的 16 例 frames／death／censored 與原 u1000 evaluation 精確相同。
+不晉升。這是局部擬合與全局行為的取捨證據，尚非廣義災難性遺忘的因果證明。
+
+Phase4：teacher 的立即碰撞稽核
+全部 143 cached observations、1287 個首步，H1 top12 與 top64 clearance 碰撞符號
+均吻合實際 first step，沒有數值不符。舊 teacher 在 5 狀態選立即致死動作，
+但各有其他 H1 正 clearance 選項；這 5 狀態的 9 個固定方向 H12 minimum clearance 全負。
+舊 fallback 取最大 minimum clearance，相當於選最小穿透而未優先考慮何時致死。
+此為目標設計限制，這批證據不支持 top12 截斷或數值失配是原因。
+不據此宣稱 teacher 最佳，也不證明全部未來狀態的物理正確。
+
+Phase5：imminent-safe 解析 teacher 控制器
+正確舊 teacher 是 top12／H12／margin2。初始診斷誤用 margin8；依實際 producer
+省略參數時的 default2 修正 baseline，僅取代修正前 baseline 定義，不改歷史稽核產物。
+實際完成 run 使用修正後 margin2；並非把初次測試追認為通過。
+只有舊 hard target 的 H1 clearance<=0 且存在 H1>0 動作才觸發：
+在 H1 正值動作中取 H12 minimum clearance 最大者（同分最小 ID），
+同時把該 trigger row 的立即不安全動作之舊 soft logits mask 為 -1e9。
+非 trigger 的 hard 與 soft 均逐位元等同舊值；全部 H1 不安全時維持舊行為。
+兩個控制函式都只讀 encoded observations；控制時不讀私有未來 S 或做完整 world search。
+cached 立即致死選擇 5→0；同 12 anchors H60 old 6/12→new 11/12，5 gains／0 losses。
+兩個解析控制器各跑同 16 個已見 seeds（32 episodes）：
+old 64.357291667 秒，new 79.831250000 秒；new-old +15.473958333 秒，
+95% 配對 bootstrap CI [6.826406250, 24.848229167]，全部 16 pairs 正值。
+這裡完全沒有 NN 訓練，也沒有自動模型晉升。
+
+共同量測邊界與工程檢查
+Gv36 為 60 Hz，H60 僅一秒，不是整集。完整遊戲 cap7200 = 120 秒，
+seeds600000..600015，凍結 Sv24 u980 stochastic 私有 RNG seed+24000000。
+死亡 anchors 由原 stochastic P 行為重建（P seed+26000000、S seed+25000000）；
+後續 NN 診斷用 actor argmax，不能把原 sampling 死亡直接等同 greedy 失敗。
+phase3／5 CI 均為配對 10000 bootstrap、seed20371118；只是已見窗口的描述性估計。
+沒有 fresh heldout、沒有獨立訓練 seed 重複；小量選定 anchors 不能推出普遍安全或強度。
+phases1～3 使用匹配 GB10 的 CPU libraries（torch2.11.0+cu128、numpy2.5.3），
+未初始化 GPU；保存紀錄完成 source／runtime／inputs／critic／RNG 的相應不變檢查。
+phase5 closure 亦記錄 P/S 權重、輸入、anchors、全域與私有 RNG 不變，
+720 stored preobservations 精確吻合、12 示範存活及 nontrigger hard/soft bitexact。
+小型單元檢查只確認診斷接線／契約，不等於整個專案測試或科學成功：
+phase1 最終 5 passed／0.06s，見 evidence/guard-performance-fix-tests.txt；
+phase3 parent-verified 記錄 6 green checks，但 missing-module RED 不證明行為測試先失敗。
+phase5 margin 修正為 RED 2 failed／4 passed→GREEN 6 passed，另有 parent-green 6 passed／1.38s；
+見 wake-0236/01-red.json、02-green.json、parent-green.json。
+上述為限縮範圍的工程檢查；不把測試通過當作存活能力提升的證據。
+所有舊嘗試、失敗測試與修正前產物留在原 assets，不刪除、不覆寫。
+
+下一步（不含結果）
+phase6 的 matched NN teacher-target adaptation 另行進行：兩臂同 Pv38 u1000 暖 actor／critic，
+fresh Adam、100 updates／E20，唯一因素為 teacher hard／soft targets；
+評估純 NN，不加 controller fallback。須另待實際 NN 結果才可判斷轉移，不以 phase5 代替。
+本文件不報告 phase6 進度或成果；生產來源與執行期未接觸，docs 不納入 base fingerprint。
