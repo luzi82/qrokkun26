@@ -1,0 +1,123 @@
+Pv37／Pv38 Gv36 死亡搜尋教學：正式配對完成報告
+日期：2026-11-17（HKT）；單一 init/train seed17，1000 updates／每次20 episodes。
+
+結論
+固定 CE0.1、每 update 一次額外 actor step 的死亡搜尋教學已正常接線並完成。
+局部逃生路徑常見，但本次單一配對實驗未證實純網路存活強度改善。
+PRIMARY BEST 與 SECONDARY terminal 的描述性95% CI 均跨零。
+這不證明方法不可能有效，也不證明 Pv38 與 Pv37 等價或較差；不據此晉升模型。
+
+來源與預註冊
+實驗程式碼：e032de5ec7091937db7007f4b881705b0ce17350。
+預註冊文件 commit：f3f8aec27b4f7f99b22d5530a5cc0e608037a6e6。
+原始協定：docs/journal/2026-11-17-1794873702-pv37-pv38-prereg.txt。
+來源鎖定：docs/journal/2026-11-17-1794875161-pv37-pv38-formal-source-lock.txt。
+契約：qrokkun_ai/v38/formal-contract.json。
+實際 run：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261117-0827-pv37-pv38-gv36-death-search-u1000
+不可變執行 archive：/home/ovm-hms-bot/projects/qrokkun26/pv3738_execution/e032de5ec7091937db7007f4b881705b0ce17350
+證據根目錄：/mnt/minion/88_minion_rw/projects/qrokkun26/assets/pv37-pv38-formal/。
+主要結果依 verified-results.json；父流程已核對兩臂 raw math、bootstrap、hash 與清理。
+formal-launch.json／formal-exit.json 保留實際來源、runtime 與四階段執行證據。
+
+實驗設計
+Pv37 為全新 Gv36 control；Pv38 唯一 treatment 為固定死亡搜尋示範與額外 actor 教學。
+兩臂相同未訓練 seed17 u0 embedding、fresh Adam；並非從已訓練 BEST 繼續。
+環境為 Gv36 normalized integer cached P；input64 子彈、hidden472、teacher12／clearance12。
+沿用既有 filter、reward、GAE、普通 PPO；固定 stochastic Sv24 u980。
+訓練各1000 updates、20000 ordinary episodes、cap7200、10 workers、pin cores on。
+普通訓練 P stochastic；validation／final P argmax，S stochastic。
+每10 updates（含u0）驗證16 seeds 600000..600015；各101 checkpoints、101 validations。
+BEST 取 validation 整數總存活 frames 最大且最早者；final 不參與選模。
+PRIMARY 為 selected BEST；SECONDARY 為 terminal u1000。
+final 固定共同64 seeds 800000..800063，S offset 24000000，cap7200、60 Hz。
+這是先前已見 benchmark，並非 fresh heldout；final 不使用搜尋或教學。
+Pv37 保存的 final 逐 seed 結果供比較重用，沒有重新跑 control。
+單一 initialization／training seed17；64 benchmark cases 不等於64次獨立訓練。
+等 episodes／updates 不代表相同 frames、compute 或 lifetime random-seed replication。
+
+正式完成狀態
+依序 control-train、control-final、search-train、search-final，四階段退出碼皆0。
+supervisor complete；已記錄 errors=[]、owner_stop=[]。
+啟動時間：2026-11-17T08:27:57.852401+08:00。
+Pv38 status.updated_at 2026-11-17T18:23:33.342564+08:00 僅標示 search train 完成。
+整對 final／supervisor 結束：2026-11-17T18:25:27.228550+08:00（formal-exit.finished 換算）。
+父流程彙整驗證時間：2026-11-17T18:27:12.175103+08:00。
+
+純網路 final 結果（均為64 deaths、0 censors）
+PRIMARY Pv37 BEST u160：4197.9375 frames，69.965625 s。
+PRIMARY Pv38 BEST u190：4190.484375 frames，69.84140625 s。
+候選減對照：−0.12421875 s（JSON浮點值 −0.12421875000000027）。
+95% CI：[−4.999225260416666, 4.743522135416663] s。
+SECONDARY Pv37 terminal u1000：4243.359375 frames，70.72265625 s。
+SECONDARY Pv38 terminal u1000：4195.046875 frames，69.91744791666666 s。
+候選減對照：−0.8052083333333335 s。
+95% CI：[−5.0886458333333335, 3.6456640624999985] s。
+兩者皆為共同 seed 的 paired bootstrap，10000 resamples、bootstrap seed17。
+正差有利 Pv38；點估計皆負，但 CI 允許正負效應，不能據此確證退步或等價。
+CI 僅為此已見共同窗口的描述性不確定性，不涵蓋不同訓練初始化的變異。
+
+搜尋與示範產量
+Pv37：19991 deaths、9 censored；搜尋、示範與 auxiliary steps 均0。
+Pv38：19993 deaths、7 censored；19993 searches、skippedearly=0。
+搜尋從死亡 D 的 pre-action D−12 anchor 開始，H60／beam256／top8。
+使用 all anchor bullets 與 Gv36 canonical key，候選須通過 full-world 驗證。
+17025 次死亡取得 accepted path，成功率85.15480418146352%。
+每條為60個 pre-action observations／actions，局部區間 D−12 至 D+48。
+這證明該局部時間窗存在逃生路徑，不是整個 episode 可存活的證明。
+modelcompletecaseN=17850；generated candidateN=142787。
+實際 full-world validatedpathN=28120；找到首條成功路徑即停止驗證。
+因此不能將142787視為全數已驗證，也不能以候選總數推斷全域可解率。
+生成示範1021500 frames（17025×60），不是全部送入 actor 的訓練量。
+實際 sampled actor frame presentations=512000；1000 auxiliary actor steps。
+每 update 僅使用當次示範、獨立抽樣最多512、0.1 mean CE、一個額外 actor Adam step。
+auxiliary 與 PPO／critic 分開；不捏造 teacher 或 PPO rollout，沒有跨 update demo replay。
+learning_verified=true 表示教學執行成立，不表示 final 強度提升。
+
+量測成本
+Pv37 ordinary train frames=81027456；Pv38=80742443。
+Pv37 train elapsed=15046.879673796007 s（4.179688798276668 h）。
+Pv38 train elapsed=20575.638419886993 s（5.715455116635276 h）。
+search/control=1.3674355657750932，約增加36.74%。
+這是 whole-train elapsed 的實測比值，排除 final；不是整對實驗總成本。
+search_s=44866.66911435529 s 是可重疊 worker CPU 搜尋耗時總和，不能當 wall time。
+replay_s=166.0481075879652、validate_s=869.1675080474815、aux_s=4.079655704670586。
+上述分項不得直接相加冒充整體 wall time，也未估算未知成本。
+
+身分與完整性
+既有驗證核對351個部署 archive 檔案雜湊、兩臂共202 checkpoints、214 control pins。
+Pv37／Pv38 各 u0、selected BEST、terminal，共6檔完成 CPU strict load。
+驗證使用實際 PyTorch 2.11.0+cu128、numpy 2.5.3；不是本機預設套件版本。
+正式 learner 為 GB10 CUDA hoisted single stream，rollout CPU；兩臂來源與 runtime 一致。
+u0 已獨立重建，兩臂相同 state SHA；frozen S 全程未變已驗證。
+S 輸入檔：/home/ovm-hms-bot/projects/qrokkun26/pv26_inputs/sv24-u980.pt。
+S file SHA256：554290b6c17a280dbfb8bb4076583a1230b278bf73a24a701f66fca76e5bfcc0
+S state SHA256：3db671ed476886b8e9640beff0e0724a66b1a72263b55be2e988078061e69b63
+以下 checkpoint 路徑均相對實際 run；file 與 state SHA256 分別列出。
+Pv37/checkpoint-000000.pt：
+  file SHA256：29ea7b509f17462c0d58a02031398fc9037294dcef6d159e652185a2c49a2135
+  state SHA256：fd355475c38bdfcd065c13bd5d1b92ddb33327f3533f08baedb92b788fc05fb0
+Pv37/checkpoint-000160.pt：
+  file SHA256：7ecc14c2b23732826e0ce8bd8b108f35aef5558c7d6a4ed4f1f9f6db3b96a587
+  state SHA256：868dd720d3180b51303b7467947a90482f420a0d5bf17f75dd7c81e96ce2270a
+Pv37/checkpoint-001000.pt：
+  file SHA256：6ea79213db6b4b6b76f6ea8813128a154fb0446b7b98fa08f31157b9ffe87685
+  state SHA256：94c3df4a1f4c223e38a4d6a8f08442e6d125b9a9d813f08affa9b111023328e1
+Pv38/checkpoint-000000.pt：
+  file SHA256：8e841fb59250003d21ad16e870e90162d8f9dff0397d412fc3734cb6ccc5e3ea
+  state SHA256：fd355475c38bdfcd065c13bd5d1b92ddb33327f3533f08baedb92b788fc05fb0
+Pv38/checkpoint-000190.pt：
+  file SHA256：9fea921be49d63a6ad62346c1fb80972bf50a55072d281103dba8093fa13c198
+  state SHA256：72c02744f1f8b19023c325d50a5f5f8bb272ad9981e3396037e6ed0998ddcbcf
+Pv38/checkpoint-001000.pt：
+  file SHA256：6028e898b5a0a6be841bee172343ac94283c363ec48379e5ac10c613f098ecf8
+  state SHA256：d029ea0fe44e65260e3f1ce72ad803902ae4626b69fad8f51249d6808e21b795
+
+結案解讀
+搜尋／示範／actor 教學接線成立，局部可逃生死亡佔多數；固定教學未顯示純網路改善。
+搜尋成功率不能替代 final 指標；高生成量也不等於同量 actor samples 或有效策略遷移。
+已觀察成本增加，但本配對不能分離搜尋品質、教學權重與有限抽樣各自的影響。
+既有完成後驗證：experiment_live_pids=[]、zombies=[]、shm_leaks=false、gpu_idle=true。
+以上為完成時既有清理證據；本次文件結案沒有重啟訓練、評估或 GPU 工作。
+本報告僅取代舊文件「formal 尚未開始／pending」執行狀態（superseded execution status）。
+歷史預註冊、trial、來源鎖定及其當時結論保留；實驗來源與 runtime archive 不變。
+此結案不自動授權後續訓練、調參、額外 final 或新實驗。
