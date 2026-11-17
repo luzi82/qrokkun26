@@ -212,3 +212,5 @@ Pv37／Pv38 正式來源鎖定（建立時 planned／not started）：[PREREG �
 
 
 Pv37／Pv38 正式死亡搜尋教學結案（2026-11-17）：四階段皆 exit0，各1000 updates／20000 episodes。PRIMARY BEST（Pv37 u160 vs Pv38 u190）候選減對照 −0.12421875 s，95% CI [−4.999225260416666, 4.743522135416663]；SECONDARY terminal −0.8052083333333335 s，CI [−5.0886458333333335, 3.6456640624999985]。局部搜尋成功率85.1548%，但單一 seed17、已見 common64 未證實純網路強度改善或等價；不含 final 的 train elapsed 增加約36.74%。見[完成報告](journal/2026-11-17-1794911352-pv37-pv38-death-search-completion-report.txt)。本附錄僅取代舊 formal pending／尚未開始狀態，保留全部歷史報告與實驗來源；無自動後續訓練授權。
+
+Pv38 [示範轉移診斷](journal/2026-11-17-1794922844-pv38-demonstration-transfer-diagnostic.txt)：抽樣單步 CE 小降、固定路徑逃生 6/12→8/12；無新模型版本或正式強度修訂。
