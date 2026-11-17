@@ -157,10 +157,10 @@ def test_sidecar_small_header_and_consumption(tmp_path):
     ep=slice_trajectory(meta,buf)
     assert len(ep.demos)==3 and not (tmp_path/handle).exists()
 
-def test_trial_gate_rejects_formal():
-    from qrokkun_ai.v37.run import _train_main
-    with pytest.raises(ValueError,match='formal gate'):
-        _train_main(['train','--role','control','--out-dir','unused','--source-commit','a'*40])
+def test_owner_amendment_accepts_formal():
+    from qrokkun_ai.v37.run import parser, validate
+    a = parser().parse_args(['train','--role','control','--out-dir','unused','--source-commit','a'*40])
+    assert validate(a)[1] == list(range(0,1001,10))
 
 def test_fingerprint_bound_to_new_env():
     from qrokkun_ai.v37.fingerprint import source_digest

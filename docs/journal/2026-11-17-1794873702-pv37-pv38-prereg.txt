@@ -1,0 +1,15 @@
+# Pv37 control / Pv38 teaching preregistration
+
+Author clock: 2026-11-17 HKT, Unix1794873702 (tool reading). Planned, not started. Owner: 「控制組為 Pv37 , 實驗組為 Pv38, 然後繼續實驗。」 This supersedes the historical trial authorization gate for future execution; it does not rename old trials.
+
+Hypothesis: fixed successful death-search demonstrations may improve paired survival relative to ordinary PPO under Gv36. No minimum gain, adaptive horizon, seed sweep, score-based retry, early stop or tuning. There is one seed17 initialization/training pair. Equal updates/episodes are not compute matched.
+
+Fixed:1000 updates/E20/cap7200/hidden472/W10/pinning on; validation600000..600015 at0..1000 step10. Pv35 model/filter and Pv31 PPO/reward/GAE/teacher hyperparameters remain unchanged. Both initialize from untrained Pv35 u0 embedding seed17 with fresh Adam, never trained best. Frozen strict-loaded Sv24 u980 uses the existing input/state identity constants; actual input SHA and state SHA will be recorded from the operator-supplied checkpoint in each manifest (not measured by author). Runtime/device/library/determinism and source identities must match both arms.
+
+Pv37 disables search/aux. Pv38 retains validated full-world snapshot and first successful H60 path from D−12, beam256/top8, all anchor bullets, canonical Gv36 key. Training deaths only; early/censored skip, unknown is not unsatisfiable. Per-update observations/actions yield actor-only0.1 mean CE, independent sample up to512, one extra actor Adam step; no critic/teacher/PPO demonstration fabrication or replay.
+
+Stage order: Pv37 train → Pv37 once final → Pv38 train → Pv38 once final/comparison. Search dynamically pins completed new control according to this preselected rule. BEST is earliest maximum integer validation total frames; terminal1000 secondary. Final uses previously seen seeds800000..800063, P argmax/S stochastic, offset read from core.S_VAL_OFFSET. Saved control BEST/TERMINAL per-seed results are reused. Descriptive paired bootstrap10000 seed17; CI containing0 implies neither improvement nor equivalence.
+
+Implementation source pin: unknown until parent supplies a full committed SHA and verifies archive; baseline45dc69f532f13e02548f5321bd6044dbff04ca2e is historical starting point, not the implementation identity. Both version production closures, Gv36 and required JSON are fingerprinted; tests/docs excluded. Parent supplies immutable execution source and runtime smoke. Author authorization excludes launch, SSH/GPU/network/install/agents/review/commit/push; none performed.
+
+Pinned existing Sv24 u980 constants (read from production source, no new evaluation): checkpoint input SHA256 `554290b6c17a280dbfb8bb4076583a1230b278bf73a24a701f66fca76e5bfcc0`; state SHA256 `3db671ed476886b8e9640beff0e0724a66b1a72263b55be2e988078061e69b63`. The validated GB10 untrained embedding identity is `fd355475c38bdfcd065c13bd5d1b92ddb33327f3533f08baedb92b788fc05fb0`; actual runtime manifest must report its measured identity, with no architecture substitution.

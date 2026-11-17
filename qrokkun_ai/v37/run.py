@@ -1,4 +1,4 @@
-"""Pv37 Gv36 paired nonformal control/search trial; formal gate remains closed."""
+"""Pv37 Gv36 control and shared Pv38 search training engine."""
 from __future__ import annotations
 
 import argparse
@@ -97,8 +97,8 @@ def add_shared_args(p: argparse.ArgumentParser) -> None:
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("command", choices=["train"])
-    p.add_argument("--role", choices=["control", "search"], required=True)
+    p.add_argument("command", choices=["train", "final"])
+    p.add_argument("--role", choices=["control", "search"], default="control")
     p.add_argument("--control-dir")
     p.set_defaults(arm="Pv35m")
     add_shared_args(p)
@@ -144,11 +144,9 @@ def validation_schedule(a: argparse.Namespace) -> tuple[int, list[int]]:
 
 def _train_main(argv: list[str] | None = None, expected_semantic: dict[str, object] | None = None) -> int:
     a = parser().parse_args(argv)
-    if not a.nonformal:
-        raise ValueError("formal gate pending owner confirmation after accepted trial")
-    if (a.updates,a.episodes,a.workers,a.cap,a.validation,a.seed) != (2,3,2,7200,2,17):
+    if a.nonformal and (a.updates,a.episodes,a.workers,a.cap,a.validation,a.seed) != (2,3,2,7200,2,17):
         raise ValueError("trial requires updates2 episodes3 workers2 cap7200 validation2 seed17")
-    a.arm = "Pv37-" + a.role
+    a.arm = "Pv37m" if a.role == "control" else "Pv38m"
     cadence, boundaries = validate(a)
     boundary_set = set(boundaries)
     val_cadence, val_boundaries = validation_schedule(a)
@@ -212,7 +210,7 @@ def _train_main(argv: list[str] | None = None, expected_semantic: dict[str, obje
 
     def check_disk(remaining_ckpts: int) -> None:
         check_stop()
-        needed = core.estimate_bytes(a.hidden, max(1, remaining_ckpts))
+        needed = core.estimate_bytes(a.hidden, max(1, remaining_ckpts)) + a.updates * a.episodes * 60 * (344 * 4 + 8)
         free = shutil.disk_usage(out).free
         if free < needed:
             raise OSError(f"checkpoint free space guard at {out}: free={free} < needed={needed}")
@@ -255,7 +253,7 @@ def _train_main(argv: list[str] | None = None, expected_semantic: dict[str, obje
         g = torch.Generator(device=a.device).manual_seed(core.PERM_BASE + a.seed)
 
         semantic: dict[str, object] = {
-            "schema": SCHEMA,
+            "schema": "pv37_manifest_v2" if a.role == "control" else "pv38_manifest_v1",
             "observation_filter": "v35 conservative impossible collision; all live candidates before stable distance top64",
             "initialization": initialization_metadata(initial_p_sha, a.hidden),
                 "architecture": p.architecture_metadata(),
@@ -293,7 +291,10 @@ def _train_main(argv: list[str] | None = None, expected_semantic: dict[str, obje
             "environment": "Gv36 normalized integer cached P",
             "role": a.role,
             "auxiliary_weight": .1 if a.role == "search" else 0.,
-            "formal_gate": "pending owner after trial",
+            "formal_authorized": not a.nonformal,
+            "initialization_seed": 17, "training_seed": a.seed,
+            "formal_contract": "qrokkun_ai/v38/formal-contract.json",
+            "window": "common previously seen reference; not fresh heldout",
             "reference_sha": __import__("qrokkun_ai.v25.core", fromlist=["REFERENCE_SHA"]).REFERENCE_SHA,
             "P_offset": core.P_OFFSET,
             "S_train_offset": core.S_TRAIN_OFFSET,
@@ -303,7 +304,7 @@ def _train_main(argv: list[str] | None = None, expected_semantic: dict[str, obje
 
         if a.role == "search":
             from .protocol import verify_control
-            verify_control(Path(a.control_dir), semantic)
+            semantic["control_pin"] = verify_control(Path(a.control_dir), semantic, is_stopped)
 
         if expected_semantic is not None and semantic != expected_semantic:
             raise ValueError("source/input/runtime semantic mismatch between paired arms")
@@ -358,7 +359,7 @@ def _train_main(argv: list[str] | None = None, expected_semantic: dict[str, obje
             snap_timings = dict(totals)
             snap_timings["elapsed_wall_s"] = prior_elapsed_s + (time.perf_counter() - started_wall)
             payload = {
-                "schema": CKPT_SCHEMA,
+                "schema": "pv37_checkpoint_v2" if a.role == "control" else "pv38_checkpoint_v1",
                 "initialization": initialization_metadata(initial_p_sha, a.hidden),
                 "architecture": p.architecture_metadata(),
                 "arm": a.arm,
@@ -417,6 +418,9 @@ def _train_main(argv: list[str] | None = None, expected_semantic: dict[str, obje
             "arm": a.arm,
             "semantic": semantic,
             "cpu_budget": init_cpu_budget,
+            "execution_root": str(Path(__file__).resolve().parents[2]),
+            "source_archive_sha": file_hash(out / "source.tar"),
+            "pid": os.getpid(),
             "workers": int(workers_n),
             "pin_cores": a.pin_cores,
             "pinned_cpus": pool.pinned_cpus if pool is not None else [],
@@ -539,20 +543,20 @@ def _train_main(argv: list[str] | None = None, expected_semantic: dict[str, obje
         json_write(out / "teaching-report.json", {"role":a.role, "totals":teaching_totals,
             "actual_train_frames":totals["frames"], "totalcost_s":total_wall_s,
             "learning_verified":bool(teaching_totals["searched"] and teaching_totals["demoframes"] and teaching_totals["auxsteps"]),
-            "blocker": "unverified-learning: fixed trial produced no auxiliary actor step" if a.role == "search" and not teaching_totals["auxsteps"] else None,
-            "formal_authorized":False})
+            "blocker": "unverified-learning: run produced no auxiliary actor step" if a.role == "search" and not teaching_totals["auxsteps"] else None,
+            "formal_authorized":not a.nonformal})
         json_write(
             out / "closed.json",
             {
                 "arm": a.arm,
                 "control_reference": warm["identity"] if warm else None,
-                "schema": SCHEMA,
+                "schema": "pv37_manifest_v2" if a.role == "control" else "pv38_manifest_v1",
                 "formal": not a.nonformal,
                 "source_tree_sha": semantic["source_tree_sha"],
                 "manifest_sha": file_hash(out / "manifest.json"),
                 "best_update": best_update,
                 "latest_validated_update": latest_validated,
-                "checkpoint_hashes": {ckpt_name(v): file_hash(out / ckpt_name(v)) for v in sorted({0, best_update, a.updates})},
+                "checkpoint_hashes": {ckpt_name(v): file_hash(out / ckpt_name(v)) for v in boundaries},
                 "completed_updates": int(completed),
                 "saved_checkpoints": discover_checkpoints(out),
                 "timings": totals_out,
@@ -598,6 +602,11 @@ def train_main(argv=None, expected_semantic=None):
 
 def main(argv=None):
     a = parser().parse_args(argv)
+    if a.role != "control":
+        raise ValueError("Pv38 search must use qrokkun_ai.v38.run")
+    if a.command == "final":
+        from qrokkun_ai.v38.final import execute
+        return execute(a)
     return train_main(argv)
 
 

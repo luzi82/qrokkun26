@@ -285,3 +285,9 @@ Pv37 Gv36 control/search teaching trial infrastructure: `qrokkun_ai/v37/`; match
 
 
 Pv37 bounded trial 結案（2026-11-17）：Gv36 matched untrained u0、兩臂各 2 updates/E3；search 6 次搜尋、5 條成功路徑、300 幀示範及 2 次額外 actor 更新，僅證明接線，無強度／promotion 結論。見[結果報告](docs/journal/2026-11-17-1794872251-pv37-bounded-trial-results.txt)。本附錄僅取代先前未執行 trial 的狀態，歷史條目保留；正式 1000/E20 control→learning 與完整 final 協定仍待 owner 確認及實作，尚未啟動。
+
+### Owner-authorized Pv37 / Pv38 formal experiment
+
+Future Gv36 control is **Pv37m**; fixed death-search teaching is **Pv38m**. These names supersede future trial-arm naming only; historical Pv37-control/Pv37-search records remain unchanged. The current execution contract is `qrokkun_ai/v38/formal-contract.json`. Standalone train/final commands, sequential pair layout, fixed reference-window comparison and nonformal smoke are documented in [v38 workflow](qrokkun_ai/v38/README.md). Formal launch is owner-authorized; implementation author has not launched training or evaluation.
+
+Formal records: [implementation](docs/journal/2026-11-17-1794873702-pv37-pv38-implementation.txt), [preregistration](docs/journal/2026-11-17-1794873702-pv37-pv38-prereg.txt).

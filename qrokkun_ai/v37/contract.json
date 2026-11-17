@@ -1,5 +1,5 @@
 {
-  "owner": "由未訓 u0 開始，其他也依建議",
+  "owner": "\u7531\u672a\u8a13 u0 \u958b\u59cb\uff0c\u5176\u4ed6\u4e5f\u4f9d\u5efa\u8b70",
   "environment": "Gv36 including cardinal normalization; old Gv20 unchanged",
   "arms": "matched untrained Pv35 u0 zero-column embedding/control vs death-search teaching; freshAdam both; controlfirst",
   "planner": "all anchor live bullets; trueGv36 motion/canonicalkey, D-12,H60,beam256,top8; validatefullS/field; fixedfirstsuccessonepath",
@@ -7,5 +7,6 @@
   "elephant_fixed_initial_weight": "search imitation coefficient0.1; one separate auxiliary actor-Adam step/update on mean CE over this update demonstrations, bounded batch512 selected using independent fixed RNG. This minimally preserves unchanged v31 PPO backend; provisional fixed design for engineering trial, no score-based tuning. Disclose extra actor optimizer step.",
   "trial": "2updates,E3,cap7200,W2,val2, controlthen search, same seeds17; no final seed access; finishreview+nonformalsmoke then report costs/success/datawiring before asking to authorize formal1000E20",
   "formal_launch_authorized": false,
-  "created": "2026-11-17T04:19:43.757910+08:00"
+  "created": "2026-11-17T04:19:43.757910+08:00",
+  "scope": "historical trial contract; superseded for future execution by v38/formal-contract.json"
 }

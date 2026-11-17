@@ -80,7 +80,7 @@ def test_stop_at_ppo_return_skips_auxiliary_and_cleans_up(tmp_path, monkeypatch)
         calls.append('auxiliary')
         return original_auxiliary(*args, **kwargs)
 
-    monkeypatch.setattr(protocol, 'archive_source', lambda *args: None)
+    monkeypatch.setattr(protocol, 'archive_source', lambda commit, path: path.write_bytes(b'controlled-source-fixture'))
     monkeypatch.setattr(protocol, 'verify_control', lambda *args: None)
     monkeypatch.setattr(run, 'random_player', lambda *args: net)
     monkeypatch.setattr(run, 'PlayerV21', lambda **kwargs: random_player(4))

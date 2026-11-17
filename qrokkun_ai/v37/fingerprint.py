@@ -6,7 +6,7 @@ from pathlib import Path
 
 def source_files():
     root=Path(__file__).resolve().parents[2]
-    pending=['qrokkun_ai.v37.'+p.stem for p in Path(__file__).parent.glob('*.py')]
+    pending=['qrokkun_ai.'+v+'.'+p.stem for v in ('v37','v38') for p in (root/'qrokkun_ai'/v).glob('*.py')]
     found=set()
     while pending:
         module=pending.pop()
@@ -28,7 +28,7 @@ def source_files():
                     prefix='.'.join(parts[:len(parts)-node.level+1]+([prefix] if prefix else []))
                 names=[prefix]+[prefix+'.'+a.name for a in node.names]
             pending.extend(n for n in names if n.startswith(('qrokkun_ai','qrokkun_env')))
-    found.update((root/'qrokkun_ai/v25/reference.json',Path(__file__).with_name('contract.json')))
+    found.update((root/'qrokkun_ai/v25/reference.json',Path(__file__).with_name('contract.json'),root/'qrokkun_ai/v38/formal-contract.json'))
     return sorted(found)
 
 

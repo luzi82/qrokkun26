@@ -43,13 +43,13 @@ def archive_source(commit, destination):
             if archived is None or archived.read() != path.read_bytes():
                 raise ValueError('source commit does not contain current implementation: '+name)
 
-def verify_control(directory, search):
+def verify_control(directory, search, stop=lambda: False):
     manifest=json.loads((directory/'manifest.json').read_text())
     control=manifest['semantic']
     status=json.loads((directory/'status.json').read_text())
     closed=json.loads((directory/'closed.json').read_text())
-    if (manifest['arm'] != 'Pv37-control' or status['status'] != 'complete'
-        or status.get('errors') or status.get('owner_stop') or closed['completed_updates'] != 2):
+    if (manifest['arm'] not in ('Pv37-control','Pv37m') or status['status'] != 'complete'
+        or status.get('errors') or status.get('owner_stop') or closed['completed_updates'] != (1000 if search.get('nonformal') is False else 2)):
         raise ValueError('completed Gv36 Pv37 control trial required')
     keys=('environment','initial_player_state_sha','spawner_state_sha','inputs','source_commit',
           'source_tree_sha','updates','episodes','cap','seed','validation','validation_seeds',
@@ -57,5 +57,15 @@ def verify_control(directory, search):
           'player_mode_training','player_mode_evaluation','spawner_mode','validation_boundaries')
     for key in keys:
         # The manifest has crossed JSON serialization; initializer mappings use tuples.
-        expected = json.loads(json.dumps(search[key])) if key == 'initialization' else search[key]
+        expected = json.loads(json.dumps(search[key]))
         if control[key] != expected: raise ValueError('paired control mismatch: '+key)
+
+    if search.get('nonformal') is False:
+        for key in ('checkpoint_boundaries','checkpoint_cadence','validation_cadence','initialization_seed','training_seed','P_offset','S_train_offset','S_validation_offset','permutation_seed','formal_contract','nonformal','formal_authorized'):
+            if control[key] != search[key]:
+                raise ValueError('paired control mismatch: '+key)
+        if manifest['workers'] != 10 or manifest['pin_cores'] != 'on':
+            raise ValueError('formal control worker configuration mismatch')
+        from qrokkun_ai.v38.protocol import control_pin
+        return control_pin(directory, stop)
+    return None

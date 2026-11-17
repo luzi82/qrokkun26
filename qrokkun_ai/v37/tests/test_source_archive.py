@@ -32,6 +32,7 @@ def test_archive_source_without_git(tmp_path, monkeypatch):
         expected = {str(path.relative_to(root)) for path in paths}
         assert set(archive.getnames()) == expected
         assert {'qrokkun_ai/v37/contract.json', 'qrokkun_ai/v25/reference.json',
-                'qrokkun_env/gv36.py'} <= expected
+                'qrokkun_env/gv36.py', 'qrokkun_ai/v38/formal-contract.json',
+                'qrokkun_ai/v38/run.py', 'qrokkun_ai/v38/final.py'} <= expected
         for name in expected:
             assert archive.extractfile(name).read() == (deployed / name).read_bytes()

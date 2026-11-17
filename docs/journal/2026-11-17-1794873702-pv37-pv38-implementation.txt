@@ -1,0 +1,7 @@
+# Formal pair implementation
+
+Author-only implementation, no new experiment started. Public v37 control and v38 search entrypoints share the validated v37 engine. Added formal closure validation, exclusive once final and sequential pair supervisor. Historical trial contract is labeled historical; v38/formal-contract.json is authoritative for future execution.
+
+Vertical RED evidence: author-evidence/red.txt records the missing default control role. GREEN and full relevant CPU suite evidence: author-evidence/green.txt. v37 retains42 tests; v38 has15 focused tests. Existing scientific planner/world/teaching tests remain. No new real-process test matrix. Parent still owns fresh acceptance review, committed archive validation, CUDA smoke and formal launch. No actual new rollout/evaluation was run outside existing tests.
+
+Commands and output layout: qrokkun_ai/v38/README.md. Source commit remains parent-supplied after commit; no claim that baseline HEAD contains new code. Source closure includes untracked required JSON, so parent must stage these before archive verification.
