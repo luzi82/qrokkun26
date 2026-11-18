@@ -1,0 +1,89 @@
+Pv38 首批 teacher-only 梯度機制診斷（非正式研究）
+文件建立：2026-11-18T09:55:28.494875+08:00；實際 Unix 秒：1794966928。
+範圍：ONE FIRST BATCH；只分析初始 teacher 目標，沒有訓練或更新。
+本文件以既有原始 JSON、來源文字與標準庫數學獨立核對；未執行 probe。
+依據：專案 AGENTS.md 與 NAS guideline.md；保留全部歷史負面、UNKNOWN、STOP。
+原始根目錄：/mnt/minion/88_minion_rw/projects/qrokkun26/assets/20261118-080729-autonomous-player-research/teacher-gradient-audit
+核心紀錄：contract.json、parent-verified.json、results-01/results.json。
+配套紀錄：results-01/status.json、episodes.json、workers.json、trigger-rows.json。
+程序紀錄：results-01.launcher/status.json；parent-verified.json 提供 GPU idle 閉合證據。
+實際開始：2026-11-18 09:51:13.049725 HKT（epoch 1794966673.0497246）。
+實際結束：2026-11-18 09:51:30.871309 HKT（epoch 1794966690.8713093）。
+監督器實測耗時：17.821584409975912 秒；root returncode=0、success=true。
+固定 deadline epoch=1794967573.047918；900 秒從 CPU／GPU 啟動前開始計算。
+清理預留120秒；group_members=[]、zombies=[]，parent 確認 GPU idle。
+launcher signals_attempted=[15] 是清理紀錄；errors=[]、stop=[]，不改寫為停止事件。
+這次只重建原 parent 的20集：seed 900000～900019，cap7200。
+環境為 P26M／S25M、凍結 Sv24 u980；基礎來源 e032de5ec7091937db7007f4b881705b0ce17350。
+三份 update1 原始紀錄（original／imminent-safe／H1）逐 seed 的 frames/death/censored 全匹配。
+20集全部 death=true、censored=false、bootstrap=0；總85836個狀態。
+trigger-rows 共20個緊急狀態，其餘85816個為普通狀態。
+緊急定義：舊動作 H1 clearance<=0 且存在安全動作；hard／soft 變更均匹配此遮罩。
+觀測 SHA256：bc057613627c0c7169b8a6ce1bdbdee6c921fd72852eab55a70c749b9f508eff。
+緊急比例20/85836=0.00023300246982618016，即0.02330024698%；稀少本身不是原因證明。
+模型甲是已訓練 Pv38 u1000 legacy344；乙是同一 parent 的 ZERO H1 embedded362。
+乙保留舊矩陣，另加18維零投影；新增 actor 參數472×18=8496。
+H1模型亦有零 critic 投影，但本次 critic 不進梯度圖、無 critic 梯度。
+來源 gate 在所有批次逐項確認舊特徵、actor logits、Categorical logits/probs 精確相同。
+因此比較的是同初始函數的局部參數幾何，並非先前已訓練100u的H1模型。
+teacher 固定 imminent-safe，H12／top12／margin2；dagger coefficient=1。
+loss=0.65 hard CE + 0.35 soft CE；使用 Categorical 正規化 logits，與 core 定義相同。
+gu=MEAN(20 urgent)；gn=MEAN(85816 ordinary)；gtotal=MEAN(全部85836)。
+每 chunk2048先 SUM，除以各 cohort 全域分母，CPU float64 累積。
+gtotal 另直接反傳全部狀態，獨立核對加權分解，非僅由gu/gn相加建構。
+全 actor、共同舊參數、新H1投影三區塊分開報告；以下 norm 均為 Euclidean L2。
+legacy 全 actor：||gu||=12.91367603398806；||gn||=0.2672358076270729。
+legacy 加權 urgent norm=0.0030089184104544315；ordinary norm=0.26717354102387036。
+legacy ||gtotal||=0.2674117914840838；加權urgent/total=0.011252003487787564。
+此為1.1252003487787563%「範數比」，不是梯度份額、學習份額或可相加百分比。
+legacy dot(gu,gn)=0.2539442029855283；cos=+0.07358575772575385。
+這是近乎正交、微弱正向，不支持全 actor teacher cohort 整體相消。
+H1 全 actor：||gu||=13.293278958342237；||gn||=0.28204094144661257。
+H1 加權 urgent norm=0.003097366829382151；ordinary norm=0.2819752252106647。
+H1 ||gtotal||=0.28218581398826303；加權urgent/total=0.010976337844931424。
+即1.0976337844931425%範數比；cos(gu,gn)=+0.062522771579935，仍為微弱正向。
+共同舊參數：gu、gn、gtotal 跨架構 relative L2 全為精確0。
+其 norm／dot／cos 與 legacy 全 actor 完全相同，沒有舊參數梯度損失證據。
+新增H1區塊：||gu||=3.154082553374892；||gn||=0.09017824446061176。
+新增區塊加權 urgent norm=0.000734909024972015；ordinary norm=0.0901572327069278。
+新增區塊 ||gtotal||=0.09010975192226271；urgent/total=0.008155710223306549。
+新增區塊 cos=-0.06866643890948713、dot=-0.019530769644017405，局部微弱反向。
+不可把新增區塊的弱負向膨脹成全網路梯度抵消；legacy 無此區塊，cos=null。
+分解 gtotal=(20gu+85816gn)/85836；legacy residual=9.536927468263507e-09。
+H1全 actor residual=9.675376757481806e-09；新區塊=1.0818426527212068e-08。
+全部區塊約1e-8（空區塊0），低於1e-5目標；不宣稱浮點分解精確零。
+兩模型 loss means 相同：urgent=3.307864618301392、ordinary=0.8745834849871382。
+全部 mean loss=0.8751504433122284；各自以原始 loss sums／counts 取得。
+已知100倍權重僅作代數：g100=(100×20gu+85816gn)/(100×20+85816)。
+legacy g100 norm=0.40743345623852834；cos(g100,gu)=0.7690199992269492。
+H1 g100 norm=0.42197000579744415；cos(g100,gu)=0.7583130797479757。
+未加權 cos(gtotal,gu) 由 norm/dot 重算約0.084772200、0.073452450。
+JSON 的 cos_total 是 cos(g100,gtotal)：legacy=0.702115255879916、H1=0.7058295527751007。
+這些是同一gu/gn的假設性方向運算，沒有新訓練、不代表最佳權重或收益。
+先前100倍NN訓練的未證實收益結果屬另一實驗；本診斷不裁定其原因。
+cosine 是初始局部 Euclidean 方向，不是 Adam 幾何，也沒有測量 PPO 梯度。
+不能推論 PPO 抵消、100u演化、因果容量、泛化、整局強度或學習增益。
+實際流程：10個CPU worker各2任務，均 frozen_S_verified=true、cuda_initialized=false。
+CPU pool 完成 shutdown/close 後才啟動 CUDA 梯度計算；沒有 optimizer 或權重更新。
+所有模型與S的state hash前後不變；所有 .grad 最終 None；來源及首筆紀錄末尾重查成功。
+未產生 checkpoint、benchmark、新評估視窗；只有原始20集重建與初始目標診斷。
+執行環境紀錄為 torch2.11.0+cu128／numpy2.5.3／CUDA12.8，非本機CPU環境。
+source_digest=0978f56b8902fb93a665cd5be5164c7bb3ed19d178efbc16613eb12a151c8fb3。
+probe SHA256=4ab96a11dc8456a430c5d1ec34e34f7ca51b0928693403a22fd2f22b2dc0d0b7。
+contract SHA256=91563276c3f45d2871c67fd536c574482f015ac033319d7a64761b1a3626ce95。
+phase6 helper SHA256=d89f6a421985dc669a92f04686c967b04f6386a5c3d10d2e00a808d7278203f9。
+phase7 helper SHA256=62ce6f3670f032d9187527798467be1a29776392d4afeb54b128ec954f273654。
+H1 model SHA256=2df341857e9495d8b2505d1c291971ca0dbf8a822491dc9524b8984b12d05380。
+supervisor SHA256=1c3ef3e697c50b4aac79e9e21d82ffd433075a0173de0f25ce41f3e10ca96118。
+teacher SHA256=2a9c942f5d9ca01da60a24452101965e21d01105f94b51317b028aba36ff7a48。
+parent checkpoint 檔案SHA256=6028e898b5a0a6be841bee172343ac94283c363ec48379e5ac10c613f098ecf8。
+模型state／S state hash與檔案hash不同；完整身分值以status.weights/spawner/pins為準。
+本次文件核對可讀NAS來源hash、三份update1與episode摘要，以及norm/dot的獨立純數學運算。
+既有工程證據：parent 5 tests／1.42秒，fresh code review accepted、findings=[]。
+上述只支援接線與工程可信度，非強度證明；本文件工作未重跑測試或新增review。
+來源是任務本地未提交overlay，非正式新commit provenance；不宣稱新正式版本。
+結論：初始teacher批次緊急加權貢獻弱、與普通梯度近乎正交；舊共用梯度不變。
+新增H1區塊弱反向僅限該區塊；不支持WHOLE／PPO相消假說或學習增益。
+先前H1整局+0.2989583333s、95% CI [-5.1351822917,5.7834830729]跨零結論保留。
+本附錄僅補上初始梯度診斷，不取代歷史負面／UNKNOWN／STOP，不指派Pv39或promotion/default。
+交接：parent另作數值fresh review後才可本地commit；本文件工作未commit、未push。

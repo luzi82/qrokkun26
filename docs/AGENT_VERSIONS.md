@@ -227,3 +227,5 @@ Pv38 研究附錄（2026-11-18）：[phase7 緊急目標曝露診斷](journal/20
 Pv38 phase8 結案（2026-11-18）：[緊急 teacher 權重100倍完成報告](journal/2026-11-18-1794960787-pv38-urgent-weight-completion.txt)。100 updates／2000 episodes；terminal100 已見 common64 候選69.6955729167s vs 重用未加權對照71.7296875s，差−2.0341145833s、95% CI [−7.2286458333, 3.2496419271]，未證實改善或等價，不晉升。05:39:28 HKT 計算完成、phase8 exit0；08時段完成獨立驗證及本次文件結案，僅取代舊 phase8 pending 狀態。舊 STOP、phase6 UNKNOWN exit 與全部歷史報告保留；H1 特徵僅為未實作假說。
 
 Pv38 H1 非正式表徵研究結案（2026-11-18）：[加性18維完成報告](journal/2026-11-18-1794964970-pv38-h1-additive-representation.txt)。100 updates／2000 episodes／8502308幀；terminal100 已見common64差+0.2989583333s，95% CI [-5.1351822917, 5.7834830729]，未證實整局收益或等價，不晉升、未指派Pv39；局部一例改善非泛化證明。僅取代H1未實作狀態，保留全部歷史結論。
+
+Pv38 初始 teacher-only 梯度診斷（2026-11-18）：[首批機制紀錄](journal/2026-11-18-1794966928-pv38-initial-teacher-gradient-audit.txt)。85836狀態中20緊急；legacy／零H1全actor緊急加權範數比1.1252%／1.09763%，cos +0.073586／+0.062523；共同舊梯度精確相同，新增H1區塊僅弱負向。非訓練、非PPO抵消或收益證明；歷史H1整局CI跨零結論保留，無Pv39或晉升。
