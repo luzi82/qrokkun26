@@ -313,3 +313,5 @@ Pv38 phase8 結案（2026-11-18）：[緊急 teacher 權重100倍完成報告](d
 Pv38 H1 非正式表徵研究結案（2026-11-18）：[加性18維完成報告](docs/journal/2026-11-18-1794964970-pv38-h1-additive-representation.txt)。100 updates／2000 episodes／8502308幀；terminal100 已見common64差+0.2989583333s，95% CI [-5.1351822917, 5.7834830729]，未證實整局收益或等價，不晉升、未指派Pv39；局部一例改善非泛化證明。僅取代H1未實作狀態，保留全部歷史結論。
 
 Pv38 初始 teacher-only 梯度診斷（2026-11-18）：[首批機制紀錄](docs/journal/2026-11-18-1794966928-pv38-initial-teacher-gradient-audit.txt)。85836狀態中20緊急；legacy／零H1全actor緊急加權範數比1.1252%／1.09763%，cos +0.073586／+0.062523；共同舊梯度精確相同，新增H1區塊僅弱負向。非訓練、非PPO抵消或收益證明；歷史H1整局CI跨零結論保留，無Pv39或晉升。
+
+Pv39 planned／formal NOT STARTED（2026-11-18）：[hard-start40＋E40 預註冊](docs/journal/2026-11-18-1794984309-pv39-hard-start40-preregistration.txt)。沿用P35／Pv38架構與同一未訓練u0、fresh both Adam；固定1000 updates×40，正常難度BEST為PRIMARY、terminal1000為SECONDARY，對應舊正式Pv38已見64配對CI。工程gates已完成；整套介入不隔離難度與batch size，無強度或晉升結論。須先提交本預註冊才正式計算，歷史結論保留。

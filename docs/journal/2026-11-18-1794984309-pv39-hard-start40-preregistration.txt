@@ -1,0 +1,100 @@
+Pv39 hard-start40／E40 正式實驗預註冊
+寫入時間：2026-11-18 14:45:09 HKT；Unix seconds=1794984309。
+狀態：planned；formal NOT STARTED；擁有者已授權 gates 後正式1000 updates。
+本次僅文件；正式計算前必須先提交本預註冊，不能以未提交草稿啟動。
+Pv39 是訓練版本，沿用 P35 架構；不重新命名舊版本或宣稱新網路形狀。
+凍結假說：同一未訓練 Pv38 u0、兩個全新 Adam 下，hard40+E40 整套介入可能改善正常難度 BEST64。
+對照是原正式 Pv38 的1000 updates／E20；本比較不隔離難度與 batch size。
+不匹配精確幀數、optimizer samples／steps、搜尋時間或總算力；不宣稱訓練軌跡配對。
+不加入 H1、imminent-safe teacher 或100倍 urgency 權重；原 ordinary teacher／PPO／搜尋／aux 保留。
+正式 source commit：5afb509cef3cc33f6b28a96aad6322cdd370ee98（code-commit 證據記錄 clean、未 push）。
+生產 digest：09f46419253dde149405553581294d3d3b741a22ba78c7290578be91415c101e。
+部署 archive SHA256：287670186f823904d14ed75ece249695f006eead3e5b6b1bfa1bb974729f9f41。
+部署根：/home/ovm-hms-bot/projects/qrokkun26/pv39_execution/5afb509cef3cc33f6b28a96aad6322cdd370ee98。
+不可變 git-free archive 已驗證60個 production dependencies，含 v25/reference.json、v39/contract.json；tests／文件排除。
+執行環境：torch 2.11.0+cu128、numpy 2.5.3、CUDA runtime12.8；不使用本機 CPU venv 替代匹配環境。
+網路 raw64、輸入344、hidden472，actor／critic 解耦；初始完整 tensor 與舊正式 u0 相同。
+u0 原檔 SHA256：8e841fb59250003d21ad16e870e90162d8f9dff0397d412fc3734cb6ccc5e3ea。
+u0 完整 state SHA256：fd355475c38bdfcd065c13bd5d1b92ddb33327f3533f08baedb92b788fc05fb0。
+S 原檔 SHA256：554290b6c17a280dbfb8bb4076583a1230b278bf73a24a701f66fca76e5bfcc0。
+S 完整 state SHA256：3db671ed476886b8e9640beff0e0724a66b1a72263b55be2e988078061e69b63。
+凍結輸入副本根：/home/ovm-hms-bot/projects/qrokkun26/pv39_inputs/20261118-132539-pv39-hard-start40。
+S 使用該根 sv24-u980.pt；u0 由原 constructor 重建並核對完整 state；不從 NAS model-load 舊輸入。
+TRAIN 真實 frame／elapsed 從0起，cap7200幀＝120真實秒；difficulty_elapsed=40+actualelapsed。
+S 觀測 frame+2400，不裁切；P 觀測 elapsed+40，維持原 min(elapsed/120,1)。
+難度時間可超過120秒，不縮短真實 episode cap；P spawn_acc 單位仍是秒。
+初始歷史場為空；不重播40秒、不建立 backlog；僅原正常 frame0 S 出生一次，其後 calendar acc=0。
+每幀 acc+=DT；interval=_spawn_interval(40+actualelapsed)；while acc>=interval 減去 interval。
+保留秒數 residual，不能改成 acc+=DT/interval 的 normalized phase。
+側場維持實際每60幀、原前一秒平均、排除當前出生；無 learned S speed multiplier。
+VAL／FINAL offset0 直接使用舊 Gv36 calendar bit path，所有 P／S 使用正常時鐘。
+BEST 一律正常難度選取；此 AI 研究範圍不要求 Godot mirror。
+正式1000 updates ×40 episodes＝40000 episodes；workers10、big cores pin on、seed17。
+TRAIN seeds100000..139999；舊 E20 是100000..119999，update seed windows 不同。
+TRAIN S offset25000000／P offset26000000，兩者 stochastic；permutation seed27000017。
+保存／驗證於0、10..1000，共101 checkpoints／101 evaluations。
+每次正常驗證16 seeds600000..600015；S stochastic offset24000000，P argmax。
+PRIMARY 為 validation total_frames 嚴格 > 才更新之 BEST；相同總幀選最早 update。
+SECONDARY 固定 terminal1000；不依 final 換 checkpoint 或改角色。
+各鎖定角色正常 final64 僅一次；若 BEST=terminal1000，重用同一結果而非重跑。
+final seeds800000..800063，是舊已見窗口，不是新 heldout；cap7200、P argmax／S stochastic24M。
+驗證／final 純 NN，無搜尋、teacher 或 shield；不重跑舊 control。
+候選減舊 Pv38 對應 BEST／terminal；64個 seed 配對 bootstrap seed17、10000 draws、95% CI。
+CI 跨零表示未證實收益，也不證明等價；單一訓練 seed 限制泛化解讀。
+不作 threshold、promotion、weight、seed、cap、budget tuning，不因差曲線提前停；預期30秒不是 gate。
+原 teacher hard=.65、soft=.35；D12、H60、beam256、top8 搜尋保留所有 anchor bullets。
+canonical／freeze／full-world validate 第一成功候選；只用當次 update demos。
+aux=.1 × mean CE，最多512 demos、每 update 最多一次額外 actor Adam；critic 無 aux 步。
+普通 teacher／搜尋機制沿用原 Pv38 生產來源，不加入跨 update demo replay。
+HYPER：gamma=.9995、lam=.999、reward_scale=.05、actor_lr=.0003、critic_lr=.001。
+HYPER：adam_eps=1e-8、epochs=4、minibatch=512、clip=.2、max_grad=1。
+HYPER：dagger=1、ppo=.3、entropy=.005、hard=.65、soft=.35；以上由舊 HYPER 與 manifest 核對。
+原正式 control 根：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261117-0827-pv37-pv38-gv36-death-search-u1000/Pv38。
+不用最近100-update 暖啟動研究作 control；舊完整正式1000 update 身分不變。
+舊 source commit=e032de5ec7091937db7007f4b881705b0ce17350。
+舊 source digest=0978f56b8902fb93a665cd5be5164c7bb3ed19d178efbc16613eb12a151c8fb3。
+舊 BEST u190 final mean69.84140625秒；terminal1000 mean69.91744791666666秒。
+control-pins.json 共215 pins；SHA256=798801dc08111c121bde0b24ae270d30bf2a6a0cdf87d347b723a77b6a9f6d66。
+覆蓋101 cp／101 eval、manifest／closed／status／角色 pointers／updates／final／source archive。
+正式 preflight、closure／final complete 前重核完整 pins；比較讀取經 pin 核對之同一份原始 JSON bytes。
+保留實際 comparison pinned bytes 與輸出可追溯關係；不覆寫歷史產物或結論。
+工程 gate 已完成：新增40 tests（含3 env）17.83秒；完整572 pass／30 skip、220.07秒。
+部署 CPU gate：原 u0 tensor／constructor RNG 隔離及 S identity 通過，未初始化 CUDA。
+CUDA smoke：2 updates、E3、cap180、W2、val2，37.2815秒，root exit0。
+smoke C0 exact、兩個 fresh Adam、actor／critic 均變動、3 cp strict finite、CPU S frozen、無 benchmark。
+normal-u0 gate：16 seeds 各完整 cap7200，frames／death／censor 與舊歷史逐項完全相同。
+該 gate 初始 state 不變、無 optimizer／updates；10 CPU workers、約3.24秒。
+以上是工程接線／可重現性證據，不是強度證據；gates-verified 記錄 GPU idle，formal 未開始。
+已知延後的非阻擋計時限制：batch_s 結束沒有 CUDA barrier。
+batch_s／ppo_s 是 HOST timing；PPO 可能包含尚未完成 teacher work，不能宣稱獨占 GPU teacher／PPO 成本。
+headline 成本使用端到端 wall、實際 frames、ordinary／aux Adam steps 與 search counts。
+不宣稱全部問題為零；不為此 profiling 限制再開修補循環。
+絕對期限由 parent 在 GPU startup 前一次設定 now+57600；不能重設以延長預算。
+train deadline=end-3600；final deadline=end-120；outer guard=end-120 發 TERM。
+只處理擁有之 process group，TERM grace5秒後 KILL、bounded group reap；不 broad kill。
+STOP 檔快取輪詢.25秒；worker 每64幀 callback 用 in-memory Event 並納入 owner stop。
+停止新 task；無 retry／resume／quota auto-awaken，技術失敗或 deadline 保持 incomplete，不縮成較少 updates 成功。
+已觀察的主程序／worker／cleanup 失敗與 owner stop 全部保留；任何要求停止者皆阻止後續階段。
+FAIL：preflight 身分／pins／normal u0 mismatch，optimization 前停止。
+FAIL：run failure／owner stop／cleanup failure，必要清理後停止，不啟動 final、不報成功。
+PASS：固定1000完成且 closure 通過，鎖定 BEST／terminal 正常64並發布兩個 CI，不自動晉升。
+若觀察到 quota 耗盡，不啟動新 launch／stage；以 STOP 配合既有 job bounded cleanup，保存 partials，不 fallback。
+未來 RUN_DIR 必須 launch 前依實際 HKT launch timestamp 選 NAS runs 下全新目錄；目前無正式 runpath 或 PID。
+以下僅供 parent 執行之 literal CLI，已依 parser source 核對，無執行 --help 或載入 torch。
+僅 RUN_DIR、DEADLINE_EPOCH 是真實未知 placeholders；後者一次計算，前者不得套用 smoke 路徑。
+工作目錄固定為上述不可變部署根；使用 GB10 專案 venv，scratch 已存在的本機 inputs 根。
+命令（此文件不執行；正式不得帶 --smoke 或 --controller）：
+/home/ovm-hms-bot/projects/qrokkun26/venv/bin/python -m qrokkun_ai.v39.supervise \
+  --out-dir "$RUN_DIR" --deadline-epoch "$DEADLINE_EPOCH" \
+  --control-dir /mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261117-0827-pv37-pv38-gv36-death-search-u1000/Pv38 \
+  --control-pins /mnt/minion/88_minion_rw/projects/qrokkun26/assets/20261118-132539-pv39-hard-start40/control-pins.json \
+  --scratch /home/ovm-hms-bot/projects/qrokkun26/pv39_inputs/20261118-132539-pv39-hard-start40 \
+  --source-commit 5afb509cef3cc33f6b28a96aad6322cdd370ee98 \
+  --spawner-checkpoint /home/ovm-hms-bot/projects/qrokkun26/pv39_inputs/20261118-132539-pv39-hard-start40/sv24-u980.pt \
+  --stop-path /mnt/minion/88_minion_rw/projects/qrokkun26/assets/20261118-132539-pv39-hard-start40/STOP --device cuda
+證據根：/mnt/minion/88_minion_rw/projects/qrokkun26/assets/20261118-132539-pv39-hard-start40。
+證據：owner-contract／design-acceptance／code-commit／deployment／input-verified／gates-verified／normal-u0-verified.json。
+另讀 cuda-smoke manifest／closed、原 control manifest／closed／final raw metadata 及 v39 生產原碼。
+本紀錄只追加 Pv39 planned，取代 Pv39 尚無預註冊的狀態；所有舊研究與歷史結論保留。
+交接：parent 作 fresh numeric／protocol 核對，提交 docs 後依既有授權立即正式 launch，無須新決策。
+本文件作者不 stage／commit／push／launch，不進行模型載入、測試、episodes、GPU 或遠端操作。
