@@ -1,0 +1,107 @@
+Pv38 暖啟動配對 teacher-target 適應：phase6 完成報告（2026-11-18）
+
+結論
+兩臂從同一已訓練 Pv38 u1000 暖權重再做 100 updates，修正 teacher 目標的候選
+在固定 terminal100、已見 common64 的純 NN 平均存活時間未顯示改善。
+候選減對照 −0.313020833 秒，95% 配對 CI [−4.662194010, 3.998476563]。
+CI 跨零不證明等價；本次不採用候選、不建立 Pv39／Pa 或自動晉升。
+先前解析控制器 +15.473958333 秒的收益，不能替代 NN 學習轉移的實證。
+
+時間與歷史關係
+實際建檔 unix 1794948671 = 2026-11-18 04:51:11 HKT（UTC+08:00）。
+前報告：[phases 1～5](2026-11-18-1794945415-pv38-overnight-teaching-diagnostics.txt)。
+前報告的 phase6「進行中／結果未就緒」保留為當時快照；本日期完成紀錄只取代
+該執行狀態（supersedes execution status），不改寫舊實驗與正式 Pv37／Pv38 結論。
+
+研究設計
+對照 original_teacher；候選 imminent_safe_teacher。兩臂獨立重設訓練 seed17，
+一般訓練 seeds900000..901999，每 update 20 episodes，皆 100 updates／2000 episodes。
+兩臂均暖啟動原 Pv38 u1000 的 actor 與 critic；兩個 Adam 都全新，非 optimizer resume。
+這不同於 phases2／3 的離線擬合繼承 actor Adam。初始權重逐位元相同，Adam state 為空；
+初始模型 state SHA256：d029ea0fe44e65260e3f1ce72ad803902ae4626b69fad8f51249d6808e21b795。
+凍結 Sv24 u980，Gv36；MLP actor／critic input344、hidden472、raw64，
+teacher12／clearance12 不變。推論只有 NN argmax，無解析 teacher 控制器、fallback 或搜尋。
+維持普通 v31 PPO／GAE／reward；teacher hard0.65／soft0.35、dagger1、PPO0.3、
+entropy0.005、epochs4、minibatch512。gamma0.9995、lambda0.999、reward scale0.05，
+actor lr0.0003、critic lr0.001、Adam eps1e−8、clip0.2、max grad1。
+只有訓練的 hard／soft teacher targets 換成 phase5 的 imminent-safe hook，實際 margin2。
+若舊 hard 動作 H1 clearance<=0 且有 H1>0 選項，改取正值選項中 H12 minimum
+clearance 最大者，同分最小 ID；soft mask 同列立即不安全動作為 −1e9。
+非 trigger 列不變；全 H1 不安全時沿用舊目標；無 death-search、額外 CE 或 demonstration buffer。
+
+評估契約與選模
+每 20 updates 驗證已見 seeds600000..600015，含 u0，共六份 checkpoint 與 evaluation。
+兩臂 u0 的 16 例 frames／death／censored 均與原 Pv38 u1000 歷史評估精確相同。
+主要比較 terminal100 在查看結果前固定；兩個 terminal checkpoint 鎖定後各只評估一次 64 集。
+benchmark seeds800000..800063 先前已見，非 fresh heldout；P argmax，
+S stochastic 私有 RNG seed+24000000；cap7200、60 Hz（最多120秒）。
+validation BEST 僅供描述：對照 u20、候選 u80，不以 benchmark 分數事後切換成 BEST。
+配對差從持久化 raw64 完整讀回，10000 bootstrap、獨立 NumPy seed20371118；
+parent 獨立重算與 runtime 結果一致。本次文件核算亦從 raw frames 重算相同 CI。
+
+主要結果（terminal100；每臂 N=64）
+臂別                         frames 總和       平均秒數
+original_teacher             276644            72.04270833333334
+imminent_safe_teacher        275442            71.7296875
+候選減對照總差 −1202 frames；平均 −1202/(64×60) = −0.3130208333333333 秒。
+配對 CI95：[-4.662194010416666, 3.9984765625] 秒。
+
+純 NN validation16 曲線（平均秒數；非 benchmark）
+update       對照                 候選
+0            71.796875            71.796875
+20           77.129166667         70.375
+40           66.282291667         66.659375
+60           74.370833333         68.078125
+80           61.890625            72.933333333
+100          72.54375             66.733333333
+
+實際預算與介入接線
+普通訓練 frames：對照 8424853，候選 8307176；actor 與 critic 各自 Adam steps
+分別 66004／65096。每 update 為 4×ceil(n_samples/512)，樣本數隨存活 frames 改變。
+相同 updates／episodes 不代表相同 frames 或 wall time，亦非相同終生預訓練成本。
+第一批20集 episode summaries 完全相同、85836 samples；首次 teacher loss
+對照0.8637527753521953、候選0.864340783164771。這證明數值介入已發生，
+不能證明介入覆蓋足夠，也不能據此推論梯度機制或排除其他普通 PPO 更新影響。
+CPU rollout10 workers、綁大核、單 batch CUDA learner；torch2.11.0+cu128、
+numpy2.5.3、CUDA12.8。保存的 PID GPU 參與紀錄已核實；pool 關閉、S 凍結、輸入 SHA
+與 checkpoint 身分由既有驗證核對。獨立小型單元與靜態契約關卡是工程證據，非強度證據。
+另存 smoke 僅2 updates／E3／cap180／W2／validation2；實際配對用完整 cap7200，不能混用。
+
+完成資格與程序限制
+原啟動管理器在 spawn 後 identity assertion 失敗；依 PID／start ticks／cmdline 身分
+找回同一健康 workload，登記 process group 並監測，未重啟訓練。
+主程序退出碼未知（root_returncode=null），不能宣稱 trainer exit0；observer 正常退出
+亦無法回復主程序退出碼。此限制與計算產物完成分開記錄。
+status.phase=complete、errors=[]、stop=[]；兩臂閉合100 updates、128個 terminal episodes，
+以及來源、optimizer／weights 身分與 CI 讀回均已有獨立驗證；沒有存活 group 成員或 zombies，GPU idle。
+原失敗與全部產物保留，不重跑原正式訓練或 final。
+
+來源、權重與證據索引
+資產根 A：/mnt/minion/88_minion_rw/projects/qrokkun26/assets/20261117-224024-autonomous-player-research
+執行根 R：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261118-0349-pv38-warm-imminent-teacher-u100-pair
+來源 commit：e032de5ec7091937db7007f4b881705b0ce17350。
+base source_tree_sha：0978f56b8902fb93a665cd5be5164c7bb3ed19d178efbc16613eb12a151c8fb3。
+base digest 不單獨涵蓋介入 hook；另鎖定 A 下兩個 overlay 與契約：
+phase6-nn-adaptation/run.py SHA256 d89f6a421985dc669a92f04686c967b04f6386a5c3d10d2e00a808d7278203f9
+phase5-imminent-teacher/teacher.py SHA256 2a9c942f5d9ca01da60a24452101965e21d01105f94b51317b028aba36ff7a48
+phase6-nn-adaptation/contract.json SHA256 d977d1612b983888320ac59c0ab11aaa1cf7a00e8f65064c898f7bc2ec92f1ba
+原暖 checkpoint：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261117-0827-pv37-pv38-gv36-death-search-u1000/Pv38/checkpoint-001000.pt
+檔案 SHA256 6028e898b5a0a6be841bee172343ac94283c363ec48379e5ac10c613f098ecf8。
+terminal 檔案為 R/{original_teacher,imminent_safe_teacher}/checkpoint-000100.pt，依序：
+檔案 SHA256 8ed8e7f43118c1c15cdaa0112ca15e4ac97c5bfb9e336c95149b3ca2e4836691
+檔案 SHA256 ad32fa0f845f3fffcd5bd6a8cb643d2e006aaeaaada18b74409f85928bb8cf2f
+權重 SHA256 f330503d591b4c1e30d8ef707f3f7c03827da505372bc9fca407cc69e4bb4ab0
+權重 SHA256 361141b935729716573c6ff4ee46a9fe07f4eec7cdc722575ee12258d53232ae
+A/phase6-nn-adaptation/parent-verified.json 保存全部六 checkpoint／evaluation／raw64 的完整 SHA pins。
+R/manifest.json、comparison.json、status.json；各臂 manifest.json、closed.json、updates.jsonl，
+evaluation-000000／000020／000040／000060／000080／000100.json 為預算、身分與曲線依據。
+R/{臂名}-terminal-eval/raw64.json、closed.json、workers.json 為逐例結果與資源閉合依據。
+A/phase6-nn-adaptation/actual-launch-recovered.json、actual-observer-completion.json 記錄程序限制。
+本文只讀 JSON 與文字，沒有載入真實權重或重新執行 episode。
+
+解釋與待驗假說
+單一訓練 seed、100 updates、已見共同窗口不能證明新 teacher 無用或 PPO 無法學到，
+也不支持架構容量不足或梯度抵消的因果結論。當前證據只是不採用此次候選。
+phase7 的目標曝露與 cached first-step action 診斷仍待完成：可檢驗緊急介入是否罕見，
+以及凍結 NN 是否學到改動目標；此處沒有其結果，也沒有新訓練。
+增加預算或重加權都只是後續假說，未由本結論自動啟動。

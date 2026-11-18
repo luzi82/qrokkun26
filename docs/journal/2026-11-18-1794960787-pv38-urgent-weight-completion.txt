@@ -1,0 +1,92 @@
+Pv38 緊急 teacher 權重100倍：phase8 完成報告
+
+結論
+terminal100 純 NN 已見 common64：加權候選 69.6955729167 秒，
+重用未加權 imminent-safe 對照 71.7296875 秒，候選減對照 −2.0341145833 秒。
+95% 配對 bootstrap CI [−7.2286458333, 3.2496419271] 秒，未證實改善。
+CI 跨零不證明等價；不採用、不晉升，也不建立新官方版本。
+
+時間、授權與歷史狀態
+實際建檔 unix 1794960787 = 2026-11-18 08:13:07 HKT（UTC+08:00）。
+凍結計算產物於 2026-11-18 05:39:28 HKT 完成，phase8 root exit0。
+此完成早於舊06:30期限；文件與獨立 parent 驗證並非當時已全部完成。
+owner 08:07 新授權後，08時段獨立驗證已完成，先前 pending 產物現已核實。
+不回填文件時間，也不宣稱本報告在06:30前已完成。
+phase7 文件寫成後曾遇 LLM quota exhausted，阻擋最後文件審查與 commit；
+原始輸出保留，本次僅核算既有記錄，沒有重算科學實驗或載入真實權重。
+舊06:28 STOP audit 的48個登記程序皆 absent，舊期限後沒有研究計算續跑。
+STOP 原文保留；08:07 是新的授權，並未延長或灌入舊程序。
+本次僅文件結案，未啟動新 training、episodes、GPU 或後續實驗。
+本日期附錄僅取代 phase7 journal 與索引中的 phase8「執行中／結果未就緒」。
+phase6 1794948671、phase7 1794950249 文件與既有索引追加內容保留原位元。
+phase6 主程序退出碼仍 UNKNOWN/null；不能用本 phase8 exit0 回填。
+
+單一介入與公平比較
+兩臂皆從已訓練 Pv38 u1000 的 actor AND critic 暖權重開始，兩個 Adam 全新。
+候選不是從 control terminal 接續，也不是未訓練模型；重設 training seed17。
+未加權 imminent_safe_teacher100 對照已預選、鎖 pin 並重用，不重跑訓練或 final。
+teacher patch 與對照相同：top12、H12、margin2，緊急 hard/soft targets 不變。
+唯一改動是 teacher example weights：urgent raw=100，其餘 raw=1，
+於整個 UPDATE batch 除以 raw mean，detach 後對 hard/soft 每列 loss 同時加權。
+沒有逐 minibatch 重新正規化；普通 PPO、entropy、critic、GAE、reward 不加權。
+沒有增加 steps、teacher features、重抽樣、搜尋或額外 aux updates。
+dagger1／PPO0.3／entropy0.005、hard0.65／soft0.35、epochs4／minibatch512 不變。
+PlayerMLP actor/critic input344、hidden472、raw64；工程 clearance 特徵仍 H12。
+100倍是依 TRAINING 首次 rollout 稀疏度預先選定的單次 probe，非 benchmark 選參。
+沒有 seed、weight 或 step sweep；此為 custom nonformal overlay 身分。
+
+預算與實際曝露
+100 updates × E20 = 2000 episodes，合計 8,296,939 training frames。
+actor 與 critic 各 64,996 普通 Adam steps，無額外 actor 更新。
+從全部100份 update 日誌讀回 urgency rows=1,826，分母=8,296,939。
+比例 0.000220081164873，百分比約0.0220081165%；非 phase7 首批外推。
+首 update 20/85,836 列 urgent，raw multiplier100；正規化後 urgent97.745285，
+normal0.977452874，整批實測 mean0.999999821，urgent teacher weight share
+0.02277489565（約2.277489565%），這是 loss 權重占比，非強度收益。
+相同 updates／episodes 是受控曝露；policy 改變導致 frames 與普通 steps 不完全相同。
+
+預先固定的主要評估
+terminal100 為預先固定 primary；兩 terminal 權重在一次比較前鎖定，無 final 重跑。
+已見 seeds800000..800063，每臂64集，非新 heldout。
+P argmax、S stochastic 私有 RNG seed+24M；cap7200、60Hz。
+推論純 NN，無 teacher、postfilter、controller override 或 search。
+raw64 每列完整讀回且有效；候選267631 frames、對照275442 frames。
+差 −7811/(64×60)=−2.0341145833333334 秒。
+獨立 NumPy seed20371118、10000次配對 bootstrap，重算 CI 與 runtime、parent 相符。
+單一 training seed、已見窗口、後續探索介入限制泛化及因果推論。
+
+validation16 描述曲線（平均秒；seeds600000..600015）
+update       0          20           40           60          80           100
+seconds      71.796875  75.023958333 69.577083333 71.396875   72.386458333 66.282291667
+BEST=u20 僅描述，不因 terminal 結果改選 BEST 作 primary。
+
+完成資格與證據
+A=/mnt/minion/88_minion_rw/projects/qrokkun26/assets/20261117-224024-autonomous-player-research
+R=/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261118-0513-pv38-urgent-weight100-u100
+C=/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261118-0349-pv38-warm-imminent-teacher-u100-pair
+A/phase8-urgent-weight/parent-verified.json、actual-exit.json 與 contract.json 為驗證及協定。
+R/manifest.json、comparison.json、status.json；R/urgent_weight100/updates.jsonl、closed.json，
+及 R/urgent_weight100-terminal-eval/raw64.json、closed.json 保存原始預算及逐集結果。
+對照 raw64 與閉合位於 C/imminent_safe_teacher-terminal-eval/，所有 control pins 未變。
+parent 已核對六 checkpoint 有限值、hash、Adam steps，u0/16例精確符合歷史 parent。
+actor/critic 均非零更新、S 凍結；10 CPU rollout workers，CUDA learner。
+既有紀錄確認 CPU stats、pool 關閉、root group 空、無 zombies、GPU idle。
+本次不重新載入 checkpoint；完成資格依已存 parent 驗證與原始 JSON。
+base commit e032de5ec7091937db7007f4b881705b0ce17350（Gv36）。
+base source_tree_sha 0978f56b8902fb93a665cd5be5164c7bb3ed19d178efbc16613eb12a151c8fb3。
+以下來源 overlay SHA256 來自實際 manifest，並已讀檔核對 runner/learner/contract：
+A/phase8-urgent-weight/run.py 0dab786ba541d2dda902fcc3d341c5fa453f27d4b316cf9c4e427be5d32dc659
+A/phase8-urgent-weight/learner.py 0319bc370d381937d06dfc7bfbef45bda81ee048f91f21ab1450ba370ef5a1ba
+A/phase8-urgent-weight/contract.json 5acf08a8362e0ef2cbc07bf4af72cb128c4f8269b0ee52b290afbc20ed47fd8b
+A/phase5-imminent-teacher/teacher.py 2a9c942f5d9ca01da60a24452101965e21d01105f94b51317b028aba36ff7a48
+暖 checkpoint：runs/20261117-0827-pv37-pv38-gv36-death-search-u1000/Pv38/checkpoint-001000.pt。
+暖檔案 SHA256 6028e898b5a0a6be841bee172343ac94283c363ec48379e5ac10c613f098ecf8。
+初始 state SHA256 d029ea0fe44e65260e3f1ce72ad803902ae4626b69fad8f51249d6808e21b795。
+terminal 檔案 R/urgent_weight100/checkpoint-000100.pt：
+檔案 SHA256 b92e870950af0c6ace057c08f3c9be3c209f7a86c74be5e46a0b3b744a37b496。
+state SHA256 f59d5486b892d6912be2e39737548c240cd9fe2f684444e2aecd20b22d19af84。
+
+下一個待驗方向
+teacher 能使用 one-step clearance，而 NN 工程特徵目前只有 H12 clearance。
+H1 representation 是下一個假說：可考慮加入 H1 features，另立凍結契約及匹配新對照。
+尚未實作或證明，不構成架構缺陷或本次未改善的因果結論，也不自動啟動實驗。

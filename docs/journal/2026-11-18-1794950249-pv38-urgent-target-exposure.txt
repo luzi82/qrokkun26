@@ -1,0 +1,90 @@
+Pv38 緊急教學目標曝露與凍結 NN 決策：phase7 診斷（2026-11-18）
+
+研究結論
+首次 rollout 的緊急 teacher 改動只涵蓋 20／85836 個觀察狀態。
+曝露稀疏、關鍵狀態的 argmax 擬合仍弱，是可觀察結果，也是合理的瓶頸假說；
+目前不能證明這是 phase6 未見 NN 收益的必要或充分原因，也未證明梯度稀釋或抵消。
+約 96% 的一般 teacher agreement 不能作為關鍵決策已學會的判準。
+
+時間與歷史關係
+實際建檔 unix 1794950249 = 2026-11-18 05:17:29 HKT（UTC+08:00）。
+前報告：[phase6 完成紀錄](2026-11-18-1794948671-pv38-matched-teacher-nn-adaptation.txt)。
+本報告只取代前報告「phase7 診斷待完成」的狀態（supersedes diagnostic status）。
+phase6 純 NN 主結果仍是候選減對照 −0.313020833 秒，95% CI 跨零，未證實改善。
+此負面報告與更早 phases 公開紀錄保留原文，沒有新版本、採用或晉升。
+
+資料與比較設計
+原 Pv38 u1000 的 stochastic rollout 僅重建一次：seeds900000..900019，cap7200。
+P 私有隨機 seed+26000000，S seed+25000000；CPU 使用匹配 torch2.11.0+cu128、numpy2.5.3。
+20 集逐 seed 的 frames／death／censor 與 phase6 兩臂 update1 完全相同，共 85836 observations。
+這是第一批 rollout 的診斷，沒有量測全部 100 updates 的曝露率。
+三個模型均凍結：parent P38 u1000、phase6 original_teacher terminal100、
+phase6 imminent_safe_teacher terminal100；後文表格皆依此順序。
+在同一預選 parent 狀態做離策略（off-policy）batch forward，沒有 optimizer 或新訓練。
+terminal100 在看結果前固定，沒有事後改用 BEST；phase2／3 的離線 model32 也不是此處 PPO100。
+原隨機軌跡的死亡與凍結 argmax 的條件預測並非同一策略的完整軌跡。
+
+teacher 目標曝露
+old／new teacher 的 hard 與 soft 各自恰有 20 列改變，兩者對應同一 trigger 集合。
+20／85836 = 0.00023300246982618016（比例）= 0.023300246982618015%。
+不能把 0.0233 當作比例；其餘 85816 列 hard 與 soft 均逐位元相同。
+原 margin2／top12／H12 設定保留，raw features 沒有改動。
+依原 stochastic 死亡的相對位置分箱如下；N 是所有列，changed 是改動列。
+位置                       N         changed
+最後1幀                    20        14
+最後2～12幀                220       5
+最後13～60幀               960       0
+超過60幀                   84636     1
+censored                   0         0
+合計 19／20 改動落在死亡前最後12幀；20 列小樣本不能外推全部訓練。
+
+新 rollout 的20個 trigger：只屬 H1 預測
+模型順序                   parent       original100     imminent100
+H1 預測致命 argmax          16/20        18/20           15/20
+argmax 符合新 hard target   3/20         2/20            5/20
+H1 安全動作總機率均值       0.250642862706 0.186909926243 0.342959295651
+這些新狀態沒有完整世界的全部9動作反事實實測，不能把 H1 預測稱為實際死亡或整集收益。
+一般 nontrigger 85816 列對舊 teacher 的 agreement 依序是
+95.6733010161%、96.1638855225%、96.2023398900%。
+此集合 old／new labels 相同；高總體 agreement 可掩蓋關鍵小群體的弱擬合。
+
+另一資料集：143個舊 cached student 狀態
+這些是 phase3 舊訓練錨點，與上述首次 rollout 狀態分開計算。
+先前已驗證每狀態全部9個 first-action 真實結果，共 143×9 = 1287 個物理分支。
+依既有 actual step1 mask，三模型 argmax 實際首步致命數為 4/143、5/143、4/143。
+只取原 baseline 致命的4個狀態，三模型皆仍為 4/4 致命。
+該4列的「實際首步存活動作」總機率均值依序為
+0.04179281406686641、0.09726099349700235、0.19300193969684187。
+機率增加，但這4列沒有安全 argmax 翻轉；不能由機率質量推論實際整集增益。
+舊 teacher 致命的5列中，三模型實際致命數依序為 4/5、5/5、4/5。
+既有 H60 mask 以舊 P1000 continuation 為條件，不能稱為當前 NN 的 H60。
+phase7 沒有 H60 rollout 評估，也沒有新 seeds600000 validation 或 seeds800000 benchmark。
+
+工程完成證據與限制
+既有 parent 小型測試4項、1.36秒及新鮮程式碼檢查屬工程證據，並非強度證明。
+phase7 實際 CPU 主程序 returncode=0，pool 已清理、GPU idle，來源與輸入／權重／RNG
+未變 assertions 已由既有執行核對；此退出碼不回填 phase6 未知主程序退出碼。
+本文僅讀 JSON／文字及核算，不另執行測試、載入模型或重播 episodes。
+
+證據與受控身分
+A = /mnt/minion/88_minion_rw/projects/qrokkun26/assets/20261117-224024-autonomous-player-research
+R = A/phase7-target-exposure/results-01。
+R/diagnostic.json、per-episode.json、episodes.json、rollout-rows.json、known143-rows.json、
+manifest.json、status.json 與 A/phase7-target-exposure/parent-verified.json 為主要依據。
+契約為 A/phase7-target-exposure/contract.json；probe 為同目錄 probe.py。
+base source commit：e032de5ec7091937db7007f4b881705b0ce17350。
+phase7 probe SHA256：62ce6f3670f032d9187527798467be1a29776392d4afeb54b128ec954f273654。
+contract SHA256：178f60ccdfe31f9a47ae91ebd5cad38b3a33a7544b9961315e67fdbbc22c1518。
+base digest 與 probe／contract 為分開的身分；只報 base 不足以識別本診斷。
+helper 為 A/phase5-imminent-teacher/teacher.py；其 pin 與三 checkpoint pins 見 R/manifest.json。
+原 checkpoint 為 runs/20261117-0827-pv37-pv38-gv36-death-search-u1000/Pv38/checkpoint-001000.pt；
+此 runs 相對 NAS 專案根；兩 terminal100 位於同根 runs/20261118-0349-pv38-warm-imminent-teacher-u100-pair/
+的 original_teacher/checkpoint-000100.pt 與 imminent_safe_teacher/checkpoint-000100.pt。
+phase6 來源身分亦由 A/phase6-nn-adaptation/parent-verified.json 鎖定。
+
+後續假說的邊界
+另行預先聲明的 phase8 單一候選，以100倍 priority 加權 teacher，整批平均權重為1，
+不加 PPO steps、不重跑 control；目前健康執行中，結果尚未就緒。
+本報告沒有該候選的改善、權重 benchmark 或結果主張，也不啟動更多訓練。
+重用 parent control 與已見窗口屬探索資料；離策略 agreement／機率質量不支持 heldout、
+強度或因果機制結論。稀疏曝露與弱 argmax 擬合值得後續檢驗，尚不足以解釋全部失敗。
