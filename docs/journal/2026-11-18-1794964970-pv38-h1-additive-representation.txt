@@ -1,0 +1,102 @@
+Pv38 H1 加性表徵研究結案（非正式實驗）
+撰寫時間：2026-11-18T09:22:50+08:00；Unix 1794964970。
+結論：terminal100 相對未加權對照未證實整局收益；不證明等價，不採用、不晉升。
+本研究未指派 Pv39；H1 輸入與參數容量同時增加，不能單獨歸因於 H1 資訊。
+本篇僅取代先前「H1 尚未實作」的狀態；全部歷史結論、零結果及種子紀錄保留。
+
+一、問題與介入
+假說是顯式提供一步動作淨空資訊，可能改善原 NN 對緊急碰撞狀態的學習。
+原 344 維特徵完整保留為前綴，新增 18 維，actor 與 critic 有效輸入均為 362。
+新增特徵為九動作 H1 clearance clip[-28,28]/28，以及九個 clearance>0 浮點旗標。
+H1 horizon=1、top12；原始 player6／bullets64×4／pad64 observation 不變。
+保留原 472×344 GEMM 與 bias，另加零初始化 472×18 投影，再進入原 activation。
+actor、critic 各增 8496 參數，共 +16992；新模型共 793914 參數。
+這是特徵與容量的聯合介入，缺乏容量匹配消融，不能宣稱 H1 單獨的因果效果。
+推論仍是帶人工設計輸入的純 NN；沒有安全動作覆寫、action mask、搜尋或 teacher 控制。
+teacher 僅於訓練產生目標，沿用 imminent-safe H12／top12／margin2，未加緊急權重。
+
+二、來源與實驗身分
+研究資產根目錄：/mnt/minion/88_minion_rw/projects/qrokkun26/assets/20261118-080729-autonomous-player-research/h1-study
+實際 run 根目錄：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261118-0846-pv38-h1-additive18-u100
+契約：資產 contract.json；完成核對：資產 parent-verified.json。
+不可變 base commit：e032de5ec7091937db7007f4b881705b0ce17350
+source_tree_sha：0978f56b8902fb93a665cd5be5164c7bb3ed19d178efbc16613eb12a151c8fb3
+base_core_sha：448949e6643fec5e471047a7871bc17e1aae3d357c2c006ab51dc5463b2785ce
+以下四個 task-local overlay SHA256 均取自實際 run manifest.json：
+run.py：dbb6cae8895bce7ed011cca242ecb9ebe72be8945aa43631c3e4cacead23a06a
+h1_model.py：2df341857e9495d8b2505d1c291971ca0dbf8a822491dc9524b8984b12d05380
+h1_adapter.py：314249d464c78ac0e21436c08a9616dfc8ffc024acb8cbf6b091e2a7a8d74874
+supervise.py：1c3ef3e697c50b4aac79e9e21d82ffd433075a0173de0f25ce41f3e10ca96118
+contract_sha：ebeb76bd05211f42d52453d4811f3e3888913c2191140cf80a8cad4fc577e0a1
+teacher_sha：2a9c942f5d9ca01da60a24452101965e21d01105f94b51317b028aba36ff7a48
+父模型檔案 SHA256：6028e898b5a0a6be841bee172343ac94283c363ec48379e5ac10c613f098ecf8
+父模型是已訓練 Pv38 u1000 actor＋critic，並非未訓練模型或 BEST 權重。
+兩組 Adam 均重新建立；建構 RNG 隔離後重設 seed17，P seed+26M、S seed+25M。
+物理 Gv36；凍結 Sv24 u980；rollout seed 起點900000，100批×20即900000..901999。
+對照重用 phase6 imminent_safe_teacher u100；20個完整檔案 pins 見契約／manifest。
+對照 run：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261118-0349-pv38-warm-imminent-teacher-u100-pair
+未重跑對照或其 episodes；teacher、來源、契約與 control pins 完成後均未改變。
+
+三、初始等價與工程證據
+全部 legacy tensors 精確複製，新 actor／critic H1 投影均為零。
+不同架構的整體 state hash 不同；零嵌入不表示整個模型 state hash 相同。
+實際 CUDA C0 gate：143 forwards 的 logits／probabilities／values 精確相等。
+完整 u0 validation16 的各 seed frames／death／censored 與歷史父模型精確相等。
+工程紀錄含真實非零投影 spawn；8項 CPU 測試5.85秒，GPU smoke 2 updates約7.10秒。
+smoke elapsed 精確為7.1036822000169195秒，未執行 benchmark episodes。
+上述是接線與初始條件證據，不是模型強度證據；本次文件工作未重跑測試或模型。
+
+四、完整訓練與 checkpoint 曲線
+候選完成100 updates、每批20 episodes，共2000 episodes，cap7200、10 workers。
+原始 updates.jsonl 實際欄位為 metrics.n_samples，並無 metrics.samples 欄位。
+100筆 metrics.n_samples 加總為 8502308 幀；不以預算上限代替實收樣本。
+使用原 ordinary core.train；terminal actor／critic Adam 各66608步，兩個 H1 投影皆已更新。
+六個 checkpoints 均由 parent-verified 確認 strict load、hash 與 finite；本次未載入 checkpoint。
+validation 固定 seeds600000..600015；每筆 episode 種子與零結果保留在 evaluation JSON。
+下表列 update／total_frames／mean秒（精確分數分母960）：
+u0：68925／71.796875000000（68925/960）。
+u20：66352／69.116666666667（66352/960）。
+u40：64249／66.926041666667（64249/960）。
+u60：74505／77.609375000000（74505/960）。
+u80：73526／76.589583333333（73526/960）。
+u100：72750／75.781250000000（72750/960）。
+BEST 為u60，僅為描述性 validation 選擇；PRIMARY 始終固定 terminal100，未換 BEST。
+terminal checkpoint：h1_additive18/checkpoint-000100.pt。
+完整檔案 SHA256：b9b8daf8565cc748a467b61468ce90b029e2c43655b900493c0d94dbaf53c167
+state SHA256：a29875290a025365ab9f62b0b793f120f64fd93c64f02fb05240557e90dfab25
+
+五、預先指定 PRIMARY 整局結果
+terminal100、已見 seeds800000..800063，P argmax、S stochastic seed+24M、cap7200。
+候選 raw64.json 共276590幀，平均72.02864583333333秒；對照71.7296875秒。
+配對候選減對照：+0.29895833333333366秒。
+95% bootstrap CI：[-5.135182291666666, 5.783483072916664]秒。
+comparison.json 使用 NumPy seed20371118、10000 bootstrap draws；未追加 episode 或挑窗口。
+CI 跨零，未證實整局增益，也不是等價檢定；不支持 promotion 或 BEST 替換。
+單一 NN 訓練 seed17、已見 benchmark、探索性比較，沒有新 held-out 泛化證據。
+
+六、固定關鍵狀態診斷
+固定143個快取訓練歷史狀態，另含 oldteacherfatal5／parentNNfatal4 預選子集。
+來源：phase3-student-visited/results-01；ledger SHA 見契約 critical_metrics。
+舊143狀態不作本次梯度資料；診斷僅 forward，沒有重跑世界或 policy H60 評估。
+actual fatal 使用舊世界實際 step1 分支 mask，不能解讀為新策略 H60 存活。
+以下三欄固定順序為父模型／重用未加權對照／H1 terminal100。
+all143 teacher argmax agreement：133／131／131；actual fatal：4／4／3。
+all143 surviving-action probability mass：0.9698085188865662／0.9728500247001648／0.9837426543235779。
+預選 parentNNfatal4 teacher argmax agreement：0／0／1；actual fatal：4／4／3。
+該4例 safe probability mass：0.041792772710323334／0.19300183653831482／0.4519152045249939。
+oldteacherfatal5 teacher argmax agreement：1／1／2；actual fatal：4／4／3。
+該5例 safe probability mass：0.1590520590543747／0.31249549984931946／0.5436438322067261。
+初始 H1 與父模型143／5／4診斷完全相同；終點只改善一個預選致死狀態的 argmax。
+這支持學到的 argmax 在一例改變，不足以證明整局學習增益或泛化。
+
+七、完成邊界與保留證據
+run closed.json：completed=true、completed_updates=100、terminal_benchmark_completed=true。
+獨立 supervisor returncode=0、group_members=[]、zombies=[]；parent 確認 GPU idle。
+elapsed=1767.377827823977秒；固定90分鐘 deadline Unix1794968199.8897982（HKT10:16:39）。
+finished_epoch=1794964567.2695835（HKT09:16:07），早於期限；未延長或重啟研究。
+root 與 smoke 已觀察 errors／stop 均為空；沒有已觀察而未記錄的失敗或擁有者停止事件。
+原始依據：manifest.json、updates.jsonl、六份evaluation、各層closed.json、raw64與comparison.json。
+關鍵依據：critical-initial.json、critical-terminal.json、根目錄critical-reused-control.json。
+操作附註：parent verification 曾有欄位與control路徑兩項讀取錯誤，修正後完成核對，無科學重跑。
+保留所有 checkpoint、episode seeds、null results 與歷史 UNKNOWN／STOP 結論；不覆寫舊實驗。
+本篇文件結案不授權新研究，也不改動既有正式模型或版本身分。
