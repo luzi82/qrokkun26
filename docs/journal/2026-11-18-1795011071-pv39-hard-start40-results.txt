@@ -1,0 +1,95 @@
+Pv39 hard-start40＋E40 正式實驗完成紀錄
+文件實際寫入：2026-11-18 22:11:11 HKT；Unix seconds=1795011071。
+計算完成時間與文件時間分列；本紀錄不回填或倒填日期。
+狀態：formal completed；正常難度改善未獲證實；不晉升。
+Pv39 版本身分保留，即使結果為陰性亦不改名或回收版本號。
+本附錄僅取代 Pv39 planned／formal NOT STARTED 的現況描述。
+預註冊原文與全部舊陰性研究、歷史結論及正式產物均保留。
+預註冊：docs/journal/2026-11-18-1794984309-pv39-hard-start40-preregistration.txt。
+預註冊提交：bce75734e33313d3162c81a3456d19254b4b5458，早於正式啟動。
+正式啟動：2026-11-18 14:51:58.684133 HKT。
+正式完成：2026-11-18 22:03:36.341014 HKT，依 supervisor 實際退出紀錄。
+端到端 supervisor wall：25896.820347939036 秒＝7.193561207760843 小時。
+絕對期限：2026-11-19 06:51:58.684084 HKT；訓練截止為05:51:58.684084。
+16小時是安全上限，非必須跑滿的工作量；7.19小時不驗證先前約11小時估算。
+正式根：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261118-1451-pv39-hard-start40-u1000-e40。
+核實摘要：/mnt/minion/88_minion_rw/projects/qrokkun26/assets/20261118-132539-pv39-hard-start40/formal-results-verified.json。
+主證據：manifest／closed／status、updates.jsonl、101 evaluation 與 final.json。
+資源證據：同根 workers／final-workers／final-status，及相鄰 .launcher/status／controller.json。
+訓練與 final 兩階段實際 returncode 均0；root supervisor 實際 returncode亦0。
+status、final-status、controller 的 errors／owner_stop 為空；supervisor errors／stop亦空。
+supervisor 收尾 group_members／zombies 為空；既有實際健康探測確認擁有 PID 消失、GPU已釋放且閒置。
+以上資源狀態引用既存探測，本次文件整理沒有執行 GPU 或遠端探測。
+固定1000 updates，每次40 episodes；總數40000，沒有縮短或自動延長。
+TRAIN seed17；episodes seeds100000..139999，10個 CPU rollout workers。
+101 checkpoints／101正常驗證，邊界0及10..1000，均已完成。
+所有101 checkpoint 檔案雜湊已由既有核實證據驗證。
+strict load／finite／完整 state identity 驗證範圍為本機副本 initial、BEST790、terminal1000三個。
+不把上述三個 tensor 驗證擴稱為全部101個 strict load。
+10個訓練 workers與10個 final workers均完成，20個 PID互異。
+兩組 workers均 frozen_S_verified=true、cuda_initialized=false。
+closed 綁定的訓練 workers.json 雜湊仍保留，未由 final-workers 替換。
+訓練 workers SHA256：43e1d1841a811ffea08d697d6233e3127ca70bfba1d780de50f8d80284d77cfc。
+生產來源提交：5afb509cef3cc33f6b28a96aad6322cdd370ee98。
+60個生產依賴 digest：09f46419253dde149405553581294d3d3b741a22ba78c7290578be91415c101e。
+部署不可變 archive SHA256：287670186f823904d14ed75ece249695f006eead3e5b6b1bfa1bb974729f9f41。
+執行來源未變；run source archive 已核實；來源指紋排除 tests與文件。
+初始 C0 完全等同原未訓練 Pv38；兩個全新 Adam 初始 state皆空。
+C0 完整 state SHA256：fd355475c38bdfcd065c13bd5d1b92ddb33327f3533f08baedb92b788fc05fb0。
+原 u0 檔案 SHA256：8e841fb59250003d21ad16e870e90162d8f9dff0397d412fc3734cb6ccc5e3ea。
+凍結 S 為原 Sv24 u980；檔案 SHA256：554290b6c17a280dbfb8bb4076583a1230b278bf73a24a701f66fca76e5bfcc0。
+S 完整 state SHA256：3db671ed476886b8e9640beff0e0724a66b1a72263b55be2e988078061e69b63。
+網路沿用 P35／Pv38，raw64、輸入344、hidden472，actor／critic解耦。
+介入為 density40、P與S難度時鐘／phase及E40整套設定，不隔離 hardness 因果。
+訓練真實 frame與elapsed從0起，難度時鐘從40秒起，實際 cap仍120秒。
+S觀測 frame+2400，P觀測 elapsed+40；歷史場空，僅正常frame0出生。
+calendar acc初始0，以秒累積並保留 residual；沒有重播40秒或累積 backlog。
+側場仍用真實每60幀的前秒平均，排除當前出生；保留原設定。
+正常驗證與 final offset0，使用原正常時鐘與calendar路徑。
+普通 Pv38 search teacher、PPO與aux保留；未加入H1、imminent或urgent權重。
+PRIMARY 預先指定正常 validation 選出的 BEST；total_frames嚴格增加才更新，同分取較早。
+正常 validation16 seeds600000..600015；P argmax、S stochastic offset24000000。
+Pv39 BEST=u790，validation平均82.734375秒；舊Pv38 BEST=u190為78.3010416667秒。
+terminal1000正常 validation平均74.32291666666667秒。
+validation峰值不是 final 強度證明；不依 final交換 BEST或改角色。
+PRIMARY final：Pv39 BEST790 70.51015625秒 vs原Pv38 BEST190 69.84140625秒。
+候選減對照＝+0.66875秒；95% CI [-4.67501953125, 6.232298177083333]秒。
+SECONDARY 預先固定 terminal1000：新68.18541666666667秒 vs舊69.91744791666666秒。
+候選減對照＝-1.73203125秒；95% CI [-6.7480078125, 3.2167447916666663]秒。
+兩項均為同一已見common64 seeds800000..800063、120秒cap之配對比較。
+P argmax、S stochastic offset24000000；純NN，沒有搜尋、shield或teacher動作。
+64 seeds配對bootstrap seed17、10000 draws；既有獨立原始資料重算得到相同CI。
+本次只讀保存JSON及整理文件，沒有重複科學評估或載入checkpoint。
+兩個CI皆跨零：未證實正常難度收益，也不證明等價；不晉升、不換BEST。
+單一訓練seed17、重用已見窗口，不構成新heldout或新泛化證據。
+BEST790檔案 SHA256：32267814005dbff281c66d588e3dc41b9da265ccdb0146c0702e8efbcf77f473。
+BEST790完整 state SHA256：390bae58143ff31ceaa6969030c90d7b7ed234df9676481979b131d5fd41eb9c。
+terminal1000檔案 SHA256：dc0b24887bef8cf43fa49557dcfce05d7bb167892a6bc7caa44d886709d95bb8。
+terminal1000完整 state SHA256：d8aef39bcf0a85f6d5dff3d44b2e245139ce0b26ec1318ef101ecc3c681c25a4。
+困難訓練前20 updates平均17.288145833333335秒，後20平均32.530125秒。
+曲線早期成長後趨平台；每批seed改變，這不是正常難度配對比較。
+困難場存活30多秒不能加40秒解讀為正常場70多秒等價。
+全部40000訓練episodes均在cap前死亡；censored=0。
+總訓練75526395幀；ordinary actor／critic各592032 Adam steps。
+aux額外actor1000 steps，故actor總593032、critic總592032。
+terminal optimizer state步數分別593032／592032；actor與critic權重均已改變。
+原Pv38對照為正式1000 updates／E20，並非最近100-update暖啟動研究。
+舊TRAIN seeds100000..119999；update seed窗口與新E40不同，非配對訓練軌跡。
+實際幀數、optimizer steps、搜尋時間及總算力未與舊E20匹配。
+原對照根：/mnt/minion/88_minion_rw/projects/qrokkun26/runs/20261117-0827-pv37-pv38-gv36-death-search-u1000/Pv38。
+原215 control pins未變；control-pins.json SHA256：798801dc08111c121bde0b24ae270d30bf2a6a0cdf87d347b723a77b6a9f6d66。
+舊來源提交：e032de5ec7091937db7007f4b881705b0ce17350。
+舊來源digest：0978f56b8902fb93a665cd5be5164c7bb3ed19d178efbc16613eb12a151c8fb3。
+死亡搜尋40000次，成功34031次＝85.0775%；無skippedearly。
+成功意指完整世界驗證H60局部路徑，不是NN整局70秒逃生率。
+搜尋失敗也不證明死亡不可避免；搜尋只用原D12／beam256／top8設定。
+示範總2041860幀；每update最多一次aux actor Adam，不跨update重播示範。
+aux=.1×mean CE、最多512 demos，critic無aux步；普通teacher hard=.65／soft=.35。
+worker搜尋秒數合計90378.76058111252，是10 workers平行工作的累計值。
+此累計不是wall，不能再加到7.193561207760843小時端到端成本。
+已知batch_s缺少結束CUDA barrier，batch_s／ppo_s為host timing，工作可非互斥。
+因此不主張GPU teacher／PPO獨占成本歸因；端到端wall及實際計數仍可用。
+保留這項小型profiling限制，不新增gate或修補研究。
+完成曲線資產：/mnt/minion/88_minion_rw/projects/qrokkun26/assets/20261118-132539-pv39-hard-start40/completion-chart.json。
+科學結案：固定正式工作量完成、原定兩角色比較完成，正常難度提升未獲證實。
+本紀錄不授權新研究、重訓、重評估或模型晉升；所有歷史結論維持。
